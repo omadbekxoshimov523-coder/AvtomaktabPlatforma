@@ -67,7 +67,6 @@ AvtomaktabPlatforma/
 │   ├── db.py              # bazaviy qatlam (SQLite): avtomaktablar, users, clicks
 │   ├── i18n.py            # UZ / RU / EN tarjimalar
 │   ├── keyboards.py       # inline tugmalar
-│   ├── seed.py            # TEST ma'lumotlarini qo'shish/olib tashlash
 │   ├── .env.example       # namuna konfiguratsiya (tokensiz)
 │   ├── requirements.txt   # aiogram, python-dotenv, qrcode
 │   ├── handlers/          # start.py, schools.py (callbacks), admin.py
@@ -238,6 +237,10 @@ avtomaktab tugmasini bosadi va shu platformaning login sahifasiga o'tadi.
 
 ## Ishlash printsipi
 
+0. Platforma **avtomatik ulanadi**: `.env` dagi `PLATFORM_URL` bo'lsa, bot
+   ishga tushganda o'sha platforma ro'yxatga qo'shiladi (takror ishga tushsa
+   yangilanadi, xarojasiz). `/start` → Platforma nomi ostida **«🔗 Platformaga
+   kirish»** tugmasi chiqadi, `/qr platforma` esa tayyor QR kod beradi.
 1. `/start` → salomlashuv + **inline tugmalar** (faol avtomaktablar ro'yxati)
 2. Avtomaktab tugmasi bosiladi → **kartochka** (nom, hudud, manzil, telefon)
    + **«🔗 Platformaga kirish»** tugmasi (login URL)
@@ -258,19 +261,23 @@ o'qib beradi — qiymat faqat `.env` da, kodda **qattiq yozilmaydi**):
 BOT_TOKEN=123456789:AA...          # @BotFather → /newbot  (SHART)
 ADMIN_IDS=123456789,987654321      # admin Telegram user_id, vergul bilan (alias: BOT_ADMINS)
 BOT_DEFAULT_LANG=uz                # uz | ru | en
+PLATFORM_NAME=Avtomaktab Platforma # bot ro'yxatidagi platforma nomi
+PLATFORM_URL=https://avtomaktab.uz # platformaning login URL'i (bo'sh = qo'shilmaydi)
 # BOT_DB=data/bot.db               # ixtiyoriy
 ```
+
+`PLATFORM_URL` — platforma joylashtirilgach to'ldiriladi. Bot shu manzilni
+o'zi ro'yxatga oladi va yangilasa ham o'zini qayta qo'shmaydi. Platforma
+bo'lmasa, avtomaktablarni `/add_school` orqali qo'lda kiritish mumkin.
 
 Lokal sinash:
 ```bash
 py -m pip install -r bot/requirements.txt
-py -m bot.seed        # 2 ta TEST avtomaktab yozuvini qo'shadi
 py -m bot.main        # polling rejimida ishga tushadi
 ```
 Deploy (VPS, asosiy platforma bilan birga):
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.prod.yml exec bot python -m bot.seed   # test ma'lumot
 docker compose -f docker-compose.prod.yml logs -f bot
 ```
 `restart: unless-stopped` — server qayta yuklansa ham bot o'z-o'zidan ishga tushadi.
@@ -296,6 +303,7 @@ hojat qoldirmaydi. Jadval `avtomaktablar`: `id, nomi, slug, login_url,
 logotip_url, manzil, telefon, tuman, faol` + `users`, `clicks` (statistika).
 Migratsiya kerak bo'lsa, `bot/db.py` ichidagi `BotDB` — yagona o'zgarish nuqtasi.
 
-**Seed skripti** `bot/seed.py`: `py -m bot.seed` — 2 ta TEST yozuv qo'shadi
-(`example.avtomaktab.uz` — haqiqiy saytga olib chiqmaydi), takror ishga tushsa
-qayta qo'shmaydi; `py -m bot.seed --clear` — faqat TEST yozuvlarini o'chiradi.
+**Asosiy platforma bilan bog'liqlik:** bot platforma kodiga tegmaydi — faqat
+uning **login URL'ini** saqlaydi. Shu sababli platforma yangilansa, bot
+kodi yangilanishiga ehtiyoj yo'q; `PLATFORM_URL` o'zgarganda bot URL'ni
+o'z-o'zidan yangilaydi.

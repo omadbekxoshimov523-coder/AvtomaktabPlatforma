@@ -90,6 +90,21 @@ class BotDB:
             )
             return cur.lastrowid
 
+    def ensure_school(self, nomi: str, slug: str, login_url: str, **fields) -> tuple[int, bool]:
+        """Slug bo'yicha avtomaktabni kafolatlaydi.
+
+        Yo'q bo'lsa — yaratadi. Bor bo'lsa — faqat `login_url` o'zgarganda
+        yangilaydi (admin tomonidan tahrirlangan nom/manzil/telefon saqlanib qoladi).
+
+        Qaytaradi: (id, yangi_yaratildi_mi)
+        """
+        existing = self.get_school_by_slug(slug)
+        if existing:
+            if existing["login_url"] != login_url:
+                self.update_school(existing["id"], login_url=login_url)
+            return existing["id"], False
+        return self.add_school(nomi, slug, login_url, **fields), True
+
     def update_school(self, school_id: int, **fields) -> None:
         allowed = {"nomi", "slug", "login_url", "logotip_url", "manzil", "telefon", "tuman"}
         sets = {k: v for k, v in fields.items() if k in allowed}

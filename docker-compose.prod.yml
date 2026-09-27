@@ -47,6 +47,8 @@ services:
       BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN .env da ko'rsatilishi shart}
       ADMIN_IDS: ${ADMIN_IDS:-}
       BOT_ADMINS: ${BOT_ADMINS:-}
+      PLATFORM_NAME: ${PLATFORM_NAME:-Avtomaktab Platforma}
+      PLATFORM_URL: ${PLATFORM_URL:-}
       BOT_DEFAULT_LANG: ${BOT_DEFAULT_LANG:-uz}
     volumes:
       - bot-data:/app/data

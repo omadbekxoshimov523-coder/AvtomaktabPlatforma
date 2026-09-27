@@ -8,6 +8,8 @@ Muhit o'zgaruvchilari:
     ADMIN_IDS        — admin Telegram user_id'lari, vergul bilan (alias: BOT_ADMINS)
     BOT_DEFAULT_LANG — default til: uz | ru | en
     BOT_DB           — SQLite fayl yo'li (default: data/bot.db)
+    PLATFORM_NAME    — asosiy platforma nomi (bot ro'yxatida ko'rinadi)
+    PLATFORM_URL     — asosiy platformaning login URL'i (bo'sh bo'lsa — qo'shilmaydi)
 """
 import os
 from dataclasses import dataclass, field
@@ -57,6 +59,8 @@ class Config:
     admins: set[int] = field(default_factory=set)
     default_lang: str = "uz"
     db_path: str = "data/bot.db"
+    platform_name: str = "Avtomaktab Platforma"
+    platform_url: str = ""
 
 
 def load_db_path() -> str:
@@ -92,4 +96,6 @@ def load_config() -> Config:
         admins=admins,
         default_lang=default_lang,
         db_path=load_db_path(),
+        platform_name=os.environ.get("PLATFORM_NAME", "").strip() or "Avtomaktab Platforma",
+        platform_url=os.environ.get("PLATFORM_URL", "").strip().rstrip("/"),
     )

@@ -21,6 +21,9 @@ from .handlers import admin_router, schools_router, start_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+# Asosiy platforma uchun barqaror slug (deep link: t.me/<bot>?start=platforma)
+PLATFORM_SLUG = "platforma"
+
 
 async def main() -> None:
     cfg = load_config()
@@ -58,7 +61,21 @@ async def main() -> None:
     ])
 
     if not cfg.admins:
-        logging.warning("BOT_ADMINS bo'sh — admin buyruqlari ishlamaydi (.env ni tekshiring)")
+        logging.warning("ADMIN_IDS bo'sh — admin buyruqlari ishlamaydi (.env ni tekshiring)")
+
+    # Asosiy platformani ro'yxatga olish: PLATFORM_URL .env da bo'lsa, bot
+    # ishga tushganda avtomatik (va takror ishga tushganda xatosiz) qo'shiladi.
+    if cfg.platform_url:
+        pid, created = db.ensure_school(cfg.platform_name, PLATFORM_SLUG, cfg.platform_url)
+        logging.info(
+            "Platforma %s: %s (ID %d)", "qo'shildi" if created else "yangilandi",
+            cfg.platform_url, pid,
+        )
+    else:
+        logging.info(
+            "PLATFORM_URL .env da bo'sh — platforma ro'yxatga qo'shilmadi "
+            "(faqat qo'lda qo'shilgan avtomaktablar ko'rinadi)"
+        )
 
     logging.info("Bot ishga tushdi: @%s (adminlar: %s)", me.username, ", ".join(map(str, sorted(cfg.admins))) or "-")
     try:
