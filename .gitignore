@@ -1,0 +1,51 @@
+# ============================================================================
+# AvtomaktabPlatforma — .gitignore
+# Muhim: .env va baza fayllari HECH QACHON GitHub'ga yuklanmasligi kerak!
+# ============================================================================
+
+# ---- Muhit o'zgaruvchilari (parollar, kalitlar — commit qilma!) ----
+.env
+.env.local
+.env.*
+!.env.example
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ---- Node.js ----
+node_modules/
+
+# ---- Baza va zaxira (lokal ma'lumotlar) ----
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/backups/
+backups/
+
+# ---- IDE / tahrirlovchilar ----
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# ---- Operatsion tizim ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Loglar ----
+*.log
+
+# ---- QA skrinshotlar (m*shot*.png, shots/) — talab emas kodga ----
+m*shot*.png
+shots/
+
+# ---- Yaqin atrofdagi test artefaktlari ----
+.tox/
+.coverage
+htmlcov/

@@ -1,0 +1,48 @@
+# ============================================================================
+# AvtomaktabPlatforma — DB infratuzilmasi (Docker)
+#
+# MUHIM HAQIQAT: amaldagi backend SQLite (stdlib sqlite3) ishlatadi —
+# mahalliy ishlab chiqishda Postgres/MySQL kerak EMAS. Shuning uchun Postgres
+# servisi "db" PROFILI orqali ixtiyoriy (optional) qilib qo'yilgan:
+#   docker compose --profile db up -d     # postgres'ni ishga tushirish
+#   docker compose up -d                  # hech narsani qo'shmaydi (default)
+#
+# Postgres'dan foydalanmoqchi bo'lsangiz: scriptlar/sqlite_to_postgres.py
+# yordamida ma'lumotlarni eksport qiling va server'ni psycopg2'li variantga
+# o'tkazing (stdlib-only muhit uchun alohida field bilan berilgan).
+#
+# Hech bir parol YML ichiga qattiq yozilmagan — hammasi .env dan (qarang: .env.example)
+# ============================================================================
+
+services:
+  db:
+    image: postgres:16-alpine
+    profiles: ["db"]
+    container_name: avtomaktab-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-avtomaktab}
+      POSTGRES_USER: ${POSTGRES_USER:-avtomaktab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD .env da ko'rsatilishi shart}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-avtomaktab} -d ${POSTGRES_DB:-avtomaktab}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - avtomaktab-net
+
+networks:
+  avtomaktab-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+    # Named volume — container'ni o'chirsangiz ham ma'lumot saqlanib qoladi.
+    # Zaxiralash (bayt-bayt nusxa):  docker run --rm -v avtomaktabplatforma_pgdata:/vol -v ${PWD}:/backup alpine tar czf /backup/pgdata-$(date +%F).tar.gz -C /vol .
+    name: avtomaktabplatforma_pgdata

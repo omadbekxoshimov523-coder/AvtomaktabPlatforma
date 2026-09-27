@@ -1,0 +1,39 @@
+# ============================================================================
+# AvtomaktabPlatforma — PRODUCTION compose (serverda ishlatiladi)
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# .env fayli shu joyda bo'lishi kerak (dockerdan avtomatik o'qiladi).
+# SQLite fayli named-volume'da saqlanadi -> container o'chsa ham ma'lumot
+# yo'qolmaydi. Zaxiralar ./backups (host) papkasiga tushadi.
+# ============================================================================
+
+services:
+  app:
+    build: .
+    image: avtomaktab:latest
+    container_name: avtomaktab-app
+    restart: unless-stopped
+    environment:
+      HOST: ${HOST:-0.0.0.0}
+      PORT: 8080
+      # SQLite fayli container ichida — volume'da abadiy saqlanadi
+      AVTOMAKTAB_DB: /app/data/avtomaktab.db
+      # Birinchi ishga tushirishda admin paroli (bo'sh bo'lsa demo: admin123)
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - avtomaktab-data:/app/data
+      - ./backups:/app/data/backups
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  avtomaktab-data:
+    # named volume — container/instansiya qayta qurilsa ham ma'lumot saqlanadi

@@ -1,0 +1,18 @@
+# Docker build kontekstidan chiqarib tashlanadigan fayllar
+.env
+.env.*
+.git/
+.github/
+.idea/
+.vscode/
+__pycache__/
+*.py[cod]
+data/
+backups/
+shots/
+tests/
+docs/
+tools_*.py
+RUN*.bat
+*.png
+*.log

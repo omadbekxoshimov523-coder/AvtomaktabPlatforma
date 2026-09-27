@@ -1,0 +1,125 @@
+# ============================================================================
+# AvtomaktabPlatforma — CI/CD: TEST → BUILD → DEPLOY
+#
+# Ishlash tartibi:
+#   1. `main` branch'ga har push'da (va qo'lda workflow_dispatch) ishga tushadi
+#   2. test: birlik testlar + JS/i18n tekshiruvlari (muvaffaqiyatsiz bo'lsa
+#      build hint boshlanmaydi — deploy ham to'xtaydi)
+#   3. build: Docker image qurilishi tekshiriladi
+#   4. deploy: VPS'ga SSH orqali `docker compose up -d --build`
+#   5. Har qanday xatolikda deploy to'xtaydi + GitHub bildiradi (email/UI),
+#      ixtiyoriy Telegram xabari ham bor (secret'lar qo'yilsa)
+#
+# GitHub repo -> Settings -> Secrets and variables -> Actions -> New secret:
+#   VPS_HOST       — server IP yoki domen (misol: 155.133.26.12)
+#   VPS_USER       — SSH foydalanuvchi (misol: root yoki deploy)
+#   VPS_SSH_KEY    — private SSH kalit (-----BEGIN OPENSSH PRIVATE KEY----- ...)
+#   VPS_APP_DIR    — serverdagi loyiha papkasi (misol: /opt/avtomaktab)
+#   (ixtiyoriy) VPS_PORT — SSH porti, standart 22
+#   (ixtiyoriy) TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID — xato haqida xabar
+# ============================================================================
+name: Test + Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------- 1) TEST
+  test:
+    name: Testlar (unit + JS + i18n)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Birlik testlari (78 ta)
+        run: python -m tests.test_api
+
+      - name: JS sintaksis tekshiruvi
+        run: python tools_js_check.py
+
+      - name: i18n kalit tekshiruvi (informatsion)
+        run: python tools_qa_i18n.py || echo "i18n ogohlantirishlar bor — bloklamaydi"
+
+  # ------------------------------------------------------------- 2) BUILD
+  build:
+    name: Docker image qurish
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker image qurish
+        run: docker build -t avtomaktab:ci .
+
+      - name: Container sog'liq tekshiruvi (smoke)
+        run: |
+          docker run -d --name avtomaktab-smoke -p 18080:8080 \
+            -e ADMIN_INITIAL_PASSWORD=ci-test-pw \
+            -v avtomaktab-smoke-data:/app/data avtomaktab:ci
+          sleep 6
+          curl -fsS http://127.0.0.1:18080/api/health || { docker logs avtomaktab-smoke; exit 1; }
+          docker rm -f avtomaktab-smoke
+          docker volume rm avtomaktab-smoke-data
+
+  # ------------------------------------------------------------- 3) DEPLOY
+  deploy:
+    name: VPS'ga joylashtirish
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH orqali deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          script: |
+            set -e
+            APP_DIR="${{ secrets.VPS_APP_DIR }}"
+            cd "$APP_DIR"
+            echo "--- .env mavjudligini tekshirish ---"
+            test -f .env || echo "OGOHLANTIRISH: .env topilmadi — env default qiymatlar"
+            echo "--- yangi kodni tortish ---"
+            git pull --ff-only origin main
+            echo "--- compose bilan qayta qurish va ishga tushirish ---"
+            docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+            echo "--- eski imagelarni tozalash ---"
+            docker image prune -f || true
+            echo "--- deploy tugadi ---"
+
+  # ------------------------------------------------------------- 4) XABAR
+  notify-failure:
+    name: Muvaffaqiyatsizlik xabari
+    needs: [test, build, deploy]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: GitHub xabari (avtomatik — commit status + email)
+        run: echo "Workflow xato bilan tugadi. Tafsilot: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Telegram xabari (ixtiyoriy)
+        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        env:
+          BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${BOT}/sendMessage" \
+            -d chat_id="${CHAT}" \
+            -d "text=⚠️ *${REPO}* deploy xato bilan tugadi:%0Ahttps://github.com/${REPO}/actions/runs/${RUN}" \
+            --data-urlencode parse_mode=Markdown || true
