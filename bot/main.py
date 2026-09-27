@@ -27,8 +27,9 @@ async def main() -> None:
     db = BotDB(cfg.db_path)
 
     bot = Bot(token=cfg.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    # @username va deep-link uchun kerak bo'ladi
-    bot.me = await bot.get_me()
+    # @username deep link (QR) uchun kerak. DIQQAT: `bot.me` — aiogram metodi,
+    # uni qiymat bilan almashtirmaymiz.
+    me = await bot.get_me()
 
     dp = Dispatcher(storage=MemoryStorage())
     dp["cfg"] = cfg
@@ -39,7 +40,7 @@ async def main() -> None:
     dp.include_router(admin_router)
 
     # ------------------------------------------------------------------ error handler
-    @dp.errors.register()
+    @dp.error()
     async def on_error(event: ErrorEvent) -> None:
         logging.exception("Bot xatolik", exc_info=event.exception)
         try:
@@ -59,7 +60,7 @@ async def main() -> None:
     if not cfg.admins:
         logging.warning("BOT_ADMINS bo'sh — admin buyruqlari ishlamaydi (.env ni tekshiring)")
 
-    logging.info("Bot ishga tushdi: @%s (adminlar: %s)", bot.me.username, ", ".join(map(str, sorted(cfg.admins))) or "-")
+    logging.info("Bot ishga tushdi: @%s (adminlar: %s)", me.username, ", ".join(map(str, sorted(cfg.admins))) or "-")
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:

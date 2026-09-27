@@ -237,7 +237,8 @@ avtomaktab tugmasini bosadi va shu platformaning login sahifasiga o'tadi.
 1. `/start` → salomlashuv + **inline tugmalar** (faol avtomaktablar ro'yxati)
 2. Avtomaktab tugmasi bosiladi → **kartochka** (nom, hudud, manzil, telefon)
    + **«🔗 Platformaga kirish»** tugmasi (login URL)
-3. Telegram profil tili bo'yicha avtomatik UZ/RU/EN; qo'lda `/lang`
+3. Birinchi `/start`da til tanlanadi (default O'zbekcha), keyin `/lang` bilan
+   o'zgartiriladi — UZ / RU / EN
 4. **Deep link**: `t.me/<bot>?start=<slug>` — QR kod orqali to'g'ridan-to'g'ri
    shu avtomaktab ochiladi (admin `/qr` bilan QR yasaydi)
 5. «Oxirgi tanlov» eslab qolinadi — keyingi safar tezkor tugma chiqadi

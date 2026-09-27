@@ -18,7 +18,7 @@ from .. import i18n
 from ..config import Config
 from ..db import BotDB
 from ..keyboards import edit_fields_kb, schools_kb, yesno_kb
-from ..utils import esc, slugify, user_lang
+from ..utils import bot_username, esc, slugify, user_lang
 
 router = Router()
 
@@ -169,7 +169,7 @@ async def _save_add(callback: CallbackQuery, state: FSMContext, db: BotDB, cfg: 
         manzil=data.get("address", ""), telefon=data.get("phone", ""),
         tuman=data.get("district", ""), logotip_url=data.get("logotip_url", ""),
     )
-    username = getattr(getattr(callback.bot, "me", None), "username", "Bot") or "Bot"
+    username = await bot_username(callback.bot)
     await callback.message.edit_text(
         i18n.t(lang, "saved", id=sid, bot=username, slug=slug)
     )
@@ -387,8 +387,8 @@ async def qr_cmd(message: Message, db: BotDB, cfg: Config) -> None:
     school = db.get_school(int(ref)) if ref.isdigit() else db.get_school_by_slug(ref)
     if not school:
         return await message.answer(i18n.t(lang, "qr_error"))
-    username = getattr(getattr(message.bot, "me", None), "username", None)
-    link = f"https://t.me/{username}?start={school['slug']}" if username else f"t.me/../?start={school['slug']}"
+    username = await bot_username(message.bot)
+    link = f"https://t.me/{username}?start={school['slug']}"
 
     img = qrcode.make(link, error_correction=ERROR_CORRECT_M, box_size=8, border=2)
     buf = io.BytesIO()
@@ -397,5 +397,5 @@ async def qr_cmd(message: Message, db: BotDB, cfg: Config) -> None:
 
     await message.answer_photo(
         BufferedInputFile(buf.getvalue(), filename="avtomaktab_qr.png"),
-        caption=i18n.t(lang, "qr_sent", bot=username or "Bot", slug=school["slug"]),
+        caption=i18n.t(lang, "qr_sent", bot=username, slug=school["slug"]),
     )

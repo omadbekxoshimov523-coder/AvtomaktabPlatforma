@@ -26,3 +26,16 @@ def slugify(text: str) -> str:
     # Agar kirill/tartibsiz qoldiq bo'lsa — lotin'ga yaqinlashtirishga urinib ko'ramiz
     s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
     return s or "avtomaktab"
+
+
+async def bot_username(bot) -> str:
+    """Botning @username'i (deep link va QR uchun).
+
+    DIQQAT: aiogram 3'da `bot.me` — bu METOD (await bot.me()); uni qiymat bilan
+    almashtirish dispatcher'ni buzadi. Shu sababli username shu yerda olinadi.
+    """
+    try:
+        me = await bot.me()
+        return me.username or "Bot"
+    except Exception:
+        return "Bot"
