@@ -7,6 +7,8 @@
 #      build hint boshlanmaydi — deploy ham to'xtaydi)
 #   3. build: Docker image qurilishi tekshiriladi
 #   4. deploy: VPS'ga SSH orqali `docker compose up -d --build`
+#      (faqat quyidagi secret'lar qo'yilgan bo'lsa; aks holda "skipped" —
+#       yangi repo'da CI yashil qoladi, xato bermaydi)
 #   5. Har qanday xatolikda deploy to'xtaydi + GitHub bildiradi (email/UI),
 #      ixtiyoriy Telegram xabari ham bor (secret'lar qo'yilsa)
 #
@@ -78,10 +80,12 @@ jobs:
           docker volume rm avtomaktab-smoke-data
 
   # ------------------------------------------------------------- 3) DEPLOY
+  # FAQAT VPS secret'lari qo'yilgan bo'lsa ishga tushadi. Aks holda CI yashil
+  # qoladi (test + build tekshiriladi), deploy esa "skipped" bo'ladi.
   deploy:
     name: VPS'ga joylashtirish
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && secrets.VPS_HOST != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
