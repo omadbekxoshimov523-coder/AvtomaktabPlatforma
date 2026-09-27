@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>AVTOMAKTAB — Amaliy mashg'ulotlar platformasi</title>
+<meta name="description" content="AVTOMAKTAB — haydovchi mashtabi amaliy mashg'ulotlar platformasi. Telegram bot orqali kirish, mashg'ulotlar, topshiriqlar va natijalar.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none' stroke='%23C9A227' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='16' y='34' width='68' height='30' rx='8'/%3E%3Cpath d='M30 46l4-12h32l4 12M42 62a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM58 62a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --gold:#C9A227; --gold-soft:#e8c766; --bg:#0e1116; --bg2:#151a22;
+    --card:#1a2029; --line:#28303c; --txt:#e9edf3; --dim:#93a0b4;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:
+      radial-gradient(900px 420px at 15% -10%, rgba(201,162,39,.14), transparent 60%),
+      radial-gradient(700px 380px at 100% 0%, rgba(60,120,255,.10), transparent 55%),
+      var(--bg);
+    color:var(--txt);
+    font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    min-height:100vh;
+  }
+  .wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+
+  header{padding:22px 0;border-bottom:1px solid var(--line);backdrop-filter:blur(6px);
+         position:sticky;top:0;background:rgba(14,17,22,.82);z-index:5}
+  .row{display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;flex:0 0 38px}
+  .brand{font-weight:800;letter-spacing:.14em;font-size:15px}
+  .brand span{color:var(--gold)}
+  .tag{margin-left:auto;font-size:12.5px;color:var(--dim);border:1px solid var(--line);
+       padding:5px 11px;border-radius:99px;white-space:nowrap}
+
+  .hero{padding:84px 0 56px;text-align:center}
+  h1{font-size:clamp(30px,6vw,52px);line-height:1.12;font-weight:800;letter-spacing:-.02em}
+  h1 em{font-style:normal;color:var(--gold);display:block}
+  .lead{color:var(--dim);font-size:clamp(15px,2.2vw,18px);max-width:620px;margin:20px auto 0}
+
+  .btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:32px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:14px 24px;border-radius:12px;
+       font-weight:700;font-size:15px;text-decoration:none;border:1px solid transparent;
+       transition:transform .15s ease,filter .15s ease}
+  .btn:hover{transform:translateY(-2px)}
+  .btn-gold{background:linear-gradient(180deg,var(--gold-soft),var(--gold));color:#1a1405}
+  .btn-gold:hover{filter:brightness(1.07)}
+  .btn-line{border-color:var(--line);color:var(--txt);background:var(--card)}
+  .btn-line:hover{border-color:var(--gold)}
+
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin:56px 0 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;
+        transition:border-color .15s ease,transform .15s ease}
+  .card:hover{border-color:#3b4757;transform:translateY(-3px)}
+  .ico{width:40px;height:40px;border-radius:11px;background:rgba(201,162,39,.13);
+      display:grid;place-items:center;font-size:20px;margin-bottom:13px}
+  .card h3{font-size:16.5px;margin-bottom:7px}
+  .card p{color:var(--dim);font-size:14.5px}
+
+  .note{margin:44px 0 0;background:linear-gradient(180deg,rgba(201,162,39,.09),rgba(201,162,39,.03));
+        border:1px solid rgba(201,162,39,.34);border-radius:16px;padding:22px 24px}
+  .note h2{font-size:15px;letter-spacing:.1em;color:var(--gold);margin-bottom:9px;text-transform:uppercase}
+  .note p{color:#cdd6e2;font-size:14.8px}
+  .note code{background:rgba(255,255,255,.07);padding:2px 7px;border-radius:6px;
+             font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13.5px}
+
+  section{padding:56px 0 0}
+  h2.sec{font-size:13px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;margin-bottom:20px}
+
+  .langs{display:flex;gap:10px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);background:var(--card);border-radius:99px;
+        padding:9px 17px;font-size:14px;color:var(--dim)}
+  .chip b{color:var(--txt)}
+
+  footer{margin-top:70px;padding:26px 0;border-top:1px solid var(--line);
+         color:var(--dim);font-size:13.5px}
+  .frow{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  footer a{color:var(--gold-soft);text-decoration:none}
+  footer a:hover{text-decoration:underline}
+
+  @media(max-width:600px){
+    .hero{padding:56px 0 34px}
+    .tag{display:none}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap row">
+    <svg class="logo" viewBox="0 0 100 100" fill="none" stroke="#C9A227" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="16" y="34" width="68" height="30" rx="8"/>
+      <path d="M30 46l4-12h32l4 12M42 62a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM58 62a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>
+    </svg>
+    <div class="brand">AVTO<span>MAKTAB</span></div>
+    <div class="tag">Amaliy mashg'ulotlar platformasi</div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="hero">
+    <h1>Haydovchi kursi<em>amaliy mashg'ulotlari</em></h1>
+    <p class="lead">
+      Nazorat, topshiriqlar va natijalar bitta joyda. Platformaga Telegram bot
+      orqali kiring — avtomaktabni tanlang va bir zumda login sahifasiga o'ting.
+    </p>
+    <div class="btns">
+      <a class="btn btn-gold" href="https://t.me/Avto_Platforma_bot" target="_blank" rel="noopener">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4.3 7.1-1.6 7.4c-.1.6-.5.7-1 .4l-2.7-2-1.3 1.2c-.2.2-.3.3-.6.3l.2-2.8 5.1-4.6c.2-.2-.1-.3-.4-.1l-6.3 4-2.7-.8c-.6-.2-.6-.6.1-.9l10.6-4.1c.5-.2.9.1.7.9z"/>
+        </svg>
+        Bot orqali kirish
+      </a>
+      <a class="btn btn-line" href="#how">Qanday ishlaydi</a>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="ico">🎯</div>
+      <h3>Amaliy mashg'ulotlar</h3>
+      <p>Har bir mashg'ulot uchun topshiriq, muddat va baho. Natija shu yerda qoladi.</p>
+    </div>
+    <div class="card">
+      <div class="ico">🚗</div>
+      <h3>Avtomaktab tanlash</h3>
+      <p>Barcha maktablar ro'yxati. Tanlang — bot sizni o'sha maktabning login sahifasiga olib boradi.</p>
+    </div>
+    <div class="card">
+      <div class="ico">🌐</div>
+      <h3>Uch til</h3>
+      <p>O'zbekcha, ruscha va inglizcha. Til birinchi kirishda tanlanadi, keyinchalik o'zgartiriladi.</p>
+    </div>
+    <div class="card">
+      <div class="ico">📊</div>
+      <h3>Nazorat paneli</h3>
+      <p>O'quvchilar, mashg'ulotlar, hisobotlar va statistika — bitta boshqaruv panelida.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>Sayt holati</h2>
+    <p>
+      Bu sahifa GitHub'da joylashtirilgan. Platformaning o'zi (login, ma'lumotlar bazasi)
+      Python serverida ishlaydi va tez orada <b>doimiy subdomen</b>ga ko'chiriladi.
+      Hozircha kirish <b>Telegram bot</b> orqali ishlaydi — u haqiqiy platforma manzilini
+      o'zi olib boradi. Platforma manzilini yangilash uchun botga
+      <code>/set_url https://…</code> yuborish yetarli.
+    </p>
+  </div>
+
+  <section id="how">
+    <h2 class="sec">Qanday ishlaydi</h2>
+    <div class="grid" style="margin-top:0">
+      <div class="card"><div class="ico">1️⃣</div><h3>Botni oching</h3><p>Telegram'da <code>@Avto_Platforma_bot</code> — <code>/start</code>.</p></div>
+      <div class="card"><div class="ico">2️⃣</div><h3>Avtomaktabni tanlang</h3><p>Ro'yxatdan kerakli maktabni bosing — kartochka va login tugmasi chiqadi.</p></div>
+      <div class="card"><div class="ico">3️⃣</div><h3>Platformaga o'ting</h3><p>«Platformaga kirish» tugmasi sizni to'g'ridan-to'g'ri login sahifasiga olib boradi.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="sec">Tillar</h2>
+    <div class="langs">
+      <div class="chip"><b>O'zbekcha</b> — asosiy</div>
+      <div class="chip"><b>Русский</b> — qo'llab-quvvatlanadi</div>
+      <div class="chip"><b>English</b> — qo'llab-quvvatlanadi</div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="frow">
+      <span>AVTOMAKTAB — amaliy mashg'ulotlar platformasi</span>
+      <span style="margin-left:auto">
+        <a href="https://t.me/Avto_Platforma_bot" target="_blank" rel="noopener">Telegram bot</a>
+      </span>
+    </div>
+  </footer>
+</main>
+
+</body>
+</html>
