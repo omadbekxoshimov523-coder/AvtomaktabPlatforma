@@ -62,11 +62,15 @@ AvtomaktabPlatforma/
 │       ├── shared.js, ui.js, api.js
 ├── data/                  # avtomaktab.db + backups/ (avtomatik yaratiladi)
 ├── bot/                   # 🤖 Telegram bot (aiogram 3)
-│   ├── main.py            # botni ishga tushirish
-│   ├── config.py          # .env dan sozlash (BOT_TOKEN, BOT_ADMINS)
-│   ├── db.py              # SQLite: avtomaktablar, users, clicks
+│   ├── main.py            # kirish nuqtasi (polling) + error handler
+│   ├── config.py          # .env dan sozlash (BOT_TOKEN, ADMIN_IDS)
+│   ├── db.py              # bazaviy qatlam (SQLite): avtomaktablar, users, clicks
 │   ├── i18n.py            # UZ / RU / EN tarjimalar
-│   ├── handlers/          # start, schools, admin paneli
+│   ├── keyboards.py       # inline tugmalar
+│   ├── seed.py            # TEST ma'lumotlarini qo'shish/olib tashlash
+│   ├── .env.example       # namuna konfiguratsiya (tokensiz)
+│   ├── requirements.txt   # aiogram, python-dotenv, qrcode
+│   ├── handlers/          # start.py, schools.py (callbacks), admin.py
 │   └── Dockerfile         # bot uchun image
 └── tests/test_api.py      # avtomatik testlar (login, users, cars, sessions, security)
 ```
@@ -247,24 +251,31 @@ avtomaktab tugmasini bosadi va shu platformaning login sahifasiga o'tadi.
 
 ## Sozlash (.env)
 
+Loyiha ildizidagi `.env` faylga (namuna: `bot/.env.example`, python-dotenv
+o'qib beradi — qiymat faqat `.env` da, kodda **qattiq yozilmaydi**):
+
 ```env
-BOT_TOKEN=123456789:AA...          # @BotFather → /newbot
-BOT_ADMINS=123456789,987654321     # admin Telegram user_id (t.me/userinfobot)
+BOT_TOKEN=123456789:AA...          # @BotFather → /newbot  (SHART)
+ADMIN_IDS=123456789,987654321      # admin Telegram user_id, vergul bilan (alias: BOT_ADMINS)
 BOT_DEFAULT_LANG=uz                # uz | ru | en
+# BOT_DB=data/bot.db               # ixtiyoriy
 ```
 
 Lokal sinash:
 ```bash
 py -m pip install -r bot/requirements.txt
-py -m bot.main
+py -m bot.seed        # 2 ta TEST avtomaktab yozuvini qo'shadi
+py -m bot.main        # polling rejimida ishga tushadi
 ```
 Deploy (VPS, asosiy platforma bilan birga):
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml exec bot python -m bot.seed   # test ma'lumot
 docker compose -f docker-compose.prod.yml logs -f bot
 ```
+`restart: unless-stopped` — server qayta yuklansa ham bot o'z-o'zidan ishga tushadi.
 
-## Admin buyruqlari (faqat BOT_ADMINS dagi foydalanuvchilar)
+## Admin buyruqlari (faqat `ADMIN_IDS` dagi foydalanuvchilar)
 
 | Buyruq | Vazifasi |
 |---|---|
@@ -272,11 +283,19 @@ docker compose -f docker-compose.prod.yml logs -f bot
 | `/list_schools` | barcha avtomaktablar ro'yxati (faol/o'chirilgan) |
 | `/edit_school` | nomi/URL/manzil/telefon/hudud/logotipni tahrirlash |
 | `/set_status` | faollikni o'zgartirish (vaqtincha yashirish) |
-| `/delete_school` | butunlay o'chirish |
+| `/remove_school` | butunlay o'chirish (alias: `/delete_school`) |
 | `/stats` | bosishlar statistikasi |
-| `/qr <id|slug>` | QR-kod (deep link: `t.me/<bot>?start=<slug>`) |
+| `/qr <id\|slug>` | QR-kod (deep link: `t.me/<bot>?start=<slug>`) |
 | `/cancel` | joriy amalni bekor qilish |
 
-**Ma'lumotlar bazasi:** `bot.db` (SQLite, alohida volume `bot-data`).
-Jadval `avtomaktablar`: `id, nomi, slug, login_url, logotip_url, manzil,
-telefon, tuman, faol` + `users`, `clicks` (statistika).
+**Ma'lumotlar bazasi:** alohida **SQLite** (`data/bot.db`, Docker'da `bot-data`
+volume). Sababi: asosiy platforma ham SQLite ishlatadi (PostgreSQL yo'q), bot
+jadvalidagi ma'lumot kam va sez o'zgarmaydi — alohida baza esa botni
+ishlayotgan koddan butunlay ajratadi va `depends_on: db` bog'lanishiga
+hojat qoldirmaydi. Jadval `avtomaktablar`: `id, nomi, slug, login_url,
+logotip_url, manzil, telefon, tuman, faol` + `users`, `clicks` (statistika).
+Migratsiya kerak bo'lsa, `bot/db.py` ichidagi `BotDB` — yagona o'zgarish nuqtasi.
+
+**Seed skripti** `bot/seed.py`: `py -m bot.seed` — 2 ta TEST yozuv qo'shadi
+(`example.avtomaktab.uz` — haqiqiy saytga olib chiqmaydi), takror ishga tushsa
+qayta qo'shmaydi; `py -m bot.seed --clear` — faqat TEST yozuvlarini o'chiradi.

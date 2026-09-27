@@ -26,6 +26,16 @@ data/*.db-wal
 data/*.db-shm
 data/backups/
 backups/
+# Bot bazalari (asosiy platforma bazasi bilan aralashmasligi uchun)
+bot/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# ---- Telegram bot (maksfiy fayllar) ----
+# Botning o'z .env fayli (umumiy `.env` qoidasi ham qamrab oladi — qo'shimcha
+# qat'iy qoida, agar kodingiz boshqa papkada ham bo'lsa)
+bot/.env
 
 # ---- IDE / tahrirlovchilar ----
 .idea/

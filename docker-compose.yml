@@ -47,6 +47,7 @@ services:
     restart: unless-stopped
     environment:
       BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN .env da ko'rsatilishi shart}
+      ADMIN_IDS: ${ADMIN_IDS:-}
       BOT_ADMINS: ${BOT_ADMINS:-}
       BOT_DEFAULT_LANG: ${BOT_DEFAULT_LANG:-uz}
     volumes:

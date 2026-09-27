@@ -1,4 +1,6 @@
-# Telegram bot (aiogram 3.x)
+# Telegram bot (aiogram 3.x) — kutubxonalar
 aiogram>=3.7,<4.0
+# .env faylni o'qish (bot/config.py)
+python-dotenv>=1.0,<2.0
 # QR-kod generatsiyasi (deep link uchun)
 qrcode[pil]>=7.4,<9

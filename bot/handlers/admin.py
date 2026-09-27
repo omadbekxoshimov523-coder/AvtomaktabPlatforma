@@ -1,7 +1,7 @@
 """Admin paneli — avtomaktablar boshqaruvi.
 
-Buyruqlar: /add_school /list_schools /edit_school /set_status /delete_school
-          /stats /qr <id|slug> /cancel   (+ /admin — yordam)
+Buyruqlar: /add_school /list_schools /edit_school /set_status
+          /remove_school (/delete_school alias) /stats /qr <id|slug> /cancel
 """
 import io
 
@@ -319,8 +319,8 @@ async def cb_status_no(callback: CallbackQuery, db: BotDB, cfg: Config) -> None:
     await callback.answer()
 
 
-# ========================================================== /delete_school
-@router.message(IsAdmin(), Command("delete_school"))
+# ============================================== /remove_school (alias: /delete_school)
+@router.message(IsAdmin(), Command("remove_school", "delete_school", "del_school"))
 async def delete_school(message: Message, db: BotDB, cfg: Config) -> None:
     lang = user_lang(db, message.from_user.id, cfg)
     schools = db.list_schools(active_only=False)

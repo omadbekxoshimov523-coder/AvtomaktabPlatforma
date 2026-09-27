@@ -1,22 +1,28 @@
-"""Bot konfiguratsiyasi — barcha qiymatlar muhit o'zgaruvchilari (.env) dan o'qiladi.
+"""Bot konfiguratsiyasi — barcha qiymatlar muhit o'zgaruvchilaridan (.env) o'qiladi.
 
-Qattiq yozilgan token / parol kod ichida YO'Q.
+QOID'A: token / parol kod ichida QATTIQ YOZILMAYDI. Faqat `os.environ`
+(read-only) orqali o'qiladi. `.env` fayl esa `.gitignore`'da.
+
+Muhit o'zgaruvchilari:
+    BOT_TOKEN        — @BotFather'dan olingan token (SHART)
+    ADMIN_IDS        — admin Telegram user_id'lari, vergul bilan (alias: BOT_ADMINS)
+    BOT_DEFAULT_LANG — default til: uz | ru | en
+    BOT_DB           — SQLite fayl yo'li (default: data/bot.db)
 """
 import os
 from dataclasses import dataclass, field
 
+try:  # python-dotenv (requirements.txt da bor)
+    from dotenv import load_dotenv as _dotenv_load
+except ImportError:  # pragma: no cover — pip install qilinmagan muhit uchun zaxira
+    _dotenv_load = None
 
-def _load_dotenv(path: str | None = None) -> None:
-    """Loyiha ildizidagi .env faylini muhit o'zgaruvchilariga yuklaydi.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # loyiha ildizi
+_BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    Docker'da compose allaqachon o'zgaruvchilarni beradi — shuning uchun
-    allaqach mavjud bo'lgan qiymatlar HECH QACHON qayta yozilmaydi (setdefault).
-    """
-    if path is None:
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        path = os.path.join(root, ".env")
-    if not os.path.isfile(path):
-        return
+
+def _simple_load(path: str) -> None:
+    """python-dotenv yo'q bo'lsa — sodda .env o'quvchi (stdlib, faqat yangi qiymat qo'shadi)."""
     try:
         with open(path, encoding="utf-8") as f:
             for raw in f:
@@ -29,6 +35,22 @@ def _load_dotenv(path: str | None = None) -> None:
         pass  # .env yo'q/ochib bo'lmaydi — muhit o'zgaruvchilariga tayanamiz
 
 
+def _load_dotenv() -> None:
+    """`.env` faylini yuklaydi (loyiha ildizi yoki bot/ ichida).
+
+    Muhit o'zgaruvchilari ALLERTAQCHON o'rnatilgan bo'lsa, ular QAYTA
+    yozilmaydi (override=False) — shuning uchun Docker'da compose'ning
+    bergan qiymatlari ustun bo'lib qoladi.
+    """
+    for path in (os.path.join(_ROOT, ".env"), os.path.join(_BOT_DIR, ".env")):
+        if not os.path.isfile(path):
+            continue
+        if _dotenv_load:
+            _dotenv_load(path, override=False)
+        else:
+            _simple_load(path)
+
+
 @dataclass
 class Config:
     token: str
@@ -37,17 +59,26 @@ class Config:
     db_path: str = "data/bot.db"
 
 
+def load_db_path() -> str:
+    """Faqat SQLite fayl yo'lini o'qish (seed/backup skriptlari uchun — token talab qilmaydi)."""
+    _load_dotenv()
+    return os.environ.get("BOT_DB") or os.path.join("data", "bot.db")
+
+
 def load_config() -> Config:
     _load_dotenv()
     token = os.environ.get("BOT_TOKEN", "").strip()
     if not token:
         raise SystemExit(
             "XATO: BOT_TOKEN muhit o'zgaruvchisi ko'rsatilmagan.\n"
-            ".env faylida BOT_TOKEN=<BotFather tokeni> qo'ying."
+            "  → .env faylga qo'ying:  BOT_TOKEN=<BotFather tokeni>\n"
+            "  → namuna uchun:        bot/.env.example"
         )
 
+    # ADMIN_IDS — asosiy nom; BOT_ADMINS — eski nom (moslik uchun qo'llab-quvvatlanadi)
+    raw_admins = os.environ.get("ADMIN_IDS") or os.environ.get("BOT_ADMINS", "")
     admins: set[int] = set()
-    for part in os.environ.get("BOT_ADMINS", "").split(","):
+    for part in raw_admins.split(","):
         part = part.strip()
         if part.isdigit():
             admins.add(int(part))
@@ -56,5 +87,9 @@ def load_config() -> Config:
     if default_lang not in ("uz", "ru", "en"):
         default_lang = "uz"
 
-    db_path = os.environ.get("BOT_DB") or os.path.join("data", "bot.db")
-    return Config(token=token, admins=admins, default_lang=default_lang, db_path=db_path)
+    return Config(
+        token=token,
+        admins=admins,
+        default_lang=default_lang,
+        db_path=load_db_path(),
+    )
