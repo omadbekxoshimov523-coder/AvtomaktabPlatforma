@@ -55,6 +55,9 @@ jobs:
       - name: Bot sintaksis tekshiruvi
         run: python -m compileall -q bot
 
+      - name: Workflow fayli tekshiruvi (noto'g'ri if/run aniqlanadi)
+        run: python tools_workflow_check.py
+
   # ------------------------------------------------------------- 2) BUILD
   build:
     name: Docker image qurish
@@ -80,17 +83,37 @@ jobs:
           docker volume rm avtomaktab-smoke-data
 
   # ------------------------------------------------------------- 3) DEPLOY
-  # FAQAT VPS secret'lari qo'yilgan bo'lsa ishga tushadi. Aks holda CI yashil
-  # qoladi (test + build tekshiriladi), deploy esa "skipped" bo'ladi.
+  # FAQAT VPS secret'lari qo'yilgan bo'lsa haqiqiy deploy ishlaydi.
+  #
+  # MUHIM: GitHub Actions'da `secrets` konteksti job/step `if` shartida
+  # ISHLATILMAYDI (ruxsatli: github, needs, vars, inputs, steps) — aks holda
+  # "Unrecognized named-value: 'secrets'" xatosi chiqadi va butun workflow
+  # ishlamay qoladi. Shuning uchun `secrets` ni `env:` orqali step ichiga
+  # o'kib, uning bo'shligi shu yerda tekshiriladi.
   deploy:
     name: VPS'ga joylashtirish
     needs: build
-    if: github.ref == 'refs/heads/main' && secrets.VPS_HOST != ''
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      - name: VPS secret'lari bormi?
+        id: gate
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          if [ -n "${VPS_HOST}" ] && [ -n "${VPS_SSH_KEY}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Deploy o'tkazildi::VPS_HOST/VPS_SSH_KEY secret'lari qo'yilmagan — serverga chiqarilmadi."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.ready == 'true'
 
       - name: SSH orqali deploy
+        if: steps.gate.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -132,8 +155,22 @@ jobs:
           echo "Workflow xato bilan tugadi."
           echo "Tafsilot: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-      - name: Telegram xabari (ixtiyoriy)
-        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+      - name: Telegram xabari uchun tayyorlik (ixtiyoriy)
+        id: tg_gate
+        env:
+          BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -n "${BOT}" ] && [ -n "${CHAT}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Telegram xabari yuborish (ixtiyoriy)
+        # `if` shartida `secrets` ishlatilmaydi (yuqoriga qarang) — shuning
+        # uchun yuqoridagi `tg_gate` step natijasidan foydalaniladi.
+        if: steps.tg_gate.outputs.ready == 'true'
         env:
           BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
