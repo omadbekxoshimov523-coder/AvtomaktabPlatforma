@@ -23,37 +23,26 @@ def lang_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def menu_kb(db: BotDB, lang: str, user_id: int) -> InlineKeyboardMarkup:
-    """Asosiy menyu: so'nggi tanlov (agar bo'lsa) + faol avtomaktablar + til."""
-    rows = []
-    rec = db.get_user(user_id)
-    if rec and rec.get("last_school_id"):
-        s = db.get_school(rec["last_school_id"])
-        if s and s["faol"]:
-            rows.append([_b(i18n.t(lang, "last_btn", nomi=s["nomi"]), cb=f"school:{s['id']}")])
-    for s in db.list_schools(active_only=True):
-        rows.append([_b(s["nomi"], cb=f"school:{s['id']}")])
+def menu_kb(db: BotDB, lang: str) -> InlineKeyboardMarkup:
+    """Asosiy menyu: faol avtomaktablar ro'yxati + til tugmasi.
+
+    Eslatma: ilgari bu yerda «🔁 Oxirgi tanlov» tezkor tugmasi ham bor edi —
+    u ro'yxatdagi bir xil avtomaktabni takror ko'rsatardi, shuning uchun
+    olib tashlandi (ro'yxat allaqon qisqa).
+    """
+    rows = [[_b(s["nomi"], cb=f"school:{s['id']}")] for s in db.list_schools(active_only=True)]
     rows.append([_b("🌐 Til / Язык / Language", cb="lang")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def card_kb(school: dict, lang: str) -> InlineKeyboardMarkup:
-    """Avtomaktab kartochkasi: Kirish (URL) + muammo + orqaga."""
+    """Avtomaktab kartochkasi: kirish (URL) + orqaga.
+
+    Eslatma: «🛠️ Muammo xabar berish» tugmasi olib tashlandi.
+    """
     return InlineKeyboardMarkup(inline_keyboard=[
         [_b(i18n.t(lang, "open"), url=school["login_url"])],
-        [
-            _b(i18n.t(lang, "report"), cb=f"report:{school['id']}"),
-            _b(i18n.t(lang, "back"), cb="back"),
-        ],
-    ])
-
-
-def report_kb(school_id: int, lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            _b(i18n.t(lang, "report_yes"), cb=f"report_yes:{school_id}"),
-            _b(i18n.t(lang, "report_no"), cb=f"report_no:{school_id}"),
-        ]
+        [_b(i18n.t(lang, "back"), cb="back")],
     ])
 
 

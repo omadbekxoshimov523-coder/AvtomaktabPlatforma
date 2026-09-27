@@ -248,9 +248,10 @@ avtomaktab tugmasini bosadi va shu platformaning login sahifasiga o'tadi.
    o'zgartiriladi — UZ / RU / EN
 4. **Deep link**: `t.me/<bot>?start=<slug>` — QR kod orqali to'g'ridan-to'g'ri
    shu avtomaktab ochiladi (admin `/qr` bilan QR yasaydi)
-5. «Oxirgi tanlov» eslab qolinadi — keyingi safar tezkor tugma chiqadi
-6. «🛠️ Muammo xabar berish» — adminga avtomatik xabar
-7. Admin `/stats` — qaysi avtomaktab necha marta tanlanganini ko'radi
+5. Admin `/stats` — qaysi avtomaktab necha marta tanlanganini ko'radi
+6. Admin `/set_url https://…` — platforma manzilini Telegram'dan darhol
+   yangilaydi (serverga kirmasdan). Platforma `.env` dagi `PLATFORM_URL`
+   yoki shu buyruq orqali belgilanadi.
 
 ## Sozlash (.env)
 

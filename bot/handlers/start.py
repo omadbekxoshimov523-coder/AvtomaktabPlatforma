@@ -39,7 +39,7 @@ async def _show_menu(message: Message, db: BotDB, cfg: Config, lang: str, note: 
         )
         return
     name = esc(message.from_user.first_name or "")
-    await message.answer(_menu_text(lang, name, note), reply_markup=menu_kb(db, lang, message.from_user.id))
+    await message.answer(_menu_text(lang, name, note), reply_markup=menu_kb(db, lang))
 
 
 @router.message(CommandStart())
@@ -60,7 +60,6 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
     if payload:
         school = db.get_school_by_slug(payload)
         if school and school["faol"]:
-            db.set_last_school(user.id, school["id"])
             db.record_click(school["id"], user.id)
             await send_school_card(message, db, cfg, school)
             return
@@ -112,5 +111,5 @@ async def cb_lang_set(callback: CallbackQuery, state: FSMContext, db: BotDB, cfg
         )
     else:
         text = i18n.t(lang, "lang_saved", lang=i18n.LANG_NAMES[lang]) + "\n\n" + i18n.t(lang, "choose_school")
-        await callback.message.edit_text(text, reply_markup=menu_kb(db, lang, callback.from_user.id))
+        await callback.message.edit_text(text, reply_markup=menu_kb(db, lang))
     await callback.answer()

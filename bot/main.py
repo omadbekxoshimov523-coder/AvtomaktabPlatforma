@@ -13,16 +13,16 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, ErrorEvent
+from aiogram.types import BotCommand, BotCommandScopeChat, ErrorEvent
 
 from .config import load_config
-from .db import BotDB
+from .db import PLATFORM_SLUG, BotDB
 from .handlers import admin_router, schools_router, start_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-# Asosiy platforma uchun barqaror slug (deep link: t.me/<bot>?start=platforma)
-PLATFORM_SLUG = "platforma"
+# Eslatma: PLATFORM_SLUG (`platforma`) `bot/db.py` da — bot/db.py, bot/main.py
+# va admin paneli (/set_url) bir xil qiymatdan foydalanadi.
 
 
 async def main() -> None:
@@ -59,6 +59,22 @@ async def main() -> None:
         BotCommand(command="lang", description="🌐 Til / Язык / Language"),
         BotCommand(command="help", description="❓ Yordam"),
     ])
+
+    # Admin buyruqlari — faqat admin chatlarida ko'rinadi
+    admin_commands = [
+        BotCommand(command="admin", description="🛠️ Admin yordami"),
+        BotCommand(command="add_school", description="➕ Avtomaktab qo'shish"),
+        BotCommand(command="list_schools", description="📋 Ro'yxat"),
+        BotCommand(command="edit_school", description="✏️ Tahrirlash"),
+        BotCommand(command="set_url", description="🌐 Platforma manzilini yangilash"),
+        BotCommand(command="stats", description="📊 Statistika"),
+        BotCommand(command="qr", description="🔲 QR kod"),
+    ]
+    for admin_id in cfg.admins:
+        try:
+            await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
+        except TelegramAPIError as exc:  # admin botni hali boshlagan bo'lishi mumkin
+            logging.debug("Admin %s uchun buyruqlarni o'rnatib bo'lmadi: %s", admin_id, exc)
 
     if not cfg.admins:
         logging.warning("ADMIN_IDS bo'sh — admin buyruqlari ishlamaydi (.env ni tekshiring)")

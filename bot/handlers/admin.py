@@ -1,7 +1,8 @@
 """Admin paneli — avtomaktablar boshqaruvi.
 
 Buyruqlar: /add_school /list_schools /edit_school /set_status
-          /remove_school (/delete_school alias) /stats /qr <id|slug> /cancel
+          /remove_school (/delete_school alias) /set_url /stats
+          /qr <id|slug> /cancel
 """
 import io
 
@@ -16,7 +17,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from .. import i18n
 from ..config import Config
-from ..db import BotDB
+from ..db import PLATFORM_SLUG, BotDB
 from ..keyboards import edit_fields_kb, schools_kb, yesno_kb
 from ..utils import bot_username, esc, slugify, user_lang
 
@@ -376,7 +377,44 @@ async def stats(message: Message, db: BotDB, cfg: Config) -> None:
     await message.answer(i18n.t(lang, "stats_header") + "\n".join(lines) + "\n\n" + i18n.t(lang, "stats_users", users=users))
 
 
-# ====================================================================== /qr
+# ================================================================== /set_url
+@router.message(IsAdmin(), Command("set_url", "set_platform"))
+async def set_url(message: Message, db: BotDB, cfg: Config) -> None:
+    """Asosiy platforma (sayt) manzilini tezda yangilash.
+
+    Nima uchun kerak: vaqtinchalik subdomain (cloudflared tunnel) kompyuter
+    qayta ishga tushganda YANGI manzil oladi. Bu buyruq yangi manzilni
+    Telegram'dan 5 soniyada qo'yish imkonini beradi — serverga kirish,
+    konteyner qayta ishga tushirish yoki .env tahrirlash kerak emas.
+
+    Ishlatish:
+        /set_url                      — joriy manzilni ko'rsatadi
+        /set_url https://example.uz   — yangisini o'rnatsa bo'ladi
+    """
+    lang = user_lang(db, message.from_user.id, cfg)
+    current = db.get_school_by_slug(PLATFORM_SLUG)
+    parts = (message.text or "").split(maxsplit=1)
+
+    if len(parts) < 2:
+        return await message.answer(
+            i18n.t(lang, "set_url_usage", url=(current or {}).get("login_url") or "—")
+        )
+
+    url = parts[1].strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    if current:
+        db.update_school(current["id"], login_url=url)
+        db.set_active(current["id"], True)
+    else:
+        db.add_school(cfg.platform_name or "Avtomaktab Platforma", PLATFORM_SLUG, url)
+
+    username = await bot_username(message.bot)
+    await message.answer(i18n.t(lang, "set_url_done", url=url, bot=username))
+
+
+# ===================================================================== /qr
 @router.message(IsAdmin(), Command("qr"))
 async def qr_cmd(message: Message, db: BotDB, cfg: Config) -> None:
     lang = user_lang(db, message.from_user.id, cfg)

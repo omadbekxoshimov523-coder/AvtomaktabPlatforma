@@ -14,6 +14,11 @@ def now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+# Asosiy platforma yozuvi uchun barqaror slug.
+# Deep link shu slug orqali ishlaydi: t.me/<bot>?start=platforma
+PLATFORM_SLUG = "platforma"
+
+
 class BotDB:
     def __init__(self, path: str):
         self.path = path
@@ -142,14 +147,6 @@ class BotDB:
     def set_lang(self, user_id: int, lang: str) -> None:
         with self._lock, self._conn() as con:
             con.execute("UPDATE users SET lang=? WHERE user_id=?", (lang, user_id))
-
-    def set_last_school(self, user_id: int, school_id: int) -> None:
-        with self._lock, self._conn() as con:
-            con.execute(
-                "INSERT INTO users(user_id,lang,last_school_id,last_seen) VALUES(?,?,?,?) "
-                "ON CONFLICT(user_id) DO UPDATE SET last_school_id=excluded.last_school_id, last_seen=excluded.last_seen",
-                (user_id, "uz", school_id, now()),
-            )
 
     # --------------------------------------------------------------- statistika
     def record_click(self, school_id: int, user_id: int) -> None:

@@ -11,20 +11,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "empty_list": "Hozircha ro'yxat bo'sh. Keyinroq urinib ko'ring. 😊",
         "empty_hint": "Batafsil: /help",
         "empty_admin_hint": "Siz admin ekansiz: /add_school bilan birinchi avtomaktabni qo'shing.",
-        "last_btn": "🔁 {nomi}",
         "school_card": "<b>🏫 {nomi}</b>\n\n{meta}🔗 <b>Platforma:</b> {url}",
         "school_meta_district": "🗺️ Hudud: {value}\n",
         "school_meta_local": "📍 Manzil: {value}\n",
         "school_meta_phone": "📞 Telefon: {value}\n",
         "open": "🔗 Platformaga kirish",
         "back": "◀️ Orqaga",
-        "report": "🛠️ Muammo haqida xabar berish",
-        "report_q": "Ushbu avtomaktab platformasida muammo bormi?\nXabaringiz adminga yuboriladi.",
-        "report_yes": "✅ Ha, yuborish",
-        "report_no": "❌ Yo'q",
-        "report_sent": "✅ Rahmat! Xabaringiz adminga yuborildi.",
-        "report_cancelled": "Bekor qilindi.",
-        "report_payload": "📩 <b>Muammo haqida xabar</b>\n🏫 {nomi}\n🔗 {url}\n👤 {user}\n🕒 {date}",
         "not_found": "⚠️ Avtomaktab topilmadi yoki vaqtincha o'chirilgan.",
         "help": (
             "<b>🚗 AVTOMAKTAB — yordam</b>\n\n"
@@ -74,6 +66,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "stats_users": "🧑 Foydalanuvchilar: {users}",
         "qr_usage": "Ishlatish: <code>/qr &lt;id|slug&gt;</code>\nMasalan: <code>/qr 3</code> yoki <code>/qr chilonzor</code>",
         "qr_sent": "✅ QR tayyor!\nHavola: <code>t.me/{bot}?start={slug}</code>",
+        "set_url_usage": "🌐 Platforma manzili: <code>{url}</code>\n\nYangilash uchun: <code>/set_url https://yangi.manzil</code>",
+        "set_url_done": "✅ Platforma manzili yangilandi:\n<code>{url}</code>\n\nFoydalanuvchilar endi shu manzilga olib boriladi.\nDeep link: <code>t.me/{bot}?start=platforma</code>",
         "qr_error": "⚠️ Avtomaktab topilmadi.",
         "admin_cmds": (
             "🛠️ <b>Admin buyruqlari</b>\n\n"
@@ -82,6 +76,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "/edit_school — tahrirlash\n"
             "/set_status — faollikni o'zgartirish\n"
             "/remove_school — o'chirish (alias: /delete_school)\n"
+            "/set_url <https://...> — platforma manzilini yangilash\n"
             "/stats — statistika\n"
             "/qr &lt;id|slug&gt; — QR kod (deep link)\n"
             "/cancel — joriy amalni bekor qilish"
@@ -104,20 +99,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "empty_list": "Пока список пуст. Попробуйте позже. 😊",
         "empty_hint": "Подробнее: /help",
         "empty_admin_hint": "Вы администратор: добавьте первую автошколу через /add_school.",
-        "last_btn": "🔁 {nomi}",
         "school_card": "<b>🏫 {nomi}</b>\n\n{meta}🔗 <b>Платформа:</b> {url}",
         "school_meta_district": "🗺️ Район: {value}\n",
         "school_meta_local": "📍 Адрес: {value}\n",
         "school_meta_phone": "📞 Телефон: {value}\n",
         "open": "🔗 Войти в платформу",
         "back": "◀️ Назад",
-        "report": "🛠️ Сообщить о проблеме",
-        "report_q": "Есть проблема с платформой этого автошкола?\nСообщение будет отправлено администратору.",
-        "report_yes": "✅ Да, отправить",
-        "report_no": "❌ Нет",
-        "report_sent": "✅ Спасибо! Сообщение отправлено администратору.",
-        "report_cancelled": "Отменено.",
-        "report_payload": "📩 <b>Сообщение о проблеме</b>\n🏫 {nomi}\n🔗 {url}\n👤 {user}\n🕒 {date}",
         "not_found": "⚠️ Автошкола не найдена или временно отключена.",
         "help": (
             "<b>🚗 AVTOMAKTAB — помощь</b>\n\n"
@@ -162,6 +149,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "stats_users": "🧑 Пользователей: {users}",
         "qr_usage": "Использование: <code>/qr &lt;id|slug&gt;</code>\nНапример: <code>/qr 3</code> или <code>/qr chilonzor</code>",
         "qr_sent": "✅ QR готов!\nСсылка: <code>t.me/{bot}?start={slug}</code>",
+        "set_url_usage": "🌐 Адрес платформы: <code>{url}</code>\n\nОбновить: <code>/set_url https://новый.адрес</code>",
+        "set_url_done": "✅ Адрес платформы обновлён:\n<code>{url}</code>\n\nПользователи теперь попадают на этот адрес.\nDeep link: <code>t.me/{bot}?start=platforma</code>",
         "qr_error": "⚠️ Автошкола не найдена.",
         "admin_cmds": (
             "🛠️ <b>Команды администратора</b>\n\n"
@@ -170,6 +159,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "/edit_school — редактировать\n"
             "/set_status — активность\n"
             "/remove_school — удалить (псевдоним: /delete_school)\n"
+            "/set_url <https://...> — обновить адрес платформы\n"
             "/stats — статистика\n"
             "/qr &lt;id|slug&gt; — QR-код (deep link)\n"
             "/cancel — отменить действие"
@@ -191,20 +181,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "empty_list": "The list is empty for now. Try again later. 😊",
         "empty_hint": "Details: /help",
         "empty_admin_hint": "You are an admin: add the first school with /add_school.",
-        "last_btn": "🔁 {nomi}",
         "school_card": "<b>🏫 {nomi}</b>\n\n{meta}🔗 <b>Platform:</b> {url}",
         "school_meta_district": "🗺️ District: {value}\n",
         "school_meta_local": "📍 Address: {value}\n",
         "school_meta_phone": "📞 Phone: {value}\n",
         "open": "🔗 Enter platform",
         "back": "◀️ Back",
-        "report": "🛠️ Report a problem",
-        "report_q": "Is there a problem with this school's platform?\nThe message will be sent to the admin.",
-        "report_yes": "✅ Yes, send",
-        "report_no": "❌ No",
-        "report_sent": "✅ Thank you! Your message was sent to the admin.",
-        "report_cancelled": "Cancelled.",
-        "report_payload": "📩 <b>Problem report</b>\n🏫 {nomi}\n🔗 {url}\n👤 {user}\n🕒 {date}",
         "not_found": "⚠️ School not found or temporarily disabled.",
         "help": (
             "<b>🚗 AVTOMAKTAB — help</b>\n\n"
@@ -249,6 +231,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "stats_users": "🧑 Users: {users}",
         "qr_usage": "Usage: <code>/qr &lt;id|slug&gt;</code>\nExample: <code>/qr 3</code> or <code>/qr chilonzor</code>",
         "qr_sent": "✅ QR is ready!\nLink: <code>t.me/{bot}?start={slug}</code>",
+        "set_url_usage": "🌐 Platform address: <code>{url}</code>\n\nUpdate: <code>/set_url https://new.address</code>",
+        "set_url_done": "✅ Platform address updated:\n<code>{url}</code>\n\nUsers now land on this address.\nDeep link: <code>t.me/{bot}?start=platforma</code>",
         "qr_error": "⚠️ School not found.",
         "admin_cmds": (
             "🛠️ <b>Admin commands</b>\n\n"
@@ -257,6 +241,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "/edit_school — edit\n"
             "/set_status — activity\n"
             "/remove_school — delete (alias: /delete_school)\n"
+            "/set_url <https://...> — update platform address\n"
             "/stats — statistics\n"
             "/qr &lt;id|slug&gt; — QR code (deep link)\n"
             "/cancel — cancel current action"
