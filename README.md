@@ -166,6 +166,27 @@ docker compose -f docker-compose.prod.yml ps
 GitHub repo → *Settings → Secrets and variables → Actions* da quyidagi
 secret'larni qo'shing: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_APP_DIR`.
 
+## Sayt (GitHub Pages)
+
+**Manzil:** <https://omadbekxoshimov523-coder.github.io/AvtomaktabPlatforma/>
+
+`site/index.html` — bitta fayl, tashqi resurssiz (shrift/rasm/JS yo'q).
+`.github/workflows/pages.yml` `site/`'ni har push'da GitHub Pages'ga
+joylashtiradi.
+
+> **Muhim:** bu **faqat ko'rsatish (landing) sahifasi**. Platformaning o'zi
+> GitHub Pages'da **ishlamaydi** — sababi ikkita:
+> 1. GitHub Pages faqat statik fayl beradi, Python'ni ishga tushirmaydi.
+>    Platforma esa `server.py` (`http.server` + `sqlite3`) bilan ishlaydi.
+> 2. Frontend `/api/*` so'rovlarini shu serverga yuboradi
+>    (`web/js/api.js:12`) — Pages'da bularga 404 qaytadi, ya'ni login
+>    ishlamaydi.
+>
+> Shuning uchun **haqiqiy login sahifasi serverga (VPS) joylashtirilishi
+> kerak**. Buni tayyorlab qo'yganmiz: yuqoridagi CI/CD + Docker.
+> Server tayyor bo'lgach, `.env`dagi `PLATFORM_URL` ni o'zgartiring yoki
+> Telegram'da `/set_url https://…` yuboring — bot darhol yangilaydi.
+
 ## Zaxira (backup) va tiklash
 
 ### Avtomatik zaxira (kuniga bir marta)
