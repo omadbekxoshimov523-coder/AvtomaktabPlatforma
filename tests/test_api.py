@@ -90,13 +90,24 @@ class Base(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        _SERVER["owners"] -= 1
-        if _SERVER["owners"] <= 0 and _SERVER["httpd"] is not None:
-            httpd = _SERVER["httpd"]
-            httpd.shutdown()
-            httpd.server_close()
-            _SERVER["httpd"] = None
-            shutil.rmtree(TMP, ignore_errors=True)
+        # DIQQAT: bu yerda hech narsani o'chirmaymiz! Server va vaqtinchalik
+        # baza butun testlar tugagandan KEYIN `tearDownModule()` da yopiladi.
+        # Sababi: sinflar ketma-ket ishlaganda, birinchisi tugagach TMP
+        # o'chirilsa, qolgan sinflar bazani topolmaydi
+        # ("sqlite3.OperationalError: unable to open database file").
+        # (Windows'da ochiq faylni o'chirib bo'lmaydi, Linux'da esa
+        #  o'chib ketardi — ya'ni xato faqat CI da ko'rinardi.)
+        pass
+
+
+def tearDownModule():
+    """Barcha sinflar tugagach — serverni to'xtatish va temp bazani tozalash."""
+    httpd = _SERVER.get("httpd")
+    if httpd is not None:
+        httpd.shutdown()
+        httpd.server_close()
+        _SERVER["httpd"] = None
+    shutil.rmtree(TMP, ignore_errors=True)
 
 
 class TestAuthAndUsers(Base):
