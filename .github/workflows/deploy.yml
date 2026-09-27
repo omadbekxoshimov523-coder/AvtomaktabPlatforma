@@ -125,7 +125,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: GitHub xabari (avtomatik — commit status + email)
-        run: echo "Workflow xato bilan tugadi. Tafsilot: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        # DIQQAT: qiymat `|` (block scalar) bilan yoziladi. Bir qatorli `run:`
+        # ichida ": " (ikki nuqta + bo'sh joy) bo'lsa, YAML uni mapping deb
+        # o'qib, butun workflow ishlamay qoladi ("workflow file issue").
+        run: |
+          echo "Workflow xato bilan tugadi."
+          echo "Tafsilot: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Telegram xabari (ixtiyoriy)
         if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
