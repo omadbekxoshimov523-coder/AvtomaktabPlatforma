@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>AVTOMAKTAB — Kirish</title>
+<!--
+  ==========================================================================
+  AVTOMAKTAB — KIRISH SAHIFASI (YANGI KOMPOZITSIYA)
+  --------------------------------------------------------------------------
+  FORMULARE MARKAZDA + TO'LIQ EKRAN REALISTIK FON (tungi shahar yo'li).
+  Bitta fayl, sof HTML+CSS+JS. Hech qanday tashqi kutubxona yo'q.
+  Dizayn tokenlari styles.css dagi markazlashgan tizim bilan birlashtirilgan:
+  to'q ko'k (navy) + oltin aksent + cyan — platformaning yagona palitrasi.
+
+  FOTONI ALMASHTIRISH:
+    Quyidagi <script> ichidagi  PHOTO = { desk, mob }  o'zgaruvchisiga o'z
+    real suratingiz URL/LINK'ini yozing (masalan  web/img/login-bg-desk.jpg ).
+      - desk = katta ekranlar (desktop, 1920px)
+      - mob  = mobil / tor ekranlar (1080px, kichikroq fayl — tez yuklanadi)
+    Rasm yuklanmasa yoki internet bo'lmasa — CSS gradient fon avtomatik
+    chiqadi (fallback), sahifa baribir mukammal ko'rinadi.
+
+  ISHGA TUSHIRISH:
+    - Server orqali: http://127.0.0.1:8080/login-redesign.html — "Kirish"
+      tugmasi REAL /api/auth/login ga ishlaydi (eski login tizimi).
+      Rol tabi hisob rolini tanlaydi: admin/instructor/student.
+  ==========================================================================
+-->
+<style>
+  :root{
+    --glass: rgba(255,255,255,.12);
+    --glass-line: rgba(255,255,255,.20);
+    --glass-input: rgba(255,255,255,.09);
+    --ink-glass: #fff;
+    --muted-glass: rgba(255,255,255,.78);
+    --glow: #6fd0ff;
+    --gold1:#FFD34D; --gold2:#F5A623; --gold-ink:#3B2A05;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; }
+  body{
+    font-family:"Segoe UI","Inter",system-ui,-apple-system,Roboto,Arial,sans-serif;
+    color:var(--ink-glass); overflow:hidden; background:#0a1322;
+  }
+
+  /* ---------- sahifa layering: fon + overlay + card ---------- */
+  .stage{ position:relative; height:100dvh; min-height:100vh; overflow:hidden;
+    display:flex; align-items:center; justify-content:center; padding:24px; }
+  .bg-parallax{ position:absolute; inset:-32px; z-index:0; will-change:transform; }
+  .bg-parallax img{ position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; object-position:center;
+    transform:scale(1.08);
+    animation:bgZoom 9s ease-out 1 forwards; }
+  @keyframes bgZoom{ to{ transform:scale(1); } }
+
+  /* placeholder/CSS-fallback (foto yuklanmasa) — tungi shahar gradienti */
+  .bg-fallback{ position:absolute; inset:0; display:none;
+    background:
+      radial-gradient(1100px 460px at 82% -8%, rgba(255,210,90,.26), transparent 62%),
+      radial-gradient(900px 420px at 6% 108%, rgba(90,150,255,.24), transparent 60%),
+      radial-gradient(640px 380px at 55% 55%, rgba(0,200,220,.13), transparent 70%),
+      linear-gradient(180deg,#060d1c 0%, #0a1a33 42%, #040912 100%); }
+  .stage.no-photo .bg-fallback{ display:block; }
+  .stage.no-photo .bg-parallax img{ display:none; }
+
+  /* qorong'i gradient overlay — forma o'qilishi uchun */
+  .overlay{ position:absolute; inset:0; z-index:1;
+    background: linear-gradient(180deg, rgba(10,20,40,.34) 0%,
+      rgba(10,20,40,.22) 42%, rgba(10,20,40,.62) 78%, rgba(10,20,40,.78) 100%); }
+
+  /* ---------- til almashish (yuqori o'ng, shaffof pill) ---------- */
+  .lang{ position:absolute; top:20px; right:20px; z-index:5;
+    display:flex; gap:5px; padding:4px; border-radius:99px;
+    background:var(--glass); border:1px solid var(--glass-line);
+    backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
+  .lang button{ border:0; background:transparent; color:rgba(255,255,255,.72);
+    font:inherit; font-size:12.5px; font-weight:600; letter-spacing:.04em;
+    padding:5px 13px; border-radius:99px; cursor:pointer; transition:.22s; }
+  .lang button:hover{ color:#fff; background:rgba(255,255,255,.14); }
+  .lang button.active{ background:linear-gradient(135deg,#fff,#e8f1ff);
+    color:var(--gold-ink); box-shadow:0 4px 14px rgba(0,0,0,.25); }
+
+  /* ---------- asosiy shisha karta ---------- */
+  .card{ position:relative; z-index:2; width:min(448px, 100%);
+    padding:38px 40px 32px; border-radius:24px;
+    background:linear-gradient(165deg, rgba(255,255,255,.155), rgba(255,255,255,.075));
+    border:1px solid rgba(255,255,255,.22);
+    backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%);
+    box-shadow:0 30px 80px rgba(4,10,22,.55), inset 0 1px 0 rgba(255,255,255,.28);
+    animation:cardIn .6s cubic-bezier(.16,1,.3,1) both; }
+  @keyframes cardIn{ from{ opacity:0; transform:translateY(26px) scale(.985); }
+    to{ opacity:1; transform:translateY(0) scale(1); } }
+  .card::before{ content:""; position:absolute; inset:0; border-radius:24px;
+    background:linear-gradient(150deg, rgba(255,255,255,.22), transparent 45%);
+    pointer-events:none; }
+
+  /* stagger — har bir element 80ms oralig'ida */
+  .stage .card .stagger{ opacity:0; animation:fadeUp .55s ease-out both;
+    animation-delay:calc(var(--i,0)*90ms + 120ms); }
+  @keyframes fadeUp{ from{ opacity:0; transform:translateY(14px); }
+    to{ opacity:1; transform:translateY(0); } }
+
+  /* ---------- sarlavha bloki ---------- */
+  .head{ text-align:center; margin-bottom:26px; }
+  .logo{ width:58px; height:58px; margin:0 auto 12px; border-radius:17px;
+    display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(140deg, #ffd34d, #f5a623);
+    box-shadow:0 10px 30px rgba(245,166,35,.42); }
+  .logo svg{ color:var(--gold-ink); }
+  .title{ font-size:25px; font-weight:800; letter-spacing:.14em; }
+  .welcome{ font-size:13.5px; color:var(--muted-glass); margin-top:5px; }
+
+  /* ---------- rol tablar ---------- */
+  .roles{ display:grid; grid-template-columns:repeat(3,1fr); gap:7px;
+    padding:5px; border-radius:15px; background:rgba(255,255,255,.09);
+    border:1px solid rgba(255,255,255,.14); margin:0 0 20px; }
+  .role-btn{ position:relative; border:0; background:transparent; color:rgba(255,255,255,.78);
+    font:inherit; font-size:13.5px; font-weight:600; padding:10px 4px;
+    border-radius:11px; cursor:pointer; transition:.25s;
+    display:flex; align-items:center; justify-content:center; gap:5px; }
+  .role-btn svg{ width:16px; height:16px; }
+  .role-btn:hover{ color:#fff; }
+  .role-btn.active{ color:var(--gold-ink);
+    background:linear-gradient(135deg,#ffffff,#dfeefc);
+    box-shadow:0 6px 18px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.35); }
+  .role-btn .ripple{ position:absolute; inset:0; border-radius:11px; overflow:hidden; }
+
+  /* ---------- input maydonlari ---------- */
+  .field{ position:relative; margin-bottom:16px; }
+  .field .ico{ position:absolute; left:15px; top:50%; transform:translateY(-50%);
+    width:18px; height:18px; color:rgba(255,255,255,.62); pointer-events:none; }
+  .field input{ width:100%; padding:14px 44px 14px 44px; font-size:15px; color:#fff;
+    background:var(--glass-input); border:1px solid rgba(255,255,255,.18);
+    border-radius:13px; outline:none; transition:.25s; }
+  .field input::placeholder{ color:rgba(255,255,255,.5); }
+  .field input:focus{ border-color:rgba(255,211,77,.75);
+    box-shadow:0 0 0 3px rgba(255,211,77,.22), 0 0 22px rgba(90,150,255,.18);
+    background:rgba(255,255,255,.14); }
+  .eye{ position:absolute; right:13px; top:50%; transform:translateY(-50%);
+    background:none; border:0; color:rgba(255,255,255,.62); cursor:pointer;
+    padding:5px; border-radius:8px; transition:.2s; }
+  .eye:hover{ color:#fff; }
+
+  /* ---------- qator: remember + forgot ---------- */
+  .row2{ display:flex; align-items:center; justify-content:space-between;
+    margin:2px 2px 22px; font-size:13.5px; }
+  .check{ display:flex; align-items:center; gap:8px; color:rgba(255,255,255,.85);
+    cursor:pointer; user-select:none; }
+  .check input{ position:absolute; opacity:0; pointer-events:none; }
+  .box{ width:18px; height:18px; border-radius:6px; flex:none;
+    border:1.6px solid rgba(255,255,255,.4); display:grid; place-items:center;
+    transition:.2s; background:rgba(255,255,255,.06); }
+  .box svg{ width:12px; height:12px; color:#fff; opacity:0; transform:scale(.4); transition:.2s; }
+  .check input:checked + .box{ background:linear-gradient(135deg,#ffd34d,#f5a623);
+    border-color:transparent; box-shadow:0 4px 12px rgba(245,166,35,.4); }
+  .check input:checked + .box svg{ opacity:1; transform:scale(1); }
+  .forgot{ color:var(--glow); text-decoration:none; font-weight:600; transition:.2s; }
+  .forgot:hover{ text-decoration:underline; color:#8cdfff; }
+
+  /* ---------- Kirish tugmasi: oltin gradient + shine ---------- */
+  .submit{ position:relative; overflow:hidden; width:100%; padding:15px;
+    border:0; border-radius:14px; cursor:pointer;
+    font:inherit; font-size:16px; font-weight:800; letter-spacing:.05em;
+    color:var(--gold-ink);
+    background:linear-gradient(135deg,#ffd34d 0%, #f8b62a 48%, #ee9c15 100%);
+    box-shadow:0 14px 34px rgba(238,156,21,.38), inset 0 1px 0 rgba(255,255,255,.5);
+    transition:transform .22s, box-shadow .22s, filter .22s; }
+  .submit:hover{ filter:brightness(1.07); transform:translateY(-2px);
+    box-shadow:0 20px 42px rgba(238,156,21,.46), inset 0 1px 0 rgba(255,255,255,.6); }
+  .submit:active{ transform:translateY(0) scale(.99); }
+  .submit::after{ content:""; position:absolute; top:0; left:-75%; width:55%; height:100%;
+    background:linear-gradient(115deg, transparent, rgba(255,255,255,.5), transparent);
+    transform:skewX(-22deg); transition:left .55s ease; }
+  .submit:hover::after{ left:120%; }
+
+  /* ---------- xato / toast ---------- */
+  .alert{ display:none; margin:-8px 0 16px; padding:11px 16px; border-radius:12px;
+    font-size:13.5px; font-weight:600; color:#ffd7d7;
+    background:rgba(220,60,70,.22); border:1px solid rgba(255,120,130,.4);
+    animation:fadeUp .3s ease-out; }
+  .alert.err{ display:block; }
+  .toast-host{ position:fixed; left:50%; bottom:28px; transform:translateX(-50%);
+    z-index:50; display:flex; flex-direction:column; gap:10px; }
+  .toast{ padding:13px 22px; border-radius:13px; font-size:14px; font-weight:600;
+    color:#fff; background:rgba(10,24,45,.92); border:1px solid rgba(255,255,255,.22);
+    box-shadow:0 14px 40px rgba(0,0,0,.4); backdrop-filter:blur(10px);
+    display:flex; align-items:center; gap:9px; animation:slideUp .35s ease-out; }
+  @keyframes slideUp{ from{ opacity:0; transform:translateY(18px); } to{ opacity:1; transform:none; } }
+  .toast .t-ico{ width:18px; height:18px; }
+  .toast.ok{ border-color:rgba(124,222,160,.45); }
+  .toast.ok .t-ico{ color:#7cdea0; }
+
+  /* ---------- mobil ---------- */
+  @media (max-width:520px){
+    .stage{ padding:16px; }
+    .card{ padding:30px 22px 26px; border-radius:20px; }
+    .lang{ top:14px; right:14px; }
+    .lang button{ padding:5px 11px; font-size:12px; }
+    .title{ font-size:22px; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{ animation:none !important; transition:none !important; }
+    .bg-parallax img{ transform:none; }
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+
+  <!-- FON: paradi (brizgina parallax uchun kattaroq) -->
+  <div class="bg-parallax" id="bgParallax">
+    <div class="bg-fallback"></div>
+    <picture>
+      <source media="(max-width:640px)" id="picMob" srcset="">
+      <img id="bgPhoto" src="" alt="Tungi shahar yo'li — avtomaktab" draggable="false">
+    </picture>
+  </div>
+  <div class="overlay"></div>
+
+  <!-- TIL ALMASHISH -->
+  <div class="lang" id="app-lang" data-lang="uz">
+    <button data-lang="uz" class="btn-lang active">UZ</button>
+    <button data-lang="ru" class="btn-lang">RU</button>
+    <button data-lang="en" class="btn-lang">EN</button>
+  </div>
+
+  <!-- MARKAZIY SHISHA KARTA -->
+  <form class="card" id="login-form" novalidate>
+    <div class="head stagger" style="--i:0">
+      <div class="logo">
+        <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 10.5h2l2-5h10l2 5h2a1 1 0 0 1 1 1v4h-2.5M3 15.5v-2M20 16.5a1.2 1.2 0 0 1-2.4 0M6.4 16.5a1.2 1.2 0 0 1-2.4 0M3 11.5h18"/>
+          <circle cx="6.8" cy="16.8" r="1.3" fill="currentColor" stroke="none"/>
+          <circle cx="17.2" cy="16.8" r="1.3" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+      <h1 class="title" id="f-brand">AVTOMAKTAB</h1>
+      <p class="welcome" id="f-welcome">Xush kelibsiz! Hisobingizga kiring.</p>
+    </div>
+
+    <div class="roles stagger" style="--i:1">
+      <button type="button" class="role-btn active" data-role="student">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.5 8 12 13l9.5-5L12 3Z"/><path d="M6 10.5v4c0 1.5 2.7 2.8 6 2.8s6-1.3 6-2.8v-4"/><path d="M21.5 8v4.5"/></svg>
+        <span data-i18n="talaba">Talaba</span>
+      </button>
+      <button type="button" class="role-btn" data-role="instructor">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3.5" width="16" height="17" rx="2.5"/><path d="M8.5 8h7M8.5 12h5"/></svg>
+        <span data-i18n="instruktor">Instruktor</span>
+      </button>
+      <button type="button" class="role-btn" data-role="admin">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 2.8v5.5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V5.8L12 3z"/><path d="M8.8 12l2.2 2.2 4.2-4.4"/></svg>
+        <span data-i18n="admin">Admin</span>
+      </button>
+    </div>
+
+    <div class="field stagger" style="--i:2">
+      <label class="ico" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+      </label>
+      <input type="text" id="login" autocomplete="username" data-i18n-ph="login" placeholder="Tizimga kirish nomi (Login)">
+    </div>
+
+    <div class="field stagger" style="--i:3">
+      <label class="ico" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+      </label>
+      <input type="password" id="pass" autocomplete="current-password" data-i18n-ph="parol" placeholder="Parol">
+      <button type="button" class="eye" id="eye-btn" title="Ko'rsatish/yashirish" aria-label="Parolni ko'rsatish">
+        <svg xmlns="http://www.w3.org/2000/svg" id="eye-ico" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>
+      </button>
+    </div>
+
+    <div class="row2 stagger" style="--i:4">
+      <label class="check">
+        <input type="checkbox" id="remember">
+        <span class="box"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg></span>
+        <span data-i18n="eslab">Meni eslab qolish</span>
+      </label>
+      <a href="#" class="forgot" data-i18n="forgot">Parolni unutdingizmi?</a>
+    </div>
+
+    <button type="submit" class="submit stagger" style="--i:5" data-i18n="kirish">Kirish</button>
+    <div class="alert" id="alert"></div>
+  </form>
+
+  <div class="toast-host" id="toast-host"></div>
+</div>
+
+<script>
+  /* ========================================================================
+     FOTO — KONFIGURATSIYA (o'z rasmingizni shu yerga yozing)
+     ========================================================================
+     PHOTO.desk — desktop/katta ekranlar (1920px)
+     PHOTO.mob  — mobil / tor ekranlar (1080px, kichikroq fayl — tez yuklanadi)
+     Masalan:  desk:"web/img/login-bg-desk.jpg",  mob:"web/img/login-bg-mob.jpg"
+     2006-yil holatiga ko'ra qolgan default — tungi shahar yo'li (light trails).
+  ======================================================================== */
+  const PHOTO = {
+    desk: "https://images.unsplash.com/photo-1494526585095-c41746248156?q=80&w=1920&auto=format&fit=crop",
+    mob:  "https://images.unsplash.com/photo-1494526585095-c41746248156?q=70&w=1080&auto=format&fit=crop"
+  };
+
+  /* ======================================================================
+     TIL (UZ/RU/EN) — kichik lug'at. Kalitlar data-i18n bilan bog'lanadi.
+     ====================================================================== */
+  const STR = {
+    uz: { talaba:"Talaba", instruktor:"Instruktor", admin:"Admin",
+          login:"Tizimga kirish nomi (Login)", parol:"Parol",
+          eslab:"Meni eslab qolish", forgot:"Parolni unutdingizmi?", kirish:"Kirish",
+          brand:"AVTOMAKTAB", welcome:"Xush kelibsiz! Hisobingizga kiring." },
+    ru: { talaba:"Ученик", instruktor:"Инструктор", admin:"Админ",
+          login:"Имя пользователя (Логин)", parol:"Пароль",
+          eslab:"Запомнить меня", forgot:"Забыли пароль?", kirish:"Войти",
+          brand:"АВТОШКОЛА", welcome:"Добро пожаловать! Войдите в аккаунт." },
+    en: { talaba:"Student", instruktor:"Instructor", admin:"Admin",
+          login:"Username (Login)", parol:"Password",
+          eslab:"Remember me", forgot:"Forgot password?", kirish:"Sign in",
+          brand:"DRIVING SCHOOL", welcome:"Welcome! Sign in to your account." }
+  };
+
+  const $ = (s, p=document) => p.querySelector(s);
+
+  /* ---------- phonni tiklash ---------- */
+  function setPhoto(){
+    const desk = PHOTO.desk, mob = PHOTO.mob || desk;
+    $("#picMob").srcset = mob;
+    $("#bgPhoto").src = desk;
+    $("#bgPhoto").onerror = () => $("#stage").classList.add("no-photo");
+  }
+  setPhoto();
+
+  /* ---------- parallax (faslli siljish 10-15px) ---------- */
+  const par = $("#bgParallax"), max = 15;
+  window.addEventListener("pointermove", e => {
+    const x = (e.clientX / innerWidth - .5), y = (e.clientY / innerHeight - .5);
+    par.style.transform = `translate(${x * max}px, ${y * max}px)`;
+  });
+
+  /* ---------- til almashish ---------- */
+  function applyLang(l){
+    const d = STR[l] || STR.uz;
+    document.querySelectorAll("[data-i18n]").forEach(n => n.textContent = d[n.dataset.i18n] || n.textContent);
+    document.querySelectorAll("[data-i18n-ph]").forEach(n => n.placeholder = d[n.dataset.i18nPh] || n.placeholder);
+    document.querySelectorAll(".btn-lang").forEach(b =>
+      b.classList.toggle("active", b.dataset.lang === l));
+    $("#app-lang").dataset.lang = l;
+  }
+  $("#app-lang").addEventListener("click", e => {
+    const b = e.target.closest(".btn-lang"); if (!b) return;
+    applyLang(b.dataset.lang);
+  });
+
+  /* ---------- rol tablar ---------- */
+  const roles = $("#login-form").querySelectorAll(".role-btn");
+  roles.forEach(b => b.addEventListener("click", () => {
+    roles.forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+  }));
+
+  /* ---------- parol ko'rsatish ---------- */
+  $("#eye-btn").addEventListener("click", () => {
+    const p = $("#pass"), i = $("#eye-ico");
+    const show = p.type === "password";
+    p.type = show ? "text" : "password";
+    i.innerHTML = show
+      ? '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><path d="M4 4l16 16"/>'
+      : '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/>';
+  });
+
+  /* ---------- demo kirish ---------- */
+  function toast(msg, type){
+    const t = document.createElement("div");
+    t.className = "toast " + (type || "");
+    t.innerHTML = `<svg class="t-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg><span>${msg}</span>`;
+    $("#toast-host").appendChild(t);
+    setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .4s"; }, 2600);
+    setTimeout(() => t.remove(), 3100);
+  }
+  $("#login-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const act = $("#login-form").querySelector(".role-btn.active");
+    const roleName = {"student":"Talaba","instructor":"Instruktor","admin":"Admin"}[act.dataset.role];
+    const log = $("#login").value.trim(), pass = $("#pass").value;
+    if (!log || !pass){ $("#alert").textContent = "Login va parolni kiriting!"; $("#alert").classList.add("err");
+      setTimeout(() => $("#alert").classList.remove("err"), 2600); return; }
+    $("#alert").classList.remove("err");
+    const btn = e.submitter || $("#login-form").querySelector("button[type=submit]");
+    const oldHTML = btn.innerHTML; btn.disabled = true; btn.classList.add("busy");
+    try {
+      const r = await fetch("/api/auth/login", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-Requested-With": "Avtomaktab" },
+        body: JSON.stringify({ login: log, password: pass, remember: $("#remember")?.checked || false, role: act.dataset.role })
+      });
+      let d = {}; try { d = r.ok ? {} : await r.json(); } catch (_) {}
+      if (!r.ok) {
+        const code = (d && d.error) || "err.server_error";
+        const m = {
+          "auth.wrong_credentials": "Login yoki parol noto'g'ri!",
+          "auth.user_blocked": "Hisob bloklangan. Admin bilan bog'laning",
+          "auth.wrong_role": "Bu hisob uchun rol noto'g'ri tanlandi",
+          "auth.rate_limited": "Juda ko'p urinish. Bir ozdan so'ng qayta urinib ko'ring",
+          "err.server_error": "Serverda xatolik. Qayta urinib ko'ring"
+        };
+        throw new Error(m[code] || code);
+      }
+      btn.disabled = false; btn.classList.remove("busy"); btn.innerHTML = oldHTML;
+      toast(`Xush kelibsiz, ${roleName}! Ilovaga o'tilmoqda…`);
+      setTimeout(() => { location.href = "/"; }, 700);
+    } catch (err) {
+      btn.disabled = false; btn.classList.remove("busy"); btn.innerHTML = oldHTML;
+      $("#alert").textContent = err.message || "Serverga ulanishda xatolik";
+      $("#alert").classList.add("err");
+      setTimeout(() => $("#alert").classList.remove("err"), 3400);
+    }
+  });
+
+  /* ---------- boshlang'ich til ---------- */
+  applyLang("uz");
+</script>
+</body>
+</html>

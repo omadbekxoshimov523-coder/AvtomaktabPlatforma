@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>AVTOMAKTAB — Amaliy mashg'ulotlar platformasi</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none' stroke='%23C9A227' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='16' y='34' width='68' height='30' rx='8'/%3E%3Cpath d='M30 46l4-12h32l4 12M42 62a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM58 62a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/styles.css">
+<script>
+/* XATO YIG'UVCHILAR — <head>da, barcha skriptlardan oldin.
+   Har qanday real JS xatosi va yuklanmagan fayl shu yerda qayd etiladi,
+   keyin diagnostika ekranida ko'rsatiladi. */
+window.__dErr = [];
+window.addEventListener("error", function (e) {
+  try {
+    if (e && e.message !== undefined) {
+      var src = e.filename || (e.target && (e.target.src || e.target.href)) || "";
+      window.__dErr.push("JS: " + e.message + " — " + src + ":" + (e.lineno || ""));
+    } else if (e && e.target) {
+      window.__dErr.push("RES: " + (e.target.src || e.target.href || e.target.nodeName) + " yuklanmadi");
+    }
+  } catch (x) {}
+}, true);
+window.addEventListener("unhandledrejection", function (e) {
+  try {
+    var r = e.reason;
+    window.__dErr.push("PROMISE: " + (r && r.message ? r.message : String(r)));
+  } catch (x) {}
+});
+</script>
+</head>
+<body>
+
+<script>
+/* UMUMIY DIAGNOSTIKA — sahifa to'g'ri ochilmaganida (file://, CSS yoki JS yuklanmasa)
+   oq/bo'sh ekran o'rniga aniq xato matnini ko'rsatadi. To'g'ri ochilganda hech narsa qilmaydi. */
+(function () {
+  var isFile = location.protocol === "file:";
+  var delay = isFile ? 300 : 2400;
+  function show(html) {
+    var tech = "";
+    try {
+      var errs = (window.__dErr && window.__dErr.length) ? window.__dErr.join("<br>") : "hech qanday JS xatosi ushlanmadi";
+      var probes = [
+        "t=" + typeof t, "setLang=" + typeof setLang, "DICT=" + typeof DICT,
+        "API=" + typeof API, "UI=" + typeof UI, "App=" + typeof App
+      ].join("&nbsp; ");
+      tech = '<div style="margin-top:18px;padding:14px;border:1px solid rgba(255,255,255,.28);' +
+        'border-radius:12px;background:rgba(255,255,255,.08);text-align:left;font-size:12.5px;' +
+        'line-height:1.7;color:#dbe6f5;word-break:break-all">' +
+        '<b style="color:#ffd166">REAL XATOLAR:</b><br>' + errs + '<br><br>' +
+        '<b>Modullar:</b> ' + probes + '<br>' +
+        '<b>Brauzer:</b> ' + (navigator.userAgent || "").slice(0, 90) + '</div>';
+    } catch (e) {}
+    var d = document.createElement("div");
+    d.style.cssText = "position:fixed;inset:0;z-index:999999;background:#0d1830;color:#fff;" +
+      "font-family:Segoe UI,Arial,sans-serif;display:flex;align-items:center;justify-content:center;" +
+      "padding:28px;overflow:auto;text-align:center";
+    d.innerHTML = '<div style="max-width:680px">' +
+      '<div style="font-size:42px;margin-bottom:12px">&#128663;</div>' +
+      '<h1 style="font-size:21px;margin:0 0 14px">AVTOMAKTAB — xato aniqlandi</h1>' +
+      '<p style="font-size:14.5px;line-height:1.8;color:#c9d6ea">' + html + '</p>' +
+      tech +
+      '<p style="margin-top:18px;font-size:12.5px;color:#8fa3c8">Bu ekranni skrinshot qilib yuboring — real xatolar matni orqali sababni aniq topamiz.</p></div>';
+    document.body.appendChild(d);
+  }
+  setTimeout(function () {
+    try {
+      if (isFile) {
+        document.body.innerHTML = "";
+        show("<b>Fayl to'g'ridan-to'g'ri ochilgan (file://).</b><br>Faylni ikki marta bosish o'rniga " +
+          "brauzer manzil qatoriga quyidagini yozing:<br><b style='font-size:20px;color:#ffd166;display:inline-block;margin-top:10px'>http://127.0.0.1:8080/</b>");
+        return;
+      }
+      var scr = document.getElementById("login-screen");
+      var shell = document.getElementById("app-shell");
+      var loginHidden = scr && scr.className && scr.className.indexOf("hidden") !== -1;
+      var shellHidden = !shell || (shell.className || "").indexOf("hidden") !== -1;
+      /* 1) Hech qaysi ekran ko'rinmayapti — JS ishga tushmagan bo'lishi mumkin.
+            Izoh: foydalanuvchi amaldagi sessiya bilan kirgan bo'lsa, dastur to'g'ridan-
+            to'g'ri ilova qobig'ini ko'rsatadi va login yashirin qoladi — bu XATO EMAS.
+            Shuning uchun faqat ikkala ekran ham yashirin bo'lsa xato deymiz. */
+      if (loginHidden && shellHidden) {
+        setTimeout(function () {
+          var s2 = document.getElementById("app-shell");
+          var stillHidden = !s2 || (s2.className || "").indexOf("hidden") !== -1;
+          if (!stillHidden) return; // orada ilova ochilib qoldi — xato emas
+          show("<b>Dastur (JS) ishga tushmadi.</b><br>Server.py ni qayta ishga tushirib ko'ring (RUN.bat)." +
+            "<br>Hozirgi manzil: <b>" + location.href + "</b>");
+        }, 1500);
+        return;
+      }
+      /* 2) CSS haqiqatan yuklanganmi — to'g'ridan-to'g'ri tekshirish */
+      function checkCssFail() {
+        show("<b>Stil fayl (CSS) yuklanmadi.</b><br>Sahifa server orqali emas, boshqa manzildan ochilgan bo'lishi mumkin." +
+          "<br>Hozirgi manzil: <b>" + location.href + "</b>&nbsp; | &nbsp;Protokol: <b>" + location.protocol + "</b>" +
+          "<br>To'g'ri manzil: <br><b style='font-size:20px;color:#ffd166;display:inline-block;margin-top:10px'>http://127.0.0.1:8080/</b>");
+      }
+      try {
+        fetch("/css/styles.css", { cache: "no-store" }).then(function (r) {
+          var ct = "";
+          try { ct = String(r.headers.get("content-type") || ""); } catch (e) {}
+          if (!r.ok || ct.indexOf("text/css") === -1) checkCssFail();
+        }).catch(function () { checkCssFail(); });
+      } catch (e) {
+        try { if (document.styleSheets.length === 0) checkCssFail(); } catch (e2) {}
+      }
+    } catch (e) {}
+  }, delay);
+})();
+</script>
+
+<!-- ============ LOGIN SAHIFASI (realistik foto fon + glass forma) ============ -->
+<div id="login-screen" class="login-screen hidden">
+
+  <!-- To'liq ekran fotosurat foni -->
+  <div class="login-bg" id="login-bg" aria-hidden="true">
+    <picture>
+      <source media="(max-width: 760px)" srcset="/img/login-bg-mobile.jpg">
+      <img src="/img/login-bg.jpg" alt="">
+    </picture>
+    <div class="login-bg-veil"></div>
+  </div>
+
+  <!-- Til tanlash (shaffof pill-tugmalar) -->
+  <div class="login-lang" id="login-lang">
+    <button data-lang="uz" class="active">O'zbek</button>
+    <button data-lang="ru">Русский</button>
+    <button data-lang="en">English</button>
+  </div>
+
+  <!-- Markaziy glassmorhpism forma -->
+  <div class="login-card" id="login-card">
+    <div class="lc-head">
+      <div class="lc-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 11l1.6-4h10.8L19 11"/>
+          <path d="M4 11h16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3z"/>
+          <circle cx="8" cy="16" r="1"/>
+          <circle cx="16" cy="16" r="1"/>
+          <path d="M7 11v-2M17 11v-2"/>
+        </svg>
+      </div>
+      <h1 class="lc-title">AVTO<span>MAKTAB</span></h1>
+      <p class="lc-welcome" data-i18n="auth.welcome_back">Xush kelibsiz!</p>
+    </div>
+
+    <div class="login-alert hidden" id="login-alert" role="alert"></div>
+
+    <form id="login-form" autocomplete="off" novalidate>
+      <div class="fl-field" id="fld-login">
+        <input type="text" id="login-username" name="login" placeholder=" " autocomplete="username" required>
+        <label for="login-username" data-i18n="auth.login">Login</label>
+        <svg class="fl-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="8" r="4"/>
+          <path d="M4.5 20c.8-3.6 3.9-5.4 7.5-5.4s6.7 1.8 7.5 5.4"/>
+        </svg>
+        <p class="field-err" id="err-login"></p>
+      </div>
+
+      <div class="fl-field" id="fld-password">
+        <input type="password" id="login-password" name="password" placeholder=" " autocomplete="current-password" required>
+        <label for="login-password" data-i18n="auth.password">Parol</label>
+        <svg class="fl-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/>
+          <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>
+          <circle cx="12" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>
+        </svg>
+        <button type="button" class="eye-btn" id="eye-btn" aria-label="Parolni ko'rsatish">
+          <svg class="ico-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/>
+            <circle cx="12" cy="12" r="2.8"/>
+          </svg>
+          <svg class="ico-eye-off hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3l18 18"/>
+            <path d="M10.6 5.2A10.6 10.6 0 0 1 12 5c6.4 0 10 6 10 6a17.6 17.6 0 0 1-2.4 3.1"/>
+            <path d="M6.6 6.7A17 17 0 0 0 2 11s3.6 6 10 6a10.4 10.4 0 0 0 4.2-.9"/>
+            <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>
+          </svg>
+        </button>
+        <p class="field-err" id="err-password"></p>
+      </div>
+
+      <div class="fl-field hidden" id="fld-otp">
+        <input type="text" id="login-otp" name="otp" placeholder=" " inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+        <label for="login-otp" data-i18n="auth.otp">2FA kod</label>
+        <p class="field-err" id="err-otp"></p>
+      </div>
+
+      <!-- Rol tanlash: hech biri oldindan tanlanmagan — rol tanlanmasa, tizim hisobni avtomatik aniqlaydi -->
+      <div class="role-switch" role="group" data-i18n-attr="aria-label:auth.role_switch">
+        <button type="button" class="role-btn" data-role="student" aria-pressed="false">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.5 8 12 13l9.5-5L12 3Z"/><path d="M6 10.5v4c0 1.5 2.7 2.8 6 2.8s6-1.3 6-2.8v-4"/><path d="M21.5 8v4.5"/></svg>
+          <span data-i18n="auth.role_student">Talaba</span>
+        </button>
+        <button type="button" class="role-btn" data-role="instructor" aria-pressed="false">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3.5" width="16" height="17" rx="2.5"/><path d="M8.5 8h7M8.5 12h5"/></svg>
+          <span data-i18n="auth.role_instructor">Instruktor</span>
+        </button>
+        <button type="button" class="role-btn" data-role="admin" aria-pressed="false">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 2.8v5.5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V5.8L12 3z"/><path d="M8.8 12l2.2 2.2 4.2-4.4"/></svg>
+          <span data-i18n="auth.role_admin">Admin</span>
+        </button>
+      </div>
+
+      <div class="login-opt">
+        <label class="login-remember" for="login-remember">
+          <button type="button" id="login-remember" class="toggle" role="switch" aria-checked="false"><span class="knob"></span></button>
+          <span data-i18n="auth.remember">Meni eslab qolish</span>
+        </label>
+        <button type="button" class="link-btn" id="forgot-btn" data-i18n="auth.forgot">Parolni unutdingizmi?</button>
+      </div>
+
+      <button type="submit" class="btn-login" id="login-submit">
+        <span class="btn-login-label" data-i18n="auth.signin">Kirish</span>
+        <svg class="btn-login-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14M13 6l6 6-6 6"/>
+        </svg>
+        <span class="btn-login-spinner"></span>
+      </button>
+    </form>
+
+    <!-- Parolni tiklash -->
+    <div id="reset-box" class="hidden">
+      <h3 class="rb-title" data-i18n="auth.reset_password">Parolni tiklash</h3>
+      <div id="rst-step1">
+        <div class="fl-field">
+          <input type="text" id="reset-login" placeholder=" " autocomplete="off">
+          <label for="reset-login" data-i18n="auth.login">Login</label>
+          <p class="rst-hint" data-i18n="auth.reset_hint">Tasdiqlash kodi SMS orqali yuboriladi. Hozircha kodni administrator beradi.</p>
+        </div>
+        <button type="button" class="btn-login" id="reset-send" data-i18n="common.send">Yuborish</button>
+      </div>
+      <div id="rst-step2" class="hidden">
+        <div class="fl-field">
+          <input type="text" id="reset-code" placeholder=" " autocomplete="off">
+          <label for="reset-code" data-i18n="auth.reset_token">Tiklash kodi</label>
+        </div>
+        <div class="fl-field">
+          <input type="password" id="reset-pass" placeholder=" " autocomplete="new-password">
+          <label for="reset-pass" data-i18n="auth.new_password">Yangi parol</label>
+        </div>
+        <div class="fl-field">
+          <input type="password" id="reset-pass2" placeholder=" " autocomplete="new-password">
+          <label for="reset-pass2" data-i18n="auth.confirm_password">Parolni tasdiqlash</label>
+        </div>
+        <button type="button" class="btn-login" id="reset-apply" data-i18n="auth.save">Saqlash</button>
+      </div>
+      <button type="button" class="btn-ghost-block" id="reset-back" data-i18n="common.back">Orqaga</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ APP QOBIG'I ============ -->
+<div id="app-shell" class="hidden">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-logo" title="Avtomaktab"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="9" rx="2.2"/><path d="M6 11l1.6-4.2h8.8L18 11M10 15.4a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2zM14 15.4a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2z"/></svg></div>
+      <div class="sidebar-name"><span class="brand-a">AVTO</span><span class="brand-b">MAKTAB</span></div>
+    </div>
+    <nav class="sidebar-nav" id="sidebar-nav"></nav>
+    <div class="sidebar-foot">
+      <div class="sidebar-user" id="sidebar-user"></div>
+    </div>
+  </aside>
+  <div class="main-wrap">
+    <header class="topbar">
+      <button class="icon-btn burger" id="burger" title="Menyu"><svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="topbar-title" id="topbar-title"></div>
+      <div class="topbar-right">
+        <div class="lang-switch small" id="app-lang-switch">
+          <button data-lang="uz">O'zbek</button>
+          <button data-lang="ru">Русский</button>
+          <button data-lang="en">English</button>
+        </div>
+        <div class="topbar-user" id="topbar-user"></div>
+      </div>
+    </header>
+    <main class="content" id="view"></main>
+  </div>
+</div>
+
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/ui.js"></script>
+<script src="/js/views-admin.js"></script>
+<script src="/js/views-instructor.js"></script>
+<script src="/js/views-student.js"></script>
+<script src="/js/shared.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
