@@ -1,0 +1,54 @@
+name: Site (GitHub Pages)
+
+# site/ papkasidagi statik landing sahifani github.io'ga joylashtiradi.
+# Diqqat: bu FAQAT ko'rsatish sahifasi. Platformaning o'zi (server.py —
+# Python http.server + sqlite3) statik hostingda ishlamaydi, chunki
+# frontend /api/* so'rovlarini serverga yuboradi (web/js/api.js).
+# Haqiqiy platforma serverga (VPS) joylashtiriladi.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodni olish
+        uses: actions/checkout@v4
+
+      - name: Pages'ni sozlash
+        uses: actions/configure-pages@v5
+
+      - name: Sayt fayllarini tayyorlash
+        run: |
+          mkdir -p _site
+          cp site/index.html _site/index.html
+          echo "Qayd etildi: $(date -u +%FT%TZ)" > _site/.build-info
+          ls -la _site
+
+      - name: Artifact'ni yuklash
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: GitHub Pages'ga joylashtirish
+        id: deployment
+        uses: actions/deploy-pages@v4
