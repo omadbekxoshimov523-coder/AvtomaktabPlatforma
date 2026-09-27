@@ -134,7 +134,7 @@ multi-filial va kengaytirish uchun ajratilgan modullar.
 
 ```bash
 # 1) Kodni serverga ko'chirish (yoki git clone)
-git clone https://github.com/<siz>/AvtomaktabPlatforma.git
+git clone https://github.com/omadbekxoshimov523-coder/AvtomaktabPlatforma.git
 cd AvtomaktabPlatforma
 
 # 2) .env yaratish va to'ldirish
