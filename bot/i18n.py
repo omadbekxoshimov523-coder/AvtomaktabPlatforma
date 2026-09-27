@@ -277,9 +277,14 @@ LANG_NAMES = {
 }
 
 
-def t(lang: str, key: str, **kw) -> str:
-    """Tarjima olish: t('uz','saved', id=1, ...)"""
-    table = STRINGS.get(lang) or STRINGS["uz"]
+def t(code: str, key: str, **kw) -> str:
+    """Tarjima olish: t('uz', 'saved', id=1, ...)
+
+    DIQQAT: birinchi parametr `code` deb nomlangan (emas `lang`) — aks holda
+    `t(lang, "lang_saved", lang="🇺🇿 O'zbekcha")` kabi chaqiruvlarda
+    "got multiple values for argument" xatosi chiqardi.
+    """
+    table = STRINGS.get(code) or STRINGS["uz"]
     s = table.get(key) or STRINGS["uz"].get(key) or key
     if kw:
         for k, v in kw.items():
