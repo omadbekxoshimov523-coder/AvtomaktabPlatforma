@@ -37,11 +37,30 @@ services:
     networks:
       - avtomaktab-net
 
+  # ---- Telegram bot (aiogram 3) ----
+  # .env da BOT_TOKEN va BOT_ADMINS bo'lishi shart (qarang: .env.example)
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    container_name: avtomaktab-bot
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN .env da ko'rsatilishi shart}
+      BOT_ADMINS: ${BOT_ADMINS:-}
+      BOT_DEFAULT_LANG: ${BOT_DEFAULT_LANG:-uz}
+    volumes:
+      - botdata:/app/data
+    networks:
+      - avtomaktab-net
+
 networks:
   avtomaktab-net:
     driver: bridge
 
 volumes:
+  botdata:
+    # Bot ma'lumotlar bazasi (bot.db) + avtomaktablar ro'yxati saqlanadi
   pgdata:
     # Named volume — container'ni o'chirsangiz ham ma'lumot saqlanib qoladi.
     # Zaxiralash (bayt-bayt nusxa):  docker run --rm -v avtomaktabplatforma_pgdata:/vol -v ${PWD}:/backup alpine tar czf /backup/pgdata-$(date +%F).tar.gz -C /vol .

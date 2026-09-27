@@ -1,0 +1,1 @@
+"""AVTOMAKTAB Telegram boti."""

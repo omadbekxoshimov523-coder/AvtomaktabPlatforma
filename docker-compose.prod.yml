@@ -34,6 +34,24 @@ services:
       retries: 3
       start_period: 10s
 
+# ---- Telegram bot (aiogram 3) ----
+  # .env da BOT_TOKEN va BOT_ADMINS kerak; bot.db volumesda saqlanadi
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    image: avtomaktab-bot:latest
+    container_name: avtomaktab-bot
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN .env da ko'rsatilishi shart}
+      BOT_ADMINS: ${BOT_ADMINS:-}
+      BOT_DEFAULT_LANG: ${BOT_DEFAULT_LANG:-uz}
+    volumes:
+      - bot-data:/app/data
+
 volumes:
   avtomaktab-data:
     # named volume — container/instansiya qayta qurilsa ham ma'lumot saqlanadi
+  bot-data:
+    # bot.db (avtomaktablar ro'yxati, statistika) — xuddi shunday saqlanadi

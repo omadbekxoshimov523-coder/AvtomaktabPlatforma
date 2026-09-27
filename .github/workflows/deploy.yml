@@ -50,6 +50,9 @@ jobs:
       - name: i18n kalit tekshiruvi (informatsion)
         run: python tools_qa_i18n.py || echo "i18n ogohlantirishlar bor — bloklamaydi"
 
+      - name: Bot sintaksis tekshiruvi
+        run: python -m compileall -q bot
+
   # ------------------------------------------------------------- 2) BUILD
   build:
     name: Docker image qurish
@@ -60,6 +63,9 @@ jobs:
 
       - name: Docker image qurish
         run: docker build -t avtomaktab:ci .
+
+      - name: Bot image qurish
+        run: docker build -f bot/Dockerfile -t avtomaktab-bot:ci .
 
       - name: Container sog'liq tekshiruvi (smoke)
         run: |
@@ -99,6 +105,12 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
             echo "--- eski imagelarni tozalash ---"
             docker image prune -f || true
+            echo "--- natijani tekshirish ---"
+            sleep 5
+            docker compose -f docker-compose.prod.yml ps
+            curl -fsS "http://127.0.0.1:${APP_PORT:-8080}/api/health" && echo "" \
+              || echo "OGOHLANTIRISH: app health javobi bermadi"
+            docker compose -f docker-compose.prod.yml logs --tail=20 bot || true
             echo "--- deploy tugadi ---"
 
   # ------------------------------------------------------------- 4) XABAR

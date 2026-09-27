@@ -61,6 +61,13 @@ AvtomaktabPlatforma/
 │       ├── views-admin.js, views-instructor.js, views-student.js
 │       ├── shared.js, ui.js, api.js
 ├── data/                  # avtomaktab.db + backups/ (avtomatik yaratiladi)
+├── bot/                   # 🤖 Telegram bot (aiogram 3)
+│   ├── main.py            # botni ishga tushirish
+│   ├── config.py          # .env dan sozlash (BOT_TOKEN, BOT_ADMINS)
+│   ├── db.py              # SQLite: avtomaktablar, users, clicks
+│   ├── i18n.py            # UZ / RU / EN tarjimalar
+│   ├── handlers/          # start, schools, admin paneli
+│   └── Dockerfile         # bot uchun image
 └── tests/test_api.py      # avtomatik testlar (login, users, cars, sessions, security)
 ```
 
@@ -217,3 +224,58 @@ loyiha bitta yengil jarayon + SQLite; baza volume'da saqlanadi, zaxira va
 cron bizning skript bilan ishlaydi, narx barqaror va to'liq nazorat bor.
 Railway/Render yechimi ham ishlaydi, lekin SQLite uchun doimiy disk pullik
 tarifda bo'ladi va zaxira/cron ustidan nazorat kamroq.
+
+---
+
+# 🤖 Telegram bot (avtomaktablar katalogi)
+
+Foydalanuvchi brauzerda manzil qidirmaydi — `@<bot_username>` ochib,
+avtomaktab tugmasini bosadi va shu platformaning login sahifasiga o'tadi.
+
+## Ishlash printsipi
+
+1. `/start` → salomlashuv + **inline tugmalar** (faol avtomaktablar ro'yxati)
+2. Avtomaktab tugmasi bosiladi → **kartochka** (nom, hudud, manzil, telefon)
+   + **«🔗 Platformaga kirish»** tugmasi (login URL)
+3. Telegram profil tili bo'yicha avtomatik UZ/RU/EN; qo'lda `/lang`
+4. **Deep link**: `t.me/<bot>?start=<slug>` — QR kod orqali to'g'ridan-to'g'ri
+   shu avtomaktab ochiladi (admin `/qr` bilan QR yasaydi)
+5. «Oxirgi tanlov» eslab qolinadi — keyingi safar tezkor tugma chiqadi
+6. «🛠️ Muammo xabar berish» — adminga avtomatik xabar
+7. Admin `/stats` — qaysi avtomaktab necha marta tanlanganini ko'radi
+
+## Sozlash (.env)
+
+```env
+BOT_TOKEN=123456789:AA...          # @BotFather → /newbot
+BOT_ADMINS=123456789,987654321     # admin Telegram user_id (t.me/userinfobot)
+BOT_DEFAULT_LANG=uz                # uz | ru | en
+```
+
+Lokal sinash:
+```bash
+py -m pip install -r bot/requirements.txt
+py -m bot.main
+```
+Deploy (VPS, asosiy platforma bilan birga):
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml logs -f bot
+```
+
+## Admin buyruqlari (faqat BOT_ADMINS dagi foydalanuvchilar)
+
+| Buyruq | Vazifasi |
+|---|---|
+| `/add_school` | yangi avtomaktab qo'shish (bosqichma-bosqich) |
+| `/list_schools` | barcha avtomaktablar ro'yxati (faol/o'chirilgan) |
+| `/edit_school` | nomi/URL/manzil/telefon/hudud/logotipni tahrirlash |
+| `/set_status` | faollikni o'zgartirish (vaqtincha yashirish) |
+| `/delete_school` | butunlay o'chirish |
+| `/stats` | bosishlar statistikasi |
+| `/qr <id|slug>` | QR-kod (deep link: `t.me/<bot>?start=<slug>`) |
+| `/cancel` | joriy amalni bekor qilish |
+
+**Ma'lumotlar bazasi:** `bot.db` (SQLite, alohida volume `bot-data`).
+Jadval `avtomaktablar`: `id, nomi, slug, login_url, logotip_url, manzil,
+telefon, tuman, faol` + `users`, `clicks` (statistika).
