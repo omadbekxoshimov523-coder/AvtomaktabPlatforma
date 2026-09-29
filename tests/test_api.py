@@ -39,7 +39,7 @@ class Client:
         self.jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
 
-    def req(self, method, path, body=None):
+    def req(self, method, path, body=None, cookie=None):
         data = None
         headers = {}
         if body is not None:
@@ -47,6 +47,10 @@ class Client:
             headers["Content-Type"] = "application/json"
         if method in ("POST", "PUT", "DELETE"):
             headers["X-Requested-With"] = "Avtomaktab"
+        # Chiqishdan keyin "eski token saqlab qolinsa ham ishlamaydi" —
+        # buni tekshirish uchun cookie'ni qo'lda yuborish imkoniyati.
+        if cookie:
+            headers["Cookie"] = "sid=" + cookie
         req = urllib.request.Request(f"http://{HOST}:{PORT}{path}", data=data, headers=headers, method=method)
         try:
             with self.opener.open(req, timeout=15) as resp:
@@ -188,6 +192,122 @@ class TestAuthAndUsers(Base):
         c = Client()
         st, r = c.post("/api/user/register", {"first_name": "X"})
         self.assertEqual(st, 404)  # bunday endpoint yo'q
+
+
+class TestLogoutSession(Base):
+    """Chiqish (logout).
+
+    Talablar: sessiya server tomonida ham yopilishi (faqat frontend tokenni
+    "unutib qo'yishi" yetarli emas), eski token qayta ishlamasligi, himoyalangan
+    endpoint'lar 401 qaytarishi va barcha uch rol uchun bir xil ishlashi.
+    """
+
+    ROLES = [
+        ("admin", "admin", "admin123"),
+        ("instructor", "usrL_00001", "usrP_00001"),
+        ("student", "usrL_00004", "usrP_00004"),
+    ]
+
+    def _sid(self, c):
+        for ck in c.jar:
+            if ck.name == "sid":
+                return ck.value
+        return None
+
+    def _login(self, login, password, role):
+        c = Client()
+        st, r = c.post("/api/auth/login", {"login": login, "password": password, "role": role})
+        self.assertEqual(st, 200, r)
+        return c
+
+    def test_01_login_then_logout_all_roles(self):
+        for role, login, pw in self.ROLES:
+            with self.subTest(role=role):
+                c = self._login(login, pw, role)
+                self.assertTrue(self._sid(c), "login cookie berilmadi")
+                st, r = c.get("/api/auth/me")
+                self.assertEqual(st, 200, r)
+                self.assertEqual(r["user"]["role"], role)
+                st, r = c.post("/api/auth/logout")
+                self.assertEqual(st, 200, r)
+
+    def test_02_protected_endpoints_401_after_logout(self):
+        for role, login, pw in self.ROLES:
+            with self.subTest(role=role):
+                c = self._login(login, pw, role)
+                self.assertEqual(c.post("/api/auth/logout")[0], 200)
+                st, r = c.get("/api/auth/me")
+                self.assertEqual(st, 401, r)
+                self.assertEqual(r["error"], "auth.required")
+
+    def test_03_stale_token_rejected_server_side(self):
+        # Eski token texnik jihatdan saqlab qolinsa ham, serverda bekor
+        # qilingani uchun qabul qilinmasligi shart.
+        c = self._login("admin", "admin123", "admin")
+        old = self._sid(c)
+        self.assertTrue(old)
+        self.assertEqual(c.post("/api/auth/logout")[0], 200)
+
+        stale = Client()
+        for path in ("/api/auth/me", "/api/me/settings", "/api/me/sessions", "/api/admin/dashboard"):
+            with self.subTest(path=path):
+                st, r = stale.req("GET", path, cookie=old)
+                self.assertEqual(st, 401, r)
+
+    def test_04_logout_clears_cookie(self):
+        # Set-Cookie Max-Age=0 — klient jaridagi sid yo'qolishi kerak
+        c = self._login("admin", "admin123", "admin")
+        self.assertTrue(self._sid(c))
+        st, r = c.post("/api/auth/logout")
+        self.assertEqual(st, 200, r)
+        self.assertIsNone(self._sid(c), "sid cookie tozalanmadi")
+
+    def test_05_logout_without_session_is_idempotent(self):
+        c = Client()
+        st, r = c.post("/api/auth/logout")
+        self.assertEqual(st, 200, r)
+        st, r = c.post("/api/auth/logout")
+        self.assertEqual(st, 200, r)
+
+    def test_06_other_sessions_survive(self):
+        # Faqat joriy sessiya yopiladi — boshqa qurilmalar saqlanib qoladi
+        a = self._login("admin", "admin123", "admin")
+        b = self._login("admin", "admin123", "admin")
+        self.assertEqual(a.post("/api/auth/logout")[0], 200)
+        st, _ = b.get("/api/auth/me")
+        self.assertEqual(st, 200)
+        self.assertEqual(b.post("/api/auth/logout")[0], 200)
+
+    def test_07_no_data_leak_between_users(self):
+        # Chiqqandan keyin boshqa hisob bilan kiringanda avvalgi foydalanuvchi
+        # ma'lumotlari (profil) ko'rinmasligi kerak.
+        admin = self._login("admin", "admin123", "admin")
+        stu = Client()
+        st, r = stu.post("/api/auth/login", {"login": "usrL_00004", "password": "usrP_00004", "role": "student"})
+        self.assertEqual(st, 200, r)
+        st, r = stu.get("/api/auth/me")
+        stu_login = r["user"]["login"]
+        stu_id = r["user"]["id"]
+
+        self.assertEqual(admin.post("/api/auth/logout")[0], 200)
+
+        st, r = stu.get("/api/auth/me")
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["user"]["login"], stu_login)
+        self.assertEqual(r["user"]["id"], stu_id)
+        # Talaba admin endpoint'iga kira olmaydi
+        st, r = stu.get("/api/admin/dashboard")
+        self.assertEqual(st, 403, r)
+        self.assertEqual(stu.post("/api/auth/logout")[0], 200)
+
+    def test_08_relogin_works_after_logout(self):
+        c = self._login("admin", "admin123", "admin")
+        self.assertEqual(c.post("/api/auth/logout")[0], 200)
+        c2 = self._login("admin", "admin123", "admin")
+        self.assertTrue(self._sid(c2))
+        st, r = c2.get("/api/auth/me")
+        self.assertEqual(st, 200, r)
+        self.assertEqual(c2.post("/api/auth/logout")[0], 200)
 
 
 class TestCars(Base):

@@ -555,6 +555,17 @@ const I18N = (function () {
     "settings.work_end": { uz: "Ish vaqti tugashi", ru: "Конец рабочего времени", en: "Work end" },
     "settings.reminder_minutes": { uz: "Avtomatik eslatma vaqti (daqiqa oldin)", ru: "Время напоминания (за N минут)", en: "Auto reminder (minutes before)" },
     "settings.reminder_hint": { uz: "Mashg'ulot boshlanishidan necha daqiqa oldin ishtirokchilarga eslatma yuboriladi", ru: "За сколько минут до занятия отправлять напоминание участникам", en: "How many minutes before the lesson to remind participants" },
+    /* Chiqish (logout) — Admin, Instruktor va Talaba uchun umumiy */
+    "settings.logout_title": { uz: "Sessiya va chiqish", ru: "Сессия и выход", en: "Session & sign out" },
+    "settings.logout_hint": { uz: "Hisobingizdan xavfsiz chiqing. Joriy sessiya serverda ham yakunlanadi.", ru: "Безопасно выйдите из аккаунта. Текущая сессия завершится и на сервере.", en: "Sign out safely. The current session is ended on the server too." },
+    "settings.logout_btn": { uz: "Hisobdan chiqish", ru: "Выйти из аккаунта", en: "Sign out of account" },
+    "settings.logout_desc": { uz: "Bu amaldan keyin qayta kirish uchun login va parol kerak bo'ladi.", ru: "После этого действия для повторного входа понадобятся логин и пароль.", en: "After this you will need your login and password to sign in again." },
+    "logout.confirm_title": { uz: "Hisobdan chiqmoqchimisiz?", ru: "Выйти из аккаунта?", en: "Sign out of your account?" },
+    "logout.confirm_text": { uz: "Tasdiqlasangiz, sessiya yakunlanadi va login sahifasiga qaytasiz.", ru: "После подтверждения сессия завершится, и вы вернётесь на страницу входа.", en: "Once confirmed, the session ends and you return to the sign-in page." },
+    "logout.confirm_yes": { uz: "Ha, chiqish", ru: "Да, выйти", en: "Yes, sign out" },
+    "logout.done": { uz: "Hisobdan chiqdingiz", ru: "Вы вышли из аккаунта", en: "You have signed out" },
+    "logout.sidebar": { uz: "Chiqish", ru: "Выйти", en: "Sign out" },
+    "logout.server_error": { uz: "Serverga ulanib bo'lmadi — sessiya yopilmagan bo'lishi mumkin. Brauzerni yopib qayta oching.", ru: "Не удалось связаться с сервером — сессия могла не завершиться. Закройте и снова откройте браузер.", en: "Could not reach the server — the session may not have ended. Close and reopen your browser." },
   };
 
   const LANGS = { uz: "O'zbek", ru: "Русский", en: "English" };

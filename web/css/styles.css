@@ -375,6 +375,15 @@ textarea.input { resize: vertical; min-height: 70px; }
   border-radius: 14px; overflow: hidden; }
 .sidebar .cell-strong { color: #fff; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar .muted { color: rgba(216, 228, 240, .55); }
+/* Sidebar foydalanuvchi kartasi: ism + tezkor "Chiqish" (destructive) tugmasi */
+.sidebar-user-info { min-width: 0; flex: 1 1 auto; }
+.sidebar-logout { margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center;
+  justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 10px;
+  background: rgba(214, 69, 69, .16); border: 1px solid rgba(214, 69, 69, .45);
+  color: #ffb9b9; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+.sidebar-logout:hover { background: rgba(214, 69, 69, .32); color: #fff; border-color: rgba(214, 69, 69, .8); }
+.sidebar-logout:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.sidebar-logout .ico { width: 17px; height: 17px; }
 
 /* ---- avatar (oltin halqa — login aksenti bilan bog'langan) ---- */
 .avatar { border-radius: 50%; display: flex; align-items: center; justify-content: center;
@@ -427,6 +436,13 @@ textarea.input { resize: vertical; min-height: 70px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: var(--shadow); padding: 18px 20px; }
 .content .card-title { font-size: 15px; font-weight: 700; color: var(--navy); margin-bottom: 12px; }
+
+/* ---- chiqish kartasi (Sozlamalar, eng pastda) — destructive zona ----
+   Boshqa sozlamalardan chiziq va bo'sh joy bilan ajratilgan. */
+.logout-card { margin-top: 26px; padding-top: 22px; border-top: 2px dashed var(--border-strong); }
+.logout-card .card-title { color: var(--red); }
+.logout-card .muted { max-width: 62ch; }
+@media (max-width: 480px) { .logout-card .btn { width: 100%; justify-content: center; } }
 
 /* ---- statistika kartalari ---- */
 .grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }

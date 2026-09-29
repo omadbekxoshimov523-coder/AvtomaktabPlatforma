@@ -186,11 +186,11 @@ const UI = (function () {
     return overlay;
   }
 
-  function confirmDialog(message, onYes, { danger = false, yesText } = {}) {
+  function confirmDialog(message, onYes, { danger = false, yesText, title, noText } = {}) {
     const m = modal("—", [
       el("p", { class: "confirm-text", text: message }),
       el("div", { class: "row gap end" }, [
-        el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
+        el("button", { class: "btn btn-light", text: noText || t("common.cancel"), onclick: () => m.close() }),
         el("button", {
           class: "btn " + (danger ? "btn-danger" : "btn-primary"),
           text: yesText || t("common.confirm"),
@@ -198,7 +198,7 @@ const UI = (function () {
         }),
       ]),
     ]);
-    m.querySelector(".modal-head h3").textContent = danger ? "⚠️" : t("common.confirm");
+    m.querySelector(".modal-head h3").textContent = title || (danger ? "⚠️" : t("common.confirm"));
     return m;
   }
 

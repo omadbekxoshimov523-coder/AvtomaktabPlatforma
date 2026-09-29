@@ -992,6 +992,7 @@ const Shared = (function () {
         notifSettingsCard(m),
         securitySettingsCard(sessions),
         ...(isAdmin ? [platformSettingsCard(s)] : []),
+        logoutCard(),
       );
     }).catch((e) => {
       body.innerHTML = "";
@@ -1114,6 +1115,22 @@ const Shared = (function () {
       ]))),
     ])]));
     return card;
+  }
+
+  /* Chiqish kartasi — boshqa sozlamalardan alohida ajratilgan holda,
+     eng pastda. Qaytarib bo'lmaydigan (destructive) amal bo'lgani uchun
+     qizil uslubda + tasdiqlash oynasi bilan. Admin, Instruktor va Talaba
+     uchun bir xil komponentda bitta marta yozilgan. */
+  function logoutCard() {
+    return el("div", { class: "card logout-card" }, [
+      el("h3", { class: "card-title", text: "🚪 " + t("settings.logout_title") }),
+      el("div", { class: "muted sm", text: t("settings.logout_hint") }),
+      el("div", { class: "muted sm mb", text: t("settings.logout_desc") }),
+      el("button", {
+        class: "btn btn-danger", icon: "logout", text: "" + t("settings.logout_btn"),
+        onclick: () => { if (window.App && App.confirmLogout) App.confirmLogout(); },
+      }),
+    ]);
   }
 
   function platformSettingsCard(s) {

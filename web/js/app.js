@@ -314,16 +314,87 @@
     }
   }
 
-  function logout() {
-    API.post("auth/logout").catch(() => {});
+  /* ---------------- sessiyani yakunlash (logout) ----------------
+     Barcha rollar uchun umumiy. Sezuvchan ma'lumotlar (profil, ko'rinish,
+     keshlangan DOM) to'liq tozalanadi — keyingi foydalanuvchi oldingi
+     foydalanuvchining ma'lumotlarini ko'rmasligi SHART.
+     Server tomonida ham sessiya `auth/logout` orqali o'chiriladi va
+     sid cookie tozalanadi (server.py). */
+  let loggingOut = false;
+
+  function clearSessionState() {
     App.me = null;
-    document.getElementById("app-shell").classList.add("hidden");
-    document.getElementById("login-screen").classList.remove("hidden");
-    document.getElementById("login-password").value = "";
+    App.view = "dashboard";
+    App.params = {};
+    App.roleNav = {};
+    otpStep = false; // 2FA bosqichi qolib ketmasin
+
+    // Himoyalangan sahifa DOM'i va navigatsiya tozalanadi
+    const viewEl = document.getElementById("view");
+    if (viewEl) viewEl.innerHTML = "";
+    const navEl = document.getElementById("sidebar-nav");
+    if (navEl) navEl.innerHTML = "";
+    ["sidebar-user", "topbar-user"].forEach((id) => {
+      const n = document.getElementById(id);
+      if (n) n.innerHTML = "";
+    });
+    const titleEl = document.getElementById("topbar-title");
+    if (titleEl) titleEl.textContent = "";
+
+    // Ochiq modallar (boshqa foydalanuvchi ma'lumoti ko'rsatilgan bo'lishi mumkin)
+    document.querySelectorAll(".modal-overlay").forEach((o) => o.remove());
+    document.body.classList.remove("modal-open");
+
+    // Login formasi tozalanadi
+    const pw = document.getElementById("login-password");
+    if (pw) pw.value = "";
+    const otp = document.getElementById("login-otp");
+    if (otp) otp.value = "";
+    const otpFld = document.getElementById("fld-otp");
+    if (otpFld) otpFld.classList.add("hidden");
     hideLoginAlert();
-    ["login", "password"].forEach(clearFieldErr);
+    ["login", "password", "otp"].forEach(clearFieldErr);
     resetRoleButtons();
   }
+
+  function showLoginScreen() {
+    document.getElementById("app-shell").classList.add("hidden");
+    document.getElementById("login-screen").classList.remove("hidden");
+  }
+
+  /* Server sessiyasini ham yakunlaydi. Serverga yetib bormasa ham lokal
+     holat (va ko'rinish) tozalanadi — aks holda ekranda eski foydalanuvchi
+     ma'lumoti qolib ketardi. */
+  App.logout = async function (opts) {
+    opts = opts || {};
+    if (loggingOut) return;
+    loggingOut = true;
+    App.me = null; // parallel 401 handlerlar qayta chaqirmasin
+    let serverOk = true;
+    try {
+      await API.post("auth/logout");
+    } catch (e) {
+      serverOk = false;
+    }
+    try {
+      clearSessionState();
+      showLoginScreen();
+      if (!serverOk) toast(t("logout.server_error"), "error");
+      else if (!opts.silent) toast(t("logout.done"));
+    } finally {
+      loggingOut = false;
+    }
+  };
+
+  App.confirmLogout = function () {
+    if (loggingOut) return;
+    UI.confirmDialog(t("logout.confirm_text"), () => App.logout(), {
+      danger: true,
+      title: "🚪 " + t("logout.confirm_title"),
+      yesText: "🚪 " + t("logout.confirm_yes"),
+      noText: t("common.cancel"),
+    });
+  };
 
   /* ---------------- shell ---------------- */
   function buildSidebar() {
@@ -341,14 +412,27 @@
     });
     markNav();
     updateNotifBadge();
-    const user = App.me.user;
+    fillSidebarUser(App.me.user);
+  }
+
+  /* Sidebar pastidagi foydalanuvchi kartasi + tezkor "Chiqish" tugmasi.
+     Barcha rollar uchun bir xil ko'rinishda. */
+  function fillSidebarUser(user) {
     const su = document.getElementById("sidebar-user");
+    if (!su) return;
     su.innerHTML = "";
-    su.append(avatar(user, 38),
-      el("div", {}, [
+    su.append(
+      avatar(user, 38),
+      el("div", { class: "sidebar-user-info" }, [
         el("div", { class: "cell-strong", text: `${user.first_name} ${user.last_name}` }),
         el("div", { class: "muted", style: "font-size:12px", text: roleLabel(user.role) }),
-      ]));
+      ]),
+      el("button", {
+        class: "sidebar-logout", icon: "logout",
+        title: t("logout.sidebar"), "aria-label": t("logout.sidebar"),
+        onclick: () => App.confirmLogout(),
+      }),
+    );
   }
 
   function roleLabel(role) {
@@ -363,12 +447,9 @@
       el("div", { class: "cell-strong", text: `${user.first_name} ${user.last_name}` }),
       el("div", { class: "muted", style: "font-size:12px", text: user.login }),
     ]));
-    const su = document.getElementById("sidebar-user");
-    su.innerHTML = "";
-    su.append(avatar(user, 38), el("div", {}, [
-      el("div", { class: "cell-strong", text: `${user.first_name} ${user.last_name}` }),
-      el("div", { class: "muted", style: "font-size:12px", text: user.login }),
-    ]));
+    // Sidebar kartasi buildSidebar() tomonidan to'ldiriladi (u rolda ham
+    // "Chiqish" tugmasi bor) — bu yerda qayta yozish eski variantni
+    // ustiga yozib tugmani yo'q qilardi.
   }
 
   function markNav() {
@@ -393,6 +474,9 @@
   };
 
   App.go = function (view, params) {
+    // Route guard: autentifikatsiya yo'q bo'lsa hech qanday himoyalangan
+    // bo'limga o'tilmaydi.
+    if (!App.me || !App.me.user) { showLoginScreen(); return; }
     App.view = view;
     App.params = params || {};
     render();
@@ -409,7 +493,10 @@
 
   async function render() {
     const viewEl = document.getElementById("view");
-    const role = App.me ? App.me.user.role : "admin";
+    // Muhim: avval `App.me` null bo'lsa role "admin" ga tushib qolardi —
+    // ya'ni chiqib ketgan foydalanuvchi admin dashboard'ini ko'ra olardi.
+    if (!App.me || !App.me.user) { showLoginScreen(); return; }
+    const role = App.me.user.role;
     const views = VF[role];
     const fn = views[App.view] || views.dashboard;
     viewEl.innerHTML = "";
@@ -417,9 +504,12 @@
     updateTitle();
     try {
       const node = await fn(App.params);
+      // Kutish paytida chiqib ketilgan bo'lsa, natija ekrana chiqmasin
+      if (!App.me || !App.me.user) return;
       viewEl.innerHTML = "";
       viewEl.append(node);
     } catch (e) {
+      if (!App.me || !App.me.user) return;
       viewEl.innerHTML = "";
       viewEl.append(UI.emptyState("⚠️", I18N.errorText(e && e.code), String(e && e.message || "")));
     }
@@ -427,7 +517,8 @@
   }
 
   function updateTitle() {
-    const role = App.me ? App.me.user.role : "admin";
+    if (!App.me || !App.me.user) return;
+    const role = App.me.user.role;
     const items = navFor(role);
     const item = items.find(([v]) => v === App.view);
     const elT = document.getElementById("topbar-title");
@@ -443,7 +534,24 @@
     if (navBtn) navBtn.append(el("span", { class: "nav-badge", text: n > 99 ? "99+" : String(n) }));
   }
 
-  API.on("logout", () => { if (App.me) logout(); });
+  // API 401 qaytarsa (sessiya serverda bekor qilingan yoki muddati o'tgan)
+  // foydalanuvchi darhol login sahifasiga qaytariladi.
+  API.on("logout", () => { if (App.me) App.logout({ silent: true }); });
+
+  /* Sahifa har qayta ko'rsatilganda (F5, orqaga qaytish/bfcache) autentifikatsiya
+     qayta tekshiriladi — serverda sessiya o'chirilgan bo'lsa, himoyalangan
+     bo'limlar qayta ochilmaydi. */
+  async function guardAuth() {
+    if (!App.me) { showLoginScreen(); return; }
+    try {
+      App.me = await API.get("auth/me");
+      updateNotifBadge();
+    } catch (e) {
+      App.logout({ silent: true });
+    }
+  }
+  addEventListener("pageshow", () => { guardAuth(); });
+  addEventListener("focus", () => { guardAuth(); });
 
   /* ---------------- boshlash ---------------- */
   async function boot() {
@@ -486,8 +594,10 @@
         Shared.openChangePassword(false);
       }
     } catch (e) {
-      // login sahifasida qolaveramiz
-      if (e && e.code !== "err.server_error") { /* login da */ }
+      // Sessiya yo'q (yoki bekor qilingan) — login sahifasida qolamiz.
+      // Himoyalangan bo'limlarga kirish taqiqlanadi (render() guard).
+      App.me = null;
+      showLoginScreen();
     }
     updateNotifBadge();
     setInterval(async () => { if (App.me) await App.refreshMe(); }, 60000);
