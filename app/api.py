@@ -1248,21 +1248,37 @@ class Api:
         if errors:
             return CONFLICT, err("session.rules_violated", {"errors": errors})
         auto = session_auto_data(self.db, instructor_id)
-        sid = self.db.ex(
-            """INSERT INTO lesson_sessions(date,start_time,end_time,instructor_id,car_id,car_name_snapshot,
-                                           car_plate_snapshot,capacity_snapshot,status,notes,created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (date, start, end, instructor_id, auto["car_id"], auto["car_name_snapshot"],
-             auto["car_plate_snapshot"], auto["capacity_snapshot"], "scheduled",
-             "So'rov asosida yaratildi (so'rov #%d)" % int(rid), now(), now()),
-        )
-        self.db.ex(
-            """INSERT INTO session_students(session_id, student_id, pickup_address, pickup_lat, pickup_lng,
-                                            attendance_status, student_status, joined_at)
-               VALUES(?,?,NULL,NULL,NULL,'unmarked','active',?)""",
-            (sid, req["student_id"], now()))
-        self.db.upd("UPDATE practice_requests SET status='approved', session_id=?, processed_at=?, admin_note=? WHERE id=?",
-                    (sid, now(), str(body.get("note", "")).strip(), int(rid)))
+        if not auto:
+            # check_session_rules mashinani tekshirdi, lekin orasida holat
+            # o'zgargan bo'lishi mumkin. Nothiy TypeError (500) bermaslik uchun
+            # aniq xato qaytaramiz — so'rov "pending"da qoladi, xabar o'qiladi.
+            row_car = self.db.q1("SELECT assigned_car_id FROM instructors WHERE id=?", (instructor_id,))
+            code = "car_not_assigned" if not (row_car and row_car["assigned_car_id"]) else "car_not_found"
+            return CONFLICT, err("session.rules_violated", {"errors": [code]})
+
+        # Session, uning talabasi va so'rov holati bitta tranzaksiyada:
+        # oraliqda xato chiqsa hech narsa yozilmaydi (yaroq session qolmasdi).
+        def _approve(c):
+            cur = c.execute(
+                """INSERT INTO lesson_sessions(date,start_time,end_time,instructor_id,car_id,car_name_snapshot,
+                                               car_plate_snapshot,capacity_snapshot,status,notes,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (date, start, end, instructor_id, auto["car_id"], auto["car_name_snapshot"],
+                 auto["car_plate_snapshot"], auto["capacity_snapshot"], "scheduled",
+                 "So'rov asosida yaratildi (so'rov #%d)" % int(rid), now(), now()),
+            )
+            sid = cur.lastrowid
+            c.execute(
+                """INSERT INTO session_students(session_id, student_id, pickup_address, pickup_lat, pickup_lng,
+                                                attendance_status, student_status, joined_at)
+                   VALUES(?,?,NULL,NULL,NULL,'unmarked','active',?)""",
+                (sid, req["student_id"], now()))
+            c.execute(
+                "UPDATE practice_requests SET status='approved', session_id=?, processed_at=?, admin_note=? WHERE id=?",
+                (sid, now(), str(body.get("note", "")).strip(), int(rid)))
+            return sid
+
+        sid = self.db.transaction(_approve)
         row = self.db.q1("SELECT * FROM lesson_sessions WHERE id=?", (sid,))
         notify_session_participants(self.db, row, "created", sender_id=self.user["id"], sender_role=self.user["role"])
         audit(self.db, self.user["id"], "request approved", "practice_requests", int(rid), {"session_id": sid})

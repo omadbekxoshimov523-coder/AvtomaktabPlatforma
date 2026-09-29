@@ -1251,6 +1251,209 @@ class TestM4RequestApprove(Base):
         self.assertEqual(req["admin_note"], "rad etildi")
 
 
+class TestApproveRequestRules(Base):
+    """'Tasdiqlash' tugmasi ishlamaydi degan xato.
+
+    Sabab: backend qoida buzilganda `params.errors` da ANIQ sabablarni
+    yuboradi (masalan ["intersects_break"]), lekin frontend `errToast` bu
+    ro'yxatni tashlab yuborib faqat umumiy "Mashg'ulot yaratib bo'lmaydi"
+    ko'rsatardi — admin qaysi qoida bloklaganini bilmasdi va tugma buzilgan
+    deb o'ylardi. Bu yerda har bir qoida kodi alohida tekshiriladi.
+
+    Ikkinchidan, session/so'rov yozuvlari bitta tranzaksiyaga o'tkazildi:
+    oraliqda xato chiqsa yaroq session qolmasligi tekshiriladi.
+    """
+
+    MSG = "APR-TEST"
+
+    def _admin(self):
+        c = Client()
+        c.post("/api/auth/login", {"login": "admin", "password": "admin123", "role": "admin"})
+        return c
+
+    def _login(self, login):
+        """Seed loginlari ketma-ket: usrL_0000N -> parol usrP_0000N."""
+        n = login.split("_")[-1]
+        c = Client()
+        c.post("/api/auth/login", {"login": login, "password": "usrP_" + n, "role": "student"})
+        return c
+
+    def _students(self):
+        """Bazadagi talabalar: [{login, sid}, ...] (s.id bo'yicha tartiblangan)."""
+        db = Db(str(TMP / "test.db"))
+        return db.q("""SELECT u.login AS login, s.id AS sid FROM students s
+                       JOIN users u ON u.id=s.user_id
+                       WHERE u.deleted_at IS NULL ORDER BY s.id""")
+
+    def _next_monday(self, weeks=0):
+        d = datetime.now()
+        mon = d + timedelta(days=(7 - d.weekday()) % 7 or 7)
+        return (mon + timedelta(days=7 * weeks)).strftime("%Y-%m-%d")
+
+    def _next_weekday(self, iso_wd):
+        """Keyingi dushanbadan keyingi `iso_wd` kuni (0=mon ... 6=sun)."""
+        d = datetime.now()
+        mon = d + timedelta(days=(7 - d.weekday()) % 7 or 7)
+        return (mon + timedelta(days=iso_wd)).strftime("%Y-%m-%d")
+
+    def _new_request(self, login, date, start, end, msg=None):
+        stu = self._login(login)
+        st, r = stu.post("/api/student/requests", {
+            "preferred_date": date, "preferred_start_time": start,
+            "preferred_end_time": end, "message": msg or self.MSG})
+        self.assertEqual(st, 200, r)
+        return r["id"]
+
+    def _sessions_for(self, note_frag):
+        db = Db(str(TMP / "test.db"))
+        return db.q("SELECT id FROM lesson_sessions WHERE notes LIKE ?", ("%" + note_frag + "%",))
+
+    def tearDown(self):
+        db = Db(str(TMP / "test.db"))
+        for r in db.q("SELECT id, session_id FROM practice_requests WHERE message=?", (self.MSG,)):
+            if r["session_id"]:
+                db.upd("DELETE FROM session_students WHERE session_id=?", (r["session_id"],))
+                db.upd("DELETE FROM lesson_sessions WHERE id=?", (r["session_id"],))
+            db.upd("DELETE FROM audit_logs WHERE entity_id=? AND entity_type='practice_requests'",
+                   (r["id"],))
+        db.upd("DELETE FROM practice_requests WHERE message=?", (self.MSG,))
+
+    # ------------------------------------------------------------------
+    # 1) Tanaffus vaqti — bu holat admin uchun eng ko'p uchraydigan sabab
+    def test_140_approve_blocked_by_break_returns_specific_rule_code(self):
+        """12:00-16:00 so'rov 13:00-14:00 tanaffusga tegadi -> intersects_break.
+
+        Bu aynan "Tasdiqlash hech narsa o'zgarmaydi" degan holat: eski kodda
+        faqat "Mashg'ulot yaratib bo'lmaydi" ko'rinardi, sabab yo'q edi.
+        """
+        student = self._students()[0]
+        rid = self._new_request(student["login"], self._next_monday(), "12:00", "16:00")
+        admin = self._admin()
+        st, r = admin.post(f"/api/admin/requests/{rid}/approve", {
+            "date": self._next_monday(), "start_time": "12:00", "end_time": "16:00",
+            "instructor_id": 1})
+        self.assertEqual(st, 409, r)
+        self.assertEqual(r["error"], "session.rules_violated")
+        self.assertIn("intersects_break", r["params"]["errors"],
+                      "frontend aniq sababni ko'rsatishi uchun kod kiritilishi shart")
+        # so'rov "pending"da qoladi va yaroq session yaratilmaydi
+        db = Db(str(TMP / "test.db"))
+        req = db.q1("SELECT * FROM practice_requests WHERE id=?", (rid,))
+        self.assertEqual(req["status"], "pending")
+        self.assertIsNone(req["session_id"])
+        self.assertEqual(self._sessions_for("so'rov #%s" % rid), [])
+
+    # 2) Ish vaqti tashqarisida
+    def test_141_approve_outside_work_hours_returns_rule_code(self):
+        """Instruktor 1 (Akmal) 08:00-18:00 ishlaydi -> 19:00-20:00 tashqarida."""
+        date = self._next_monday()
+        rid = self._new_request(self._students()[0]["login"], date, "19:00", "20:00")
+        admin = self._admin()
+        st, r = admin.post(f"/api/admin/requests/{rid}/approve", {
+            "date": date, "start_time": "19:00", "end_time": "20:00",
+            "instructor_id": 1})
+        self.assertEqual(st, 409, r)
+        self.assertIn("outside_work_hours", r["params"]["errors"])
+        db = Db(str(TMP / "test.db"))
+        self.assertEqual(db.q1("SELECT status FROM practice_requests WHERE id=?",
+                               (rid,))["status"], "pending")
+
+    # 3) Ish kuni emas
+    def test_142_approve_on_non_work_day_returns_rule_code(self):
+        """Instruktor 1 dushanbadan shanbagacha ishlaydi -> yakshanbay = not_work_day."""
+        sunday = self._next_weekday(6)
+        rid = self._new_request(self._students()[0]["login"], sunday, "09:00", "10:00")
+        admin = self._admin()
+        st, r = admin.post(f"/api/admin/requests/{rid}/approve", {
+            "date": sunday, "start_time": "09:00", "end_time": "10:00",
+            "instructor_id": 1})
+        self.assertEqual(st, 409, r)
+        self.assertIn("not_work_day", r["params"]["errors"])
+
+    # 4) Xato jim qolmasligi: instruktor tanlanmagan
+    def test_143_approve_without_instructor_is_explicit_error(self):
+        rid = self._new_request(self._students()[0]["login"], self._next_monday(),
+                                "09:00", "10:00")
+        admin = self._admin()
+        st, r = admin.post(f"/api/admin/requests/{rid}/approve", {
+            "date": self._next_monday(), "start_time": "09:00", "end_time": "10:00"})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "request.no_instructor")
+        db = Db(str(TMP / "test.db"))
+        self.assertEqual(db.q1("SELECT status FROM practice_requests WHERE id=?",
+                               (rid,))["status"], "pending")
+
+    # 5) Atomiklik: oraliqda xato chiqsa yaroq session qolmasligi
+    def test_144_approve_rolls_back_on_midway_failure(self):
+        """session_students INSERTida xato -> session ham, status ham qaytadi."""
+        rid = self._new_request(self._students()[0]["login"], self._next_monday(),
+                                "09:00", "10:00")
+        date = self._next_monday()
+        db = Db(str(TMP / "test.db"))
+        with db.connect() as c:
+            c.execute("""CREATE TRIGGER IF NOT EXISTS t_apr_fail BEFORE INSERT ON session_students
+                         BEGIN SELECT RAISE(ABORT, 'test: session_students buzildi'); END""")
+            c.commit()
+        try:
+            admin = self._admin()
+            st, r = admin.post(f"/api/admin/requests/{rid}/approve", {
+                "date": date, "start_time": "09:00", "end_time": "10:00",
+                "instructor_id": 1})
+            # xato 5xx sifatida qaytishi kerak (200 emas!) — "jim" qolmasin
+            self.assertGreaterEqual(st, 500, "xato yutilmasin, aniq status kod qaytaring")
+        finally:
+            with db.connect() as c:
+                c.execute("DROP TRIGGER IF EXISTS t_apr_fail")
+                c.commit()
+
+        req = db.q1("SELECT * FROM practice_requests WHERE id=?", (rid,))
+        self.assertEqual(req["status"], "pending", "xatodan keyin holat o'zgarmasligi kerak")
+        self.assertIsNone(req["session_id"])
+        self.assertEqual(self._sessions_for("so'rov #%s" % rid), [],
+                         "yaroq (orphan) session qolmadi — tranzaksiya ishladi")
+
+    # 6) Turli so'rovlarda muvaffaqiyatli tasdiqlash
+    def test_145_approve_three_different_requests(self):
+        """Uch xil so'rov (turli kun/vaqt/talaba) -> hammasi 'approved'."""
+        students = self._students()
+        self.assertGreaterEqual(len(students), 3, "seedda kamida 3 ta talaba kerak")
+        admin = self._admin()
+        # (talaba, sana, start, end, instruktor_id) — har biri boshqacha holatda:
+        # oddiy, keyingi hafta, boshqa instruktor bilan.
+        cases = [
+            (students[0], self._next_monday(), "09:00", "10:00", 1),
+            (students[1], self._next_monday(1), "15:00", "16:30", 1),
+            (students[2], self._next_monday(2), "11:00", "12:00", 2),
+        ]
+        for student, date, start, end, iid in cases:
+            with self.subTest(login=student["login"], date=date, instructor=iid):
+                rid = self._new_request(student["login"], date, start, end)
+                st, r = admin.post(f"/api/admin/requests/{rid}/approve", {
+                    "date": date, "start_time": start, "end_time": end,
+                    "instructor_id": iid})
+                self.assertEqual(st, 200, r)
+                sid = r["session_id"]
+                self.assertTrue(sid)
+                db = Db(str(TMP / "test.db"))
+                req = db.q1("SELECT * FROM practice_requests WHERE id=?", (rid,))
+                self.assertEqual(req["status"], "approved")
+                self.assertEqual(req["session_id"], sid)
+                ls = db.q1("SELECT * FROM lesson_sessions WHERE id=?", (sid,))
+                self.assertIsNotNone(ls, "mashg'ulot yaratilishi kerak")
+                self.assertEqual(ls["date"], date)
+                self.assertEqual(ls["start_time"], start)
+                self.assertEqual(ls["end_time"], end)
+                self.assertEqual(ls["instructor_id"], iid)
+                self.assertEqual(ls["status"], "scheduled")
+                ss = db.q1("SELECT * FROM session_students WHERE session_id=? "
+                           "AND student_status='active'", (sid,))
+                self.assertIsNotNone(ss, "talaba sessionga bog'lanishi kerak")
+                self.assertEqual(ss["student_id"], student["sid"])
+                notif = db.q1("SELECT * FROM notifications WHERE type='lesson' "
+                              "AND title='lesson.assigned' ORDER BY id DESC LIMIT 1")
+                self.assertIsNotNone(notif, "bog'liq amal: talabaga bildirishnoma yuboriladi")
+
+
 class TestM1SenderInfo(Base):
     """M1 — bildirishnoma jo'natuvchisi (sender_id, sender_role, ism-familiya)
     saqlanadi va `/api/me/notifications` orqali qaytariladi."""

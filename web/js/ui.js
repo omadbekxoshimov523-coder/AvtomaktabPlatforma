@@ -133,14 +133,34 @@ const UI = (function () {
     const box = el("div", { class: `toast toast-${type}`, text: message });
     host.appendChild(box);
     requestAnimationFrame(() => box.classList.add("show"));
+    // Uzun (ko'p qatorli) xabarlar — masalan tasdiqlashda qaysi qoida
+    // bloklagani — 3.2 soniyada o'qib bo'lmaydi, vaqtni matn uzunligiga bog'laymiz.
+    const ttl = Math.min(9000, 3200 + String(message || "").length * 45);
     setTimeout(() => {
       box.classList.remove("show");
       setTimeout(() => box.remove(), 300);
-    }, 3200);
+    }, ttl);
   }
 
   function errToast(e) {
-    toast(I18N.errorText(e && e.code) || I18N.t("err.generic"), "error");
+    const code = e && e.code;
+    let msg = I18N.errorText(code) || I18N.t("err.generic");
+    // Backend ko'p qoidali xatolarda aniq sabablarni `params.errors` da yuboradi
+    // (masalan session.rules_violated -> ["intersects_break"]). Ularni ham
+    // ko'rsatmasak, admin "Mashg'ulot yaratib bo'lmaydi" deb umumiy xabarni
+    // ko'rib, tugma buzilgan deb o'ylaydi — aslida qaysi qoida bloklagani
+    // ko'rinmay qoladi. Har bir sababni alohida qatorga chiqaramiz.
+    const params = (e && e.params) || {};
+    const reasons = [].concat(params.errors || []).filter(Boolean);
+    if (reasons.length) {
+      const lines = [];
+      for (const r of reasons) {
+        const d = I18N.errorText(r);
+        if (d) lines.push("• " + d);
+      }
+      if (lines.length) msg += "\n" + lines.join("\n");
+    }
+    toast(msg, "error");
   }
 
   function modal(title, content, { wide = false, onClose } = {}) {
