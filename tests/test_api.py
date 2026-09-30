@@ -186,7 +186,7 @@ class TestAuthAndUsers(Base):
         st, r = admin.post(f"/api/admin/users/{cr['user']['id']}/status", {"status": "block"})
         self.assertEqual(st, 200, r)
         stud = Client()
-        st, r = stud.post("/api/auth/login", {"login": lg, "password": pw})
+        st, r = stud.post("/api/auth/login", {"login": lg, "password": pw, "role": "student"})
         self.assertEqual(r["error"], "auth.user_blocked")
 
     def test_05_logout(self):
@@ -206,7 +206,9 @@ class TestAuthAndUsers(Base):
         self.assertRegex(r["credentials"]["password"], r"^usrP_\d{5}$")
         # yangi login bilan kirish
         sc = Client()
-        st, r2 = sc.post("/api/auth/login", {"login": r["credentials"]["login"], "password": r["credentials"]["password"]})
+        st, r2 = sc.post("/api/auth/login", {"login": r["credentials"]["login"],
+                                             "password": r["credentials"]["password"],
+                                             "role": "student"})
         self.assertEqual(st, 200, r2)
 
     def test_07_sequence_increases_and_not_reused(self):
@@ -2106,24 +2108,25 @@ class TestSessionIsolation(Base):
         self.assertEqual(legacy.get("/api/auth/me")[0], 200)
         legacy.post("/api/auth/logout")
 
-    def test_108_remember_me_cookie_max_age(self):
-        """"Meni eslab qolish" — checkbox yoqilgan/o'chirilgan holat."""
+    def test_108_remember_me_cookie_shape(self):
+        """"Meni eslab qolish" — yoqilganda 30 kun, o'chirilganda sessiya cookie'si.
+
+        (MODUL 3 uchun batafsil testlar: TestRememberMe)"""
         import urllib.request as _u
-        for remember, want in ((True, 2592000), (False, 86400)):
-            cj = http.cookiejar.CookieJar()
-            op = _u.build_opener(_u.HTTPCookieProcessor(cj))
-            req = _u.Request(
-                f"http://{HOST}:{PORT}/api/auth/login",
-                data=json.dumps({"login": "admin", "password": "admin123",
-                                 "role": "admin", "remember": remember}).encode(),
-                headers={"Content-Type": "application/json",
-                         "X-Requested-With": "Avtomaktab",
-                         "X-Avto-Tab": "iso-rm-%d" % int(remember)},
-                method="POST")
-            with op.open(req, timeout=15) as resp:
-                sc = resp.headers.get("Set-Cookie", "")
-            self.assertIn("Max-Age=%d" % want, sc, "remember=%s" % remember)
-            self.assertIn("HttpOnly", sc)
+        cj = http.cookiejar.CookieJar()
+        op = _u.build_opener(_u.HTTPCookieProcessor(cj))
+        req = _u.Request(
+            f"http://{HOST}:{PORT}/api/auth/login",
+            data=json.dumps({"login": "admin", "password": "admin123",
+                             "role": "admin", "remember": True}).encode(),
+            headers={"Content-Type": "application/json",
+                     "X-Requested-With": "Avtomaktab",
+                     "X-Avto-Tab": "iso-rm-1"},
+            method="POST")
+        with op.open(req, timeout=15) as resp:
+            sc = resp.headers.get("Set-Cookie", "")
+        self.assertIn("Max-Age=2592000", sc, sc)
+        self.assertIn("HttpOnly", sc)
 
     def test_109_relogin_same_tab_ok(self):
         """Bir xil tab'da qayta-qayta kirish xatosiz ishlashi (UNIQUE constraint)."""
@@ -2156,6 +2159,125 @@ class TestSessionIsolation(Base):
         self.assertEqual(t2.post("/api/me/sessions/revoke-all")[0], 200)
         self.assertEqual(t1.get("/api/auth/me")[0], 401)
         self.assertEqual(t2.get("/api/auth/me")[0], 401)
+
+
+class TestRoleMustMatch(Base):
+    """MODUL 2 — login qilganda tanlangan rol hisobning roliga MOS bo'lishi shart."""
+
+    CASES = [
+        ("admin", "admin123", "admin"),
+        ("usrL_00001", "usrP_00001", "instructor"),
+        ("usrL_00004", "usrP_00004", "student"),
+    ]
+
+    def _login(self, body):
+        # Bu testlar ataylab RAD etilishlarni tekshiradi — login urinishlari
+        # limitini (6 urinish / 5 daqiqa) tozalab, boshqa testlarni koldirmaymiz.
+        from app.auth import reset_login_attempts
+        reset_login_attempts("login:" + body["login"])
+        return Client().post("/api/auth/login", body)
+
+    def test_200_correct_role_allowed(self):
+        for login, pw, role in self.CASES:
+            st, r = self._login({"login": login, "password": pw, "role": role})
+            self.assertEqual(st, 200, f"{login}/{role}: {r}")
+            self.assertEqual(r["user"]["role"], role)
+
+    def test_201_wrong_role_rejected(self):
+        for login, pw, role in self.CASES:
+            for wrong in ("admin", "instructor", "student"):
+                if wrong == role:
+                    continue
+                st, r = self._login({"login": login, "password": pw, "role": wrong})
+                self.assertEqual(st, 400, f"{login} roli {wrong} deb kirildi: {r}")
+                self.assertEqual(r["error"], "auth.wrong_role")
+
+    def test_202_missing_role_rejected(self):
+        """Rol yuborilmasa kirish RAD etiladi (avval 'avtomatik' deb o'tib ketardi)."""
+        for login, pw, _role in self.CASES:
+            for extra in ({}, {"role": ""}, {"role": "   "}, {"role": None}):
+                body = {"login": login, "password": pw}
+                body.update(extra)
+                st, r = self._login(body)
+                self.assertEqual(st, 400, f"{login} rolisiz kirdi: {r}")
+                self.assertEqual(r["error"], "auth.wrong_role")
+
+    def test_203_unknown_role_rejected(self):
+        for bogus in ("Admin", "ADMIN", "root", "superadmin", "teaching", "1", "null", "student "):
+            st, r = self._login({"login": "admin", "password": "admin123", "role": bogus})
+            self.assertEqual(st, 400, f"noma'lum rol '{bogus}' qabul qilindi: {r}")
+            self.assertEqual(r["error"], "auth.wrong_role")
+
+    def test_204_wrong_password_still_reported_first(self):
+        """Parol noto'g'ri bo'lsa, xabar rol haqida emas — hisob borligi oshkor bo'lmaydi."""
+        st, r = self._login({"login": "usrL_00004", "password": "noto'g'ri-parol", "role": "admin"})
+        self.assertEqual(st, 400)
+        self.assertEqual(r["error"], "auth.wrong_credentials")
+
+    def test_205_no_session_created_on_role_mismatch(self):
+        """Rad etilgandan keyin sessiya QOLMASIN."""
+        c = Client()
+        st, _ = self._login({"login": "usrL_00004", "password": "usrP_00004", "role": "admin"})
+        self.assertEqual(st, 400)
+        c = TabClient("role-mismatch-1")
+        c.post("/api/auth/login", {"login": "usrL_00004", "password": "usrP_00004", "role": "admin"})
+        self.assertEqual(c.get("/api/auth/me")[0], 401)
+
+
+class TestRememberMe(Base):
+    """MODUL 3 — "Meni eslab qolish"."""
+
+    def _login_cookie(self, remember):
+        cj = http.cookiejar.CookieJar()
+        op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        req = urllib.request.Request(
+            f"http://{HOST}:{PORT}/api/auth/login",
+            data=json.dumps({"login": "admin", "password": "admin123",
+                             "role": "admin", "remember": remember}).encode(),
+            headers={"Content-Type": "application/json",
+                     "X-Requested-With": "Avtomaktab", "X-Avto-Tab": "rm-%s" % remember},
+            method="POST")
+        with op.open(req, timeout=15) as resp:
+            return resp.headers.get("Set-Cookie", "")
+
+    def test_210_remember_on_is_30_days(self):
+        sc = self._login_cookie(True)
+        self.assertIn("Max-Age=2592000", sc, sc)
+        self.assertIn("HttpOnly", sc)
+        self.assertIn("SameSite=Lax", sc)
+
+    def test_211_remember_off_is_session_cookie(self):
+        """Checkbox o'chirilgan -> Max-Age YO'Q = brauzer yopilganda o'chadi."""
+        sc = self._login_cookie(False)
+        self.assertNotIn("Max-Age", sc, "sessiya cookie'si Max-Age olmasligi kerak: %s" % sc)
+        self.assertIn("HttpOnly", sc)
+
+    def test_212_session_actually_works(self):
+        for remember in (True, False):
+            c = TabClient("rm-work-%s" % remember)
+            st, r = c.post("/api/auth/login", {
+                "login": "admin", "password": "admin123", "role": "admin", "remember": remember})
+            self.assertEqual(st, 200, r)
+            self.assertEqual(c.get("/api/auth/me")[0], 200)
+
+    def test_213_token_never_in_response_body(self):
+        """Token JS ga BERILMASIN — faqat HttpOnly cookie orqali (XSS himoyasi)."""
+        c = Client()
+        st, r = c.post("/api/auth/login",
+                       {"login": "admin", "password": "admin123", "role": "admin", "remember": True})
+        self.assertEqual(st, 200, r)
+        self.assertNotIn("token", r, "token javob tanasida qaytayapti — XSS ga ochiq!")
+        self.assertIn("user", r)
+
+    def test_214_login_name_only_in_localstorage(self):
+        """localStorage'da faqat LOGIN nomi saqlanadi — token emas."""
+        import re
+        src = (ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8")
+        for m in re.finditer(r'localStorage\.(setItem|getItem)\(\s*"([^"]+)"', src):
+            self.assertNotIn("token", m.group(2).lower(),
+                             "localStorage'ga token yozilmoqda: %s" % m.group(2))
+            self.assertNotIn("sid", m.group(2).lower(),
+                             "localStorage'ga sessiya kaliti yozilmoqda: %s" % m.group(2))
 
 
 if __name__ == "__main__":

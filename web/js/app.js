@@ -57,7 +57,8 @@
   }
 
   /* ---------------- login ---------------- */
-  let selectedRole = ""; // bo'sh = rol avtomatik aniqlanadi (login orqali)
+  // MODUL 2: rol bo'sh qoldirilmaydi — login paytida MAJBURIY tanlanadi.
+  let selectedRole = "";
   let otpStep = false; // 2FA bosqichi: OTP kiritish maydoni ko'rsatilgan
 
   function resetRoleButtons() {
@@ -66,6 +67,8 @@
       b.classList.remove("active");
       b.setAttribute("aria-pressed", "false");
     });
+    const sw = document.getElementById("role-switch");
+    if (sw) sw.classList.remove("err");
   }
 
   function showFieldErr(field, msg) {
@@ -136,19 +139,23 @@
       document.querySelector("#eye-btn .ico-eye-off").classList.toggle("hidden", !show);
     });
 
-    // Rol tanlash: bosilgan tugma faol bo'ladi; yana bossa — bekor qilinadi (avtomatik rejim)
+    // Rol tanlash (MODUL 2): rol MAJBURIY. Avval "hech biri tanlanmagan" holati
+    // mavjud edi — u holda backend rol tekshiruvini butunlay o'tkazib yuborardi
+    // va foydalanuvchi o'z rolini ko'rsatmasdan kirishi mumkin edi.
     const roleBtns = document.querySelectorAll("#login-form .role-btn");
+    function selectRole(role) {
+      selectedRole = role || "";
+      roleBtns.forEach((x) => {
+        const on = x.dataset.role === role;
+        x.classList.toggle("active", on);
+        x.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      document.getElementById("role-switch").classList.toggle("err", !role);
+      if (role) clearFieldErr("role");
+    }
     roleBtns.forEach((b) => b.addEventListener("click", () => {
-      const role = b.dataset.role;
-      const wasActive = b.classList.contains("active");
-      roleBtns.forEach((x) => { x.classList.remove("active"); x.setAttribute("aria-pressed", "false"); });
-      if (!wasActive) {
-        b.classList.add("active");
-        b.setAttribute("aria-pressed", "true");
-        selectedRole = role;
-      } else {
-        selectedRole = ""; // avtomatik aniqlashga qaytish
-      }
+      selectRole(b.dataset.role);
+      hideLoginAlert();
     }));
 
     // "Meni eslab qolish" — oldingi login saqlangan bo'lsa
@@ -177,6 +184,14 @@
       let ok = true;
       if (!login) { showFieldErr("login", t("auth.err.empty_login")); ok = false; }
       if (!password) { showFieldErr("password", t("auth.err.empty_password")); ok = false; }
+      // MODUL 2: rolni tanlash shart. Backend ham buni tekshiradi, lekin foydalanuvchi
+      // noto'g'ri rolni yuborib serverga xato so'rov yubormasligi uchun ham
+      // shu yerda to'xtatamiz.
+      if (!selectedRole) {
+        showFieldErr("role", t("auth.err.empty_role"));
+        document.getElementById("role-switch").classList.add("err");
+        ok = false;
+      }
       if (otpStep) {
         const otpVal = document.getElementById("login-otp").value.trim();
         if (!otpVal) { showFieldErr("otp", I18N.errorText("auth.otp_required")); ok = false; }
@@ -187,9 +202,12 @@
         return;
       }
 
-      if (rememberVal()) {
-        try { localStorage.setItem("rm_login", login); } catch (e) {}
-      }
+      // MODUL 3: "eslab qolish" — checkbox o'chirilgan bo'lsa, eski login ham
+      // tozalanadi (aks holda keyingi safar yana avtomatik to'ldirilardi).
+      try {
+        if (rememberVal()) localStorage.setItem("rm_login", login);
+        else localStorage.removeItem("rm_login");
+      } catch (e) {}
 
       setLoginLoading(true);
       try {
@@ -215,7 +233,14 @@
           document.getElementById("login-otp").value = "";
           setTimeout(() => document.getElementById("login-otp").focus(), 60);
         } else if (e && e.code === "auth.user_blocked") showLoginAlert(t("auth.err.blocked"));
-        else if (e && e.code === "auth.wrong_role") showLoginAlert(I18N.errorText("auth.wrong_role"));
+        else if (e && e.code === "auth.wrong_role") {
+          // Xavfsizlik: foydalanuvchining HAQIQIY roli oshkor qilinmaydi
+          // ("siz Talaba ekansiz" deb aytilmaydi). Faqat neytral eslatma.
+          showLoginAlert(I18N.errorText("auth.wrong_role"));
+          const sw = document.getElementById("role-switch");
+          if (sw) sw.classList.add("err");
+          showFieldErr("role", t("auth.err.role_retry"));
+        }
         else if (e && e.code) {
           showLoginAlert(I18N.errorText(e.code));
           if (e.code === "auth.wrong_credentials") showFieldErr("password", I18N.errorText(e.code));

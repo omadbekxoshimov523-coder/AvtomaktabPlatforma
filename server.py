@@ -182,8 +182,12 @@ class Handler(BaseHTTPRequestHandler):
             extra = {}
             if status == 200 and payload.get("token"):
                 remember = bool(body.get("remember"))
-                max_age = 2592000 if remember else 86400
-                cookie = f"sid={urllib.parse.quote(payload['token'])}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}"
+                # MODUL 3 — "Meni eslab qolish":
+                #   yoqilgan  -> 30 kun (Max-Age beriladi, brauzer qayta ochilganda ham saqlanadi)
+                #   o'chirilgan -> Max-Age BERILMAYDI = "session cookie": brauzer
+                #                  yopilganda avtomatik o'chadi (sessiya cookie'si).
+                base = f"sid={urllib.parse.quote(payload['token'])}; Path=/; HttpOnly; SameSite=Lax"
+                cookie = base + ("; Max-Age=2592000" if remember else "")
                 extra = {"Set-Cookie": cookie}
                 payload.pop("token", None)
                 # CSRF token ham beramiz

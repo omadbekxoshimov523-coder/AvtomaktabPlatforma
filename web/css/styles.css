@@ -215,11 +215,20 @@ textarea.input { resize: vertical; min-height: 70px; }
 
 /* rol tablari — shisha, tanlangani yorqin */
 .role-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-bottom: 20px; }
+.role-switch > .field-err { grid-column: 1 / -1; margin: 0; }
 .role-btn { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 13px 6px 11px;
   border-radius: 14px; border: 1px solid rgba(255, 255, 255, .28); background: rgba(255, 255, 255, .08);
   color: #fff; cursor: pointer; font: inherit; font-weight: 600; font-size: 12.5px;
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   transition: all .22s cubic-bezier(.2, .7, .3, 1); }
+/* Rol tanlanmagan / noto'g'ri holat (MODUL 2) */
+.role-switch.err .role-btn { border-color: #ff9d9d; background: rgba(255, 90, 90, .18); }
+.role-switch.err { animation: roleShake .4s ease; }
+@keyframes roleShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
 .role-btn svg { width: 22px; height: 22px; }
 .role-btn:hover { background: rgba(255, 255, 255, .17); }
 .role-btn.active { border-color: #fff; color: #10233F;

@@ -188,8 +188,9 @@ window.addEventListener("unhandledrejection", function (e) {
         <p class="field-err" id="err-otp"></p>
       </div>
 
-      <!-- Rol tanlash: hech biri oldindan tanlanmagan — rol tanlanmasa, tizim hisobni avtomatik aniqlaydi -->
-      <div class="role-switch" role="group" data-i18n-attr="aria-label:auth.role_switch">
+      <!-- Rol tanlash: rol MAJBURIY (MODUL 2). Tanlanmagan holda kirishga
+           yo'l qo'yilmaydi va backend ham roli tekshiradi. -->
+      <div class="role-switch" id="role-switch" role="group" data-i18n-attr="aria-label:auth.role_switch">
         <button type="button" class="role-btn" data-role="student" aria-pressed="false">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.5 8 12 13l9.5-5L12 3Z"/><path d="M6 10.5v4c0 1.5 2.7 2.8 6 2.8s6-1.3 6-2.8v-4"/><path d="M21.5 8v4.5"/></svg>
           <span data-i18n="auth.role_student">Talaba</span>
@@ -202,6 +203,7 @@ window.addEventListener("unhandledrejection", function (e) {
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 2.8v5.5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V5.8L12 3z"/><path d="M8.8 12l2.2 2.2 4.2-4.4"/></svg>
           <span data-i18n="auth.role_admin">Admin</span>
         </button>
+        <p class="field-err" id="err-role"></p>
       </div>
 
       <div class="login-opt">

@@ -39,6 +39,10 @@ CONFLICT = 409
 MAX_IMG_BYTES = 5 * 1024 * 1024  # ≤5MB (base64 URL qabul qilinadi)
 MAX_CAR_PHOTOS = 8               # bitta avtomobil uchun fotosuratlar soni
 
+# Tizimdagi mavjud rollar — login paytida yuborilgan rol shu ro'yxamdandagi
+# bo'lishi SHART (MODUL 2). Noma'lum rol ham "wrong_role" bilan rad etiladi.
+ROLES = ("admin", "instructor", "student")
+
 
 def _week_monday() -> str:
     """Joriy haftaning dushanba sanasi (YYYY-MM-DD). M6: haftalik statistika uchun."""
@@ -208,7 +212,13 @@ class Api:
             return BAD, err("auth.wrong_credentials")
         if u["status"] != "active":
             return BAD, err("auth.user_blocked")
-        if role and u["role"] != role:
+        # MODUL 2: rol MAJBURIY va foydalanuvchining haqiqiy roliga mos kelishi shart.
+        # Eski kod `if role and ...` edi — rol yuborilmasa umuman tekshirilmasdi,
+        # ya'ni tizim roli "avtomatik" deb qabul qilib kirishga ruxsat berardi.
+        # Endi rol yo'q/noto'g'ri/xato bo'lsa — kirish RAD etiladi.
+        # Xavfsizlik uchun xabar umumiy ("login yoki parol noto'g'ri"): foydalanuvchi
+        # haqiqiy roli oshkor qilinmaydi.
+        if role not in ROLES or u["role"] != role:
             return BAD, err("auth.wrong_role")
         if u.get("totp_enabled"):
             otp = str(body.get("otp", "")).strip()
