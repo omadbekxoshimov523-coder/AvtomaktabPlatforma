@@ -2280,5 +2280,86 @@ class TestRememberMe(Base):
                              "localStorage'ga sessiya kaliti yozilmoqda: %s" % m.group(2))
 
 
+class TestUsersByRole(Base):
+    """MODUL 6 — foydalanuvchilar rolda bo'linib ko'rsatiladi
+    (Talabalar | Instruktorlar | Adminlar), har biri o'z qidiruvi bilan."""
+
+    def setUp(self):
+        self.admin = Client()
+        from app.auth import reset_login_attempts
+        reset_login_attempts("login:admin")
+        st, r = self.admin.post("/api/auth/login",
+                                {"login": "admin", "password": "admin123", "role": "admin"})
+        self.assertEqual(st, 200, r)
+
+    def test_300_each_role_returned_separately(self):
+        """Har bir rol faqat o'z rolikadagilarni oladi — ro'yxatlar aralashmaydi."""
+        for role in ("student", "instructor", "admin"):
+            st, r = self.admin.get(f"/api/admin/users?role={role}")
+            self.assertEqual(st, 200, r)
+            self.assertTrue(r["users"], f"{role} bo'sh qaytdi")
+            for u in r["users"]:
+                self.assertEqual(u["role"], role,
+                                 f"role={role} so'rovida {u['role']} qaytdi — ro'yxatlar aralashdi")
+
+    def test_301_admin_tab_shows_admins(self):
+        st, r = self.admin.get("/api/admin/users?role=admin")
+        self.assertEqual(st, 200, r)
+        self.assertTrue(any(u["login"] == "admin" for u in r["users"]),
+                        "boshqaruvchi admin ro'yxatda yo'q")
+        # Adminlar uchun 'progress'/'instructors' kabi talaba maydonlari chiqmasin
+        for u in r["users"]:
+            self.assertNotIn("progress", u)
+            self.assertNotIn("instructors", u)
+
+    def test_302_student_tab_has_instructor_and_progress(self):
+        st, r = self.admin.get("/api/admin/users?role=student")
+        self.assertEqual(st, 200, r)
+        for u in r["users"]:
+            self.assertIn("student", u)
+            pr = u.get("progress")
+            self.assertIsNotNone(pr, f"{u['login']} uchun progress yo'q")
+            for k in ("total", "done", "pct"):
+                self.assertIn(k, pr)
+            self.assertTrue(0 <= pr["pct"] <= 100, f"{u['login']}: pct={pr['pct']}")
+            self.assertLessEqual(pr["done"], pr["total"])
+            self.assertIsInstance(u.get("instructors"), list)
+
+    def test_303_instructor_tab_has_students_count(self):
+        st, r = self.admin.get("/api/admin/users?role=instructor")
+        self.assertEqual(st, 200, r)
+        for u in r["users"]:
+            self.assertIn("instructor", u)
+            self.assertIsInstance(u.get("students_count"), int)
+            self.assertGreaterEqual(u["students_count"], 0)
+
+    def test_304_search_inside_role(self):
+        """Qidiruv faqat tanlangan rol ichida ishlaydi."""
+        st, r = self.admin.get("/api/admin/users?role=student&q=usrL_00004")
+        self.assertEqual(st, 200, r)
+        self.assertTrue(any(u["login"] == "usrL_00004" for u in r["users"]))
+
+        # Boshqa rolga tegishli qidiruv natijasi bo'sh bo'lishi SHART
+        st, r2 = self.admin.get("/api/admin/users?role=admin&q=usrL_00004")
+        self.assertEqual(st, 200, r2)
+        self.assertEqual([u for u in r2["users"] if u["login"] == "usrL_00004"], [])
+
+        st, r3 = self.admin.get("/api/admin/users?role=student&q=admin123")
+        self.assertEqual(st, 200, r3)
+        self.assertEqual([u for u in r3["users"] if u["role"] != "student"], [])
+
+    def test_305_other_roles_cannot_list_users(self):
+        for login, pw, role in (("usrL_00004", "usrP_00004", "student"),
+                                 ("usrL_00001", "usrP_00001", "instructor")):
+            from app.auth import reset_login_attempts
+            reset_login_attempts("login:" + login)
+            c = Client()
+            st, _ = c.post("/api/auth/login", {"login": login, "password": pw, "role": role})
+            self.assertEqual(st, 200)
+            for q in ("role=student", "role=instructor", "role=admin"):
+                self.assertEqual(c.get(f"/api/admin/users?{q}")[0], 403,
+                                 f"{role} admin ro'yxatini ko'ra oladi!")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

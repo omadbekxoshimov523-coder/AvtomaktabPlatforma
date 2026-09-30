@@ -301,83 +301,211 @@ window.AdminViews = (function () {
   }
 
   /* ============================ TALABALAR ============================ */
-  async function students() {
+  /* =====================================================================
+     MODUL 6 — FOYDALANUVCHILAR: rol bo'yicha uchta alohida bo'lim (tab)
+     Talabalar | Instruktorlar | Adminlar
+     Har birida qidiruv + o'z ustunlari. Backend `role=` orqali filtrlaydi,
+     shuning uchun ro'yxatlar aralashmaydi.
+     ===================================================================== */
+  const USER_TABS = [
+    { role: "student", icon: "student", key: "nav.students" },
+    { role: "instructor", icon: "instructor", key: "nav.instructors" },
+    { role: "admin", icon: "shield", key: "nav.admins" },
+  ];
+
+  async function users(params) {
+    const active = (params && params.tab && USER_TABS.some((x) => x.role === params.tab))
+      ? params.tab : "student";
     const wrap = el("div", {}, []);
-    const searchI = input({ type: "search", placeholder: t("common.search") + "..." });
-    const addB = el("button", { class: "btn btn-primary", icon: "plus", text: "" + t("student.add"), onclick: () => Shared.openUserForm("student") });
-    wrap.append(el("div", { class: "row between mb" }, [searchI, addB]));
+
+    // --- Tablar (sidebar'dan oson o'tish uchun) ---
+    wrap.append(el("div", { class: "tabs mb" }, USER_TABS.map((tb) =>
+      el("button", {
+        class: "tab" + (tb.role === active ? " active" : ""),
+        icon: tb.icon, text: t(tb.key),
+        onclick: () => App.go("users", { tab: tb.role }),
+      })
+    )));
+
     const host = el("div", {});
     wrap.append(host);
-    async function load() {
-      host.innerHTML = ""; host.append(spinner());
-      const res = await API.get("admin/users?role=student&q=" + encodeURIComponent(searchI.value));
-      const users = res.users.filter((u) => !u.deleted_at);
-      host.innerHTML = "";
-      if (!users.length) { host.append(emptyState("👨‍🎓", t("instructor.students_empty"))); return; }
-      const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
-        el("th", { text: t("common.name") }), el("th", { text: t("student.group") }), el("th", { text: t("student.category") }),
-        el("th", { text: t("common.phone") }), el("th", { text: t("common.status") }), el("th", { text: t("common.actions") }),
-      ])]), el("tbody", {}, users.map((u) => el("tr", {}, [
-        el("td", {}, [el("div", { class: "user-cell" }, [avatar(u, 34), el("div", {}, [
-          el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
-          el("div", { class: "muted", text: u.login })])])]),
-        el("td", { text: (u.student && u.student.group_name) || "—" }),
-        el("td", { text: (u.student && u.student.license_category) || "—" }),
-        el("td", { text: u.phone || "—" }),
-        el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
-        el("td", {}, [el("div", { class: "actions" }, [
-          el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("student", u) }),
-          el("button", { class: "btn btn-danger btn-sm", text: "🗑", onclick: () => confirmDialog("Delete?", async () => {
-            try { await API.del(`admin/users/${u.id}`); toast(t("misc.saved")); load(); } catch (e) { errToast(e); }
-          }, { danger: true }) }),
-        ])]),
-      ])))]);
-      host.append(tbl);
-    }
-    searchI.addEventListener("input", (() => { let tm; return () => { clearTimeout(tm); tm = setTimeout(load, 300); }; })());
-    load();
+    host.append(USER_TABLE[active](host));
     return wrap;
   }
 
-  /* ============================ INSTRUKTORLAR ============================ */
-  async function instructors() {
-    const res = await API.get("admin/instructors");
-    const wrap = el("div", {}, []);
-    wrap.append(el("div", { class: "row between mb" }, [
-      el("h3", { icon: "instructor", text: "" + t("nav.instructors") }),
-      el("button", { class: "btn btn-primary", icon: "plus", text: "" + t("instructor.add"), onclick: () => Shared.openUserForm("instructor") }),
-    ]));
-    const list = el("div", { class: "grid-3" });
-    res.instructors.forEach((u) => {
-      // Backend flat rekord qaytaradi (user + instructor bir qatorda): frontendda
-      // Shared.openUserForm uchun normalizatsiya: id=user_id, instructor=to'liq yozuv
-      const rec = Object.assign({}, u, { id: u.user_id, instructor: u });
-      const car = rec.car || null;
-      const card = el("div", { class: "card" }, [
-        el("div", { class: "user-cell mb" }, [avatar(rec, 44), el("div", {}, [
-          el("div", { class: "cell-strong", text: `${rec.first_name} ${rec.last_name}` }),
-          el("div", { class: "muted", text: rec.login }),
-        ])]),
-        car ? el("div", { class: "car-big mb" }, [
-          el("div", { class: "car-icon", text: "🚗" }),
-          el("div", {}, [
-            el("div", { class: "car-model", text: `${car.brand} ${car.model}` }),
-            el("div", { class: "car-plate", text: car.plate_number }),
-            el("div", { class: "muted sm", text: `👥 ${car.practice_capacity}` }),
-            el("div", { class: "mt" }, [badge(car.status, statusText(car.status))]),
-          ]),
-        ]) : emptyState("🚗", t("err.car_not_assigned")),
-        el("div", { class: "muted sm", icon: "clock", text: "" + (rec.work_start ? `${rec.work_start}–${rec.work_end}` : "") }),
-        el("div", { class: "row mt" }, [
-          el("button", { class: "btn btn-light btn-sm f1", text: "✏️", onclick: () => Shared.openUserForm("instructor", rec) }),
-          el("button", { class: "btn btn-cyan btn-sm f1", icon: "car", text: "" + t("car.reassign"), onclick: () => assignCarModal(rec) }),
-        ]),
-      ]);
-      list.append(card);
-    });
-    wrap.append(list);
-    return wrap;
+  // Eski havolalar (kichik o'zgarish uchun saqlanadi)
+  function students(params) { return users({ tab: "student" }); }
+  function instructors(params) { return users({ tab: "instructor" }); }
+
+  function userSearchBox(placeholder) {
+    return input({ type: "search", placeholder: placeholder || (t("common.search") + "...") });
   }
+  function debounce(fn, ms) {
+    let tm;
+    return () => { clearTimeout(tm); tm = setTimeout(fn, ms || 300); };
+  }
+
+  /* ------------------------------ TALABALAR ------------------------------ */
+  function studentsTable(host) {
+    const searchI = userSearchBox(t("users.search_student"));
+    const addB = el("button", {
+      class: "btn btn-primary", icon: "plus", text: "" + t("student.add"),
+      onclick: () => Shared.openUserForm("student"),
+    });
+    host.append(el("div", { class: "row between mb" }, [searchI, addB]));
+
+    async function load() {
+      host.innerHTML = "";
+      host.append(spinner());
+      const res = await API.get("admin/users?role=student&q=" + encodeURIComponent(searchI.value));
+      const list = res.users.filter((u) => !u.deleted_at);
+      host.innerHTML = "";
+      host.append(el("div", { class: "row between mb" }, [searchI, addB]));
+      if (!list.length) { host.append(emptyState("👨‍🎓", t("users.empty_student"))); return; }
+
+      const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
+        el("th", { text: t("common.name") }),
+        el("th", { text: t("student.group") }),
+        el("th", { text: t("student.category") }),
+        el("th", { text: t("users.instructor") }),
+        el("th", { text: t("users.progress") }),
+        el("th", { text: t("common.phone") }),
+        el("th", { text: t("common.status") }),
+        el("th", { text: t("common.actions") }),
+      ])]), el("tbody", {}, list.map((u) => {
+        const pr = u.progress || { done: 0, total: 0, pct: 0 };
+        const names = (u.instructors || []).map((x) => x.name);
+        return el("tr", {}, [
+          el("td", {}, [el("div", { class: "user-cell" }, [avatar(u, 34), el("div", {}, [
+            el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
+            el("div", { class: "muted", text: u.login })])])]),
+          el("td", { text: (u.student && u.student.group_name) || "—" }),
+          el("td", { text: (u.student && u.student.license_category) || "—" }),
+          el("td", {}, [names.length
+            ? el("span", { text: names.length > 2 ? names.slice(0, 2).join(", ") + ` +${names.length - 2}` : names.join(", ") })
+            : el("span", { class: "muted", text: "—" })]),
+          el("td", {}, [el("div", { class: "prog-mini" }, [
+            el("div", { class: "prog-mini-bar" }, [el("i", { style: `width:${pr.pct}%` })]),
+            el("span", { class: "muted sm", text: `${pr.done}/${pr.total}` }),
+          ])]),
+          el("td", { text: u.phone || "—" }),
+          el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
+          el("td", {}, [el("div", { class: "actions" }, [
+            el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("student", u) }),
+            el("button", { class: "btn btn-danger btn-sm", text: "🗑", onclick: () => confirmDialog(t("users.delete_confirm", { name: `${u.first_name} ${u.last_name}` }), async () => {
+              try { await API.del(`admin/users/${u.id}`); toast(t("misc.saved")); load(); } catch (e) { errToast(e); }
+            }, { danger: true }) }),
+          ])]),
+        ]);
+      }))]);
+      host.append(tbl);
+    }
+    searchI.addEventListener("input", debounce(load, 300));
+    load();
+  }
+
+  /* ---------------------------- INSTRUKTORLAR ---------------------------- */
+  function instructorsTable(host) {
+    const searchI = userSearchBox(t("users.search_instructor"));
+    const addB = el("button", {
+      class: "btn btn-primary", icon: "plus", text: "" + t("instructor.add"),
+      onclick: () => Shared.openUserForm("instructor"),
+    });
+    host.append(el("div", { class: "row between mb" }, [searchI, addB]));
+
+    async function load() {
+      host.innerHTML = "";
+      host.append(spinner());
+      const res = await API.get("admin/users?role=instructor&q=" + encodeURIComponent(searchI.value));
+      const list = res.users.filter((u) => !u.deleted_at);
+      host.innerHTML = "";
+      host.append(el("div", { class: "row between mb" }, [searchI, addB]));
+      if (!list.length) { host.append(emptyState("🚗", t("users.empty_instructor"))); return; }
+
+      const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
+        el("th", { text: t("common.name") }),
+        el("th", { text: t("users.students_count") }),
+        el("th", { text: t("users.car") }),
+        el("th", { text: t("users.work_hours") }),
+        el("th", { text: t("common.phone") }),
+        el("th", { text: t("common.status") }),
+        el("th", { text: t("common.actions") }),
+      ])]), el("tbody", {}, list.map((u) => {
+        const car = u.car || null;
+        const inst = u.instructor || {};
+        return el("tr", {}, [
+          el("td", {}, [el("div", { class: "user-cell" }, [avatar(u, 34), el("div", {}, [
+            el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
+            el("div", { class: "muted", text: u.login })])])]),
+          el("td", {}, [el("span", { icon: "student", text: ` ${u.students_count || 0}` })]),
+          el("td", {}, [car
+            ? el("div", {}, [
+                el("div", { class: "cell-strong", text: `${car.brand} ${car.model}` }),
+                el("div", { class: "muted", text: car.plate_number }),
+              ])
+            : el("span", { class: "muted", text: t("err.car_not_assigned") })]),
+          el("td", { text: (inst.work_start ? `${inst.work_start}–${inst.work_end}` : "—") }),
+          el("td", { text: u.phone || "—" }),
+          el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
+          el("td", {}, [el("div", { class: "actions" }, [
+            el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("instructor", u) }),
+            el("button", { class: "btn btn-cyan btn-sm", icon: "car", text: "" + t("car.reassign"), onclick: () => assignCarModal(u) }),
+            el("button", { class: "btn btn-danger btn-sm", text: "🗑", onclick: () => confirmDialog(t("users.delete_confirm", { name: `${u.first_name} ${u.last_name}` }), async () => {
+              try { await API.del(`admin/users/${u.id}`); toast(t("misc.saved")); load(); } catch (e) { errToast(e); }
+            }, { danger: true }) }),
+          ])]),
+        ]);
+      }))]);
+      host.append(tbl);
+    }
+    searchI.addEventListener("input", debounce(load, 300));
+    load();
+  }
+
+  /* ------------------------------ ADMINLAR ------------------------------ */
+  function adminsTable(host) {
+    const searchI = userSearchBox(t("users.search_admin"));
+    const bar = el("div", { class: "row between mb" }, [
+      searchI,
+      el("span", { class: "muted sm", text: t("users.admins_hint") }),
+    ]);
+    host.append(bar);
+
+    async function load() {
+      host.innerHTML = "";
+      host.append(spinner());
+      const res = await API.get("admin/users?role=admin&q=" + encodeURIComponent(searchI.value));
+      const list = res.users.filter((u) => !u.deleted_at);
+      host.innerHTML = "";
+      host.append(bar);
+      if (!list.length) { host.append(emptyState("🛡️", t("users.empty_admin"))); return; }
+
+      const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
+        el("th", { text: t("common.name") }),
+        el("th", { text: t("users.perms") }),
+        el("th", { text: t("users.last_login") }),
+        el("th", { text: t("common.phone") }),
+        el("th", { text: t("common.status") }),
+      ])]), el("tbody", {}, list.map((u) => el("tr", {}, [
+        el("td", {}, [el("div", { class: "user-cell" }, [avatar(u, 34), el("div", {}, [
+          el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
+          el("div", { class: "muted", text: u.login })])])]),
+        el("td", {}, [el("span", { class: "badge badge-cyan", text: t("auth.role_admin") })]),
+        el("td", { text: u.last_login_at || "—" }),
+        el("td", { text: u.phone || "—" }),
+        el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
+      ])))]);
+      host.append(tbl);
+    }
+    searchI.addEventListener("input", debounce(load, 300));
+    load();
+  }
+
+  const USER_TABLE = {
+    student: studentsTable,
+    instructor: instructorsTable,
+    admin: adminsTable,
+  };
 
   async function assignCarModal(instructor) {
     const cars = (await API.get("admin/cars")).cars.filter((c) => c.status !== "inactive");
@@ -1097,5 +1225,5 @@ window.AdminViews = (function () {
     return wrap;
   }
 
-  return { dashboard, base, students, instructors, cars, lessons, calendar, requests, reports, analytics, audit, backup, settings, profile, notifications: () => Shared.notificationsPage() };
+  return { dashboard, base, users, students, instructors, cars, lessons, calendar, requests, reports, analytics, audit, backup, settings, profile, notifications: () => Shared.notificationsPage() };
 })();

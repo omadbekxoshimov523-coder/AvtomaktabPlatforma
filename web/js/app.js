@@ -19,8 +19,8 @@
       ["base", "book", "nav.base"],
       ["calendar", "calendar", "nav.calendar"],
       ["requests", "inbox", "nav.requests"],
-      ["students", "student", "nav.students"],
-      ["instructors", "instructor", "nav.instructors"],
+      // MODUL 6: foydalanuvchilar bitta bo'limda, ichida 3 ta tab (rol bo'yicha)
+      ["users", "users", "nav.users"],
       ["cars", "car", "nav.cars"],
       ["lessons", "lessons", "nav.lessons"],
       ["reports", "chart", "nav.reports"],

@@ -56,6 +56,24 @@ const I18N = (function () {
     "nav.requests": { uz: "So'rovlar", ru: "Заявки", en: "Requests" },
     "nav.students": { uz: "Talabalar", ru: "Ученики", en: "Students" },
     "nav.instructors": { uz: "Instruktorlar", ru: "Инструкторы", en: "Instructors" },
+    /* MODUL 6: foydalanuvchilar bo'limi — uchta alohida tab */
+    "nav.users": { uz: "Foydalanuvchilar", ru: "Пользователи", en: "Users" },
+    "nav.admins": { uz: "Adminlar", ru: "Администраторы", en: "Administrators" },
+    "users.instructor": { uz: "Instruktor", ru: "Инструктор", en: "Instructor" },
+    "users.progress": { uz: "Progress", ru: "Прогресс", en: "Progress" },
+    "users.students_count": { uz: "Talabalar soni", ru: "Кол-во учеников", en: "Students" },
+    "users.car": { uz: "Avtomobil", ru: "Автомобиль", en: "Vehicle" },
+    "users.work_hours": { uz: "Ish vaqti", ru: "Рабочие часы", en: "Working hours" },
+    "users.perms": { uz: "Huquqlar", ru: "Права", en: "Permissions" },
+    "users.last_login": { uz: "Oxirgi kirish", ru: "Последний вход", en: "Last sign-in" },
+    "users.admins_hint": { uz: "Admin hisobini faqat boshqa admin yaratadi.", ru: "Учётную запись администратора создаёт только другой администратор.", en: "Only another administrator can create an admin account." },
+    "users.search_student": { uz: "Talaba qidirish (ism, login, telefon)...", ru: "Поиск ученика (имя, логин, телефон)...", en: "Search student (name, login, phone)..." },
+    "users.search_instructor": { uz: "Instruktor qidirish (ism, login, telefon)...", ru: "Поиск инструктора (имя, логин, телефон)...", en: "Search instructor (name, login, phone)..." },
+    "users.search_admin": { uz: "Admin qidirish (ism, login)...", ru: "Поиск администратора (имя, логин)...", en: "Search administrator (name, login)..." },
+    "users.empty_student": { uz: "Talabalar topilmadi", ru: "Ученики не найдены", en: "No students found" },
+    "users.empty_instructor": { uz: "Instruktorlar topilmadi", ru: "Инструкторы не найдены", en: "No instructors found" },
+    "users.empty_admin": { uz: "Adminlar topilmadi", ru: "Администраторы не найдены", en: "No administrators found" },
+    "users.delete_confirm": { uz: "{name} hisobini o'chirishni tasdiqlaysizmi?", ru: "Подтвердите удаление учётной записи {name}?", en: "Delete the account of {name}?" },
     "nav.cars": { uz: "Avtomobillar", ru: "Автомобили", en: "Cars" },
     "nav.lessons": { uz: "Mashg'ulotlar", ru: "Занятия", en: "Lessons" },
     "nav.reports": { uz: "Hisobotlar", ru: "Отчёты", en: "Reports" },
@@ -586,10 +604,18 @@ const I18N = (function () {
 
   let current = lsGet("lang") || "uz";
 
-  function t(key) {
+  /* Tarjima kaliti. `params` berilsa, matndagi {nom} kabi joylar almashtiriladi:
+     t("users.delete_confirm", { name: "Ali" }) -> "...Ali..." */
+  function t(key, params) {
     const entry = DICT[key];
     if (!entry) return key;
-    return entry[current] || entry.uz || key;
+    let s = entry[current] || entry.uz || key;
+    if (params && typeof params === "object") {
+      Object.keys(params).forEach((k) => {
+        s = s.split("{" + k + "}").join(String(params[k]));
+      });
+    }
+    return s;
   }
 
   function setLang(l) {

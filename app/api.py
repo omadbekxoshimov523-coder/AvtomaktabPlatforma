@@ -632,19 +632,70 @@ class Api:
         rows = self.db.q(
             "SELECT * FROM users WHERE " + " AND ".join(where) + " ORDER BY id DESC LIMIT 500", params
         )
-        out = []
-        for r in rows:
-            u = user_public(r)
+        out = [user_public(r) for r in rows]
+
+        # MODUL 6: rolda bo'linish uchun qo'shimcha ma'lumotlar BULK so'rov bilan
+        # olinadi (har bir qatorga alohida SQL yubormaslik uchun — N+1 oldi olindi).
+        st_by_uid = {s["user_id"]: s for s in self.db.q("SELECT * FROM students")}
+        inst_by_uid = {i["user_id"]: i for i in self.db.q("SELECT * FROM instructors")}
+
+        prog = {}
+        if any(u["role"] == "student" for u in out):
+            for p in self.db.q(
+                """SELECT ss.student_id AS sid,
+                          COUNT(*) AS total,
+                          SUM(CASE WHEN ls.status='completed' THEN 1 ELSE 0 END) AS done
+                   FROM session_students ss
+                   JOIN lesson_sessions ls ON ls.id=ss.session_id
+                   WHERE ss.student_status='active' AND ls.status!='cancelled'
+                   GROUP BY ss.student_id"""
+            ):
+                total = p["total"] or 0
+                done = p["done"] or 0
+                prog[p["sid"]] = {
+                    "total": total, "done": done,
+                    "pct": round(done * 100 / total) if total else 0,
+                }
+
+        inst_of = {}
+        if any(u["role"] == "student" for u in out):
+            for p in self.db.q(
+                """SELECT DISTINCT ss.student_id AS sid, i.id AS iid,
+                          u.first_name||' '||u.last_name AS name
+                   FROM session_students ss
+                   JOIN lesson_sessions ls ON ls.id=ss.session_id
+                   JOIN instructors i ON i.id=ls.instructor_id
+                   JOIN users u ON u.id=i.user_id
+                   WHERE ss.student_status='active' ORDER BY ss.student_id, name"""
+            ):
+                inst_of.setdefault(p["sid"], []).append({"id": p["iid"], "name": p["name"]})
+
+        stud_count = {}
+        if any(u["role"] == "instructor" for u in out):
+            for p in self.db.q(
+                """SELECT ls.instructor_id AS iid,
+                          COUNT(DISTINCT CASE WHEN ss.student_status='active' THEN ss.student_id END) AS n
+                   FROM lesson_sessions ls
+                   JOIN session_students ss ON ss.session_id=ls.id
+                   GROUP BY ls.instructor_id"""
+            ):
+                stud_count[p["iid"]] = p["n"] or 0
+
+        for u in out:
             if u["role"] == "student":
-                s = self.db.q1("SELECT * FROM students WHERE user_id=?", (r["id"],))
+                s = st_by_uid.get(u["id"])
                 u["student"] = s
-            if u["role"] == "instructor":
-                i_ = self.db.q1("SELECT * FROM instructors WHERE user_id=?", (r["id"],))
+                if s:
+                    u["progress"] = prog.get(s["id"], {"total": 0, "done": 0, "pct": 0})
+                    u["instructors"] = inst_of.get(s["id"], [])
+            elif u["role"] == "instructor":
+                i_ = inst_by_uid.get(u["id"])
                 u["instructor"] = i_
+                if i_:
+                    u["students_count"] = stud_count.get(i_["id"], 0)
                 if i_ and i_["assigned_car_id"]:
                     c = self.db.q1("SELECT id, brand, model, plate_number, practice_capacity, status FROM cars WHERE id=?", (i_["assigned_car_id"],))
                     u["car"] = c
-            out.append(u)
         return OK, {"ok": True, "users": out}
 
     def admin_user_create(self, body):
