@@ -184,10 +184,14 @@ def save_data_url_image(data_url: str, folder: str, prefix: str) -> "tuple[str, 
 
 
 class Api:
-    def __init__(self, db: Db, token: str):
+    # `tab` — so'rov sarlavhasidagi tab kaliti (None = eski rejim: faqat cookie).
+    # Foydalanuvchi har bir so'rovda FAQAT shu so'rov keltirgan kalit orqali
+    # aniqlanadi; modul darajasida hech qanday foydalanuvchi holati saqlanmaydi.
+    def __init__(self, db: Db, token: str, tab: str = None):
         self.db = db
         self.token = token
-        self.user = get_session_user(db, token) if token else None
+        self.tab = tab or None
+        self.user = get_session_user(db, token, self.tab) if token else None
 
     # ------------------------------------------------------------------ auth
     def auth_login(self, body):
@@ -215,12 +219,19 @@ class Api:
             if not self._check_twofa_code(u, otp):
                 return BAD, err("auth.otp_invalid")
         reset_login_attempts("login:" + login)
-        token = create_session(self.db, u["id"], remember)
+        # Tab'ga xos rejim: cookie'ga qurilma kaliti yoziladi (HttpOnly), sessiya
+        # esa shu qurilma + shu tab birligidan yaratiladi. Shunda boshqa tab'
+        # kirganda bu tab'ning sessiyasi buzilmaydi.
+        token = create_session(self.db, u["id"], remember, tab=self.tab, device=self.token or None)
+        if self.tab and self.token:
+            # Eski rejimda yaratilgan sessiya qoldig'ini tozalaymiz
+            # (cookie qiymati endi qurilma kaliti sifatida ishlatiladi).
+            destroy_session(self.db, self.token)
         self.db.upd("UPDATE users SET last_login_at=? WHERE id=?", (now(), u["id"]))
         return OK, {"ok": True, "token": token, "user": user_public(u)}
 
     def auth_logout(self):
-        destroy_session(self.db, self.token)
+        destroy_session(self.db, self.token, self.tab)
         return OK, {"ok": True}
 
     def auth_change_password(self, body):

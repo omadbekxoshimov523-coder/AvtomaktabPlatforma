@@ -48,21 +48,71 @@ def _expires(days: int) -> str:
     return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def create_session(db, user_id: int, remember: bool) -> tuple:
-    token = new_token()
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
+# ---------------------------------------------------------------------------
+# TAB'GA XOS SESSIYA (bir brauzer = bir emas, har bir tab' = alohida sessiya)
+#
+# MUAMMO: sessiya bitta `sid` cookie'si orqali aniqlanardi. Cookie esa bitta
+# brauzer bo'ylab UMUMIY — barcha tab'lar va oynalar bir xil qiymatni ko'radi.
+# Shuning uchun ikki odam bir xil brauzerda (ikki tab'da) kirsa, ikkinchisi
+# birinchisining sessiyasini almashtirib yuboradi: birinchi oyna o'zini
+# instruktor deb o'ylashda davom etadi, lekin server undan TALABA ma'lumotini
+# qaytaradi. Natijada boshqa odamning ismi, jadvali, xabarlari ko'rinadi.
+#
+# YECHIM: kalit bitta emas, IKKI qismdan yig'iladi:
+#   * qurilma kaliti — HttpOnly `sid` cookie'sida. JS uni KO'RA OLMAYDI,
+#     ya'ni XSS orqali olib chiqib ketish mumkin emas.
+#   * tab kaliti — `X-Avto-Tab` sarlavhasida, tabga xos (sessionStorage).
+#     Bu credential EMAS, faqat indeks: o'zi bilan hech naga kira olmaydi.
+# Serverda saqlanadigan kalit ikkalasining kombinatsiyasidan hash qilinadi,
+# shuning uchun hech qanday bitta qism credential hisoblanmaydi.
+# ---------------------------------------------------------------------------
+
+TAB_HEADER = "X-Avto-Tab"
+
+
+def new_device_id() -> str:
+    """Yangi qurilma (brauzer) kaliti — cookie'ga yoziladi, HttpOnly."""
+    return new_token(32)
+
+
+def session_hash(cred: str, tab: str = None) -> str:
+    """So'rov keltirgan kalitdan sessiya kalitini (hash) hisoblaydi.
+
+    `tab` berilsa: sha256(cred:tab) — har bir tab' alohida sessiya oladi.
+    `tab` yo'q bo'lsa: sha256(cred) — eski mijozlar (curl, test, bot) uchun.
+    """
+    if tab:
+        return hashlib.sha256(("%s:%s" % (cred, tab)).encode()).hexdigest()
+    return hashlib.sha256(cred.encode()).hexdigest()
+
+
+def create_session(db, user_id: int, remember: bool, tab: str = None, device: str = None) -> str:
+    """Sessiya yaratadi va cookie'ga yoziladigan kalitni qaytaradi.
+
+    `tab` berilgan holatda qaytarilgan qiymat — qurilma kaliti (barcha tab'lar
+    uchun umumiy, ammo o'zi bilan kirishga imkon bermaydi). Aks holda — eski
+    rejim: to'liq sessiya tokeni.
+    """
     days = 30 if remember else 1
+    if tab:
+        cred = device or new_device_id()
+    else:
+        cred = new_token()
+    th = session_hash(cred, tab)
+    # `token_hash` UNIQUE: bir xil tab'da qayta kiringanda (masalan avvalgi
+    # chiqish so'rovi serverga yetib borilmagan bo'lsa) constraint buzilmasin.
+    db.upd("DELETE FROM sessions_ring WHERE token_hash=?", (th,))
     db.ex(
         "INSERT INTO sessions_ring(user_id, token_hash, created_at, expires_at) VALUES(?,?,?,?)",
-        (user_id, token_hash, now(), _expires(days)),
+        (user_id, th, now(), _expires(days)),
     )
-    return token
+    return cred
 
 
-def get_session_user(db, token: str):
+def get_session_user(db, token: str, tab: str = None):
     if not token:
         return None
-    th = hashlib.sha256(token.encode()).hexdigest()
+    th = session_hash(token, tab)
     row = db.q1(
         "SELECT user_id, expires_at FROM sessions_ring WHERE token_hash=?", (th,)
     )
@@ -77,11 +127,11 @@ def get_session_user(db, token: str):
     return db.q1("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (row["user_id"],))
 
 
-def destroy_session(db, token: str) -> None:
+def destroy_session(db, token: str, tab: str = None) -> None:
     if token:
         db.upd(
             "DELETE FROM sessions_ring WHERE token_hash=?",
-            (hashlib.sha256(token.encode()).hexdigest(),),
+            (session_hash(token, tab),),
         )
 
 

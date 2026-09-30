@@ -362,6 +362,24 @@
     document.getElementById("login-screen").classList.remove("hidden");
   }
 
+  /* Serverdan kelgan foydalanuvchi shu tab'ning foydalanuvchisi bilan mos
+     kelishi SHART. Mos kelmasa — sessiya almashib qolgan: masalan boshqa
+     qurilmada "Barcha qurilmalardan chiqish" qilingan, yoki eski token qolgan.
+     Bunday holatda eski ma'lumotni KO'RSATMAYDI — tozalab, qayta kiritishga
+     majbur qiladi. Aks holda bir odam boshqa odamning profilini, jadvalini va
+     xabarlarini ko'ra oladi (fail-closed). */
+  function applyMe(me) {
+    const cur = App.me && App.me.user;
+    if (cur && me && me.user && me.user.id !== cur.id) {
+      clearSessionState();
+      showLoginScreen();
+      toast(t("session.switched"), "error");
+      return false;
+    }
+    App.me = me;
+    return true;
+  }
+
   /* Server sessiyasini ham yakunlaydi. Serverga yetib bormasa ham lokal
      holat (va ko'rinish) tozalanadi — aks holda ekranda eski foydalanuvchi
      ma'lumoti qolib ketardi. */
@@ -487,7 +505,7 @@
   };
 
   App.refreshMe = async function () {
-    try { App.me = await API.get("auth/me"); } catch (e) {}
+    try { applyMe(await API.get("auth/me")); } catch (e) {}
     updateNotifBadge();
   };
 
@@ -544,8 +562,9 @@
   async function guardAuth() {
     if (!App.me) { showLoginScreen(); return; }
     try {
-      App.me = await API.get("auth/me");
-      updateNotifBadge();
+      // applyMe: server boshqa foydalanuvchini qaytarsa — eski ma'lumotni
+      // ko'rsatmaydi, qayta kiritishga majbur qiladi.
+      if (applyMe(await API.get("auth/me"))) updateNotifBadge();
     } catch (e) {
       App.logout({ silent: true });
     }

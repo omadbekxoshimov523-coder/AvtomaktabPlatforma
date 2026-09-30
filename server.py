@@ -37,6 +37,7 @@ os.makedirs(BACKUP_DIR, exist_ok=True)
 
 from app.db import init_db
 from app.api import Api, configure
+from app.auth import TAB_HEADER
 from app.seed import seed
 
 
@@ -156,9 +157,12 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_file(WEB_DIR / "index.html")  # SPA fallback
 
     def _api(self, method: str, sub: str, query: dict):
-        # Cookie'dan session tokeni olinadi; auth'ga yuboriladi
+        # Cookie'dan QURILMA kaliti olinadi; tab kaliti — so'rov sarlavhasidan.
+        # Ikkalasi birgalikda sessiyani belgilaydi, shuning uchun bitta brauzerdagi
+        # turli tab'lar bir-birining foydalanuvchisini ko'ra olmaydi.
         token = self._cookie("sid")
-        api = Api(DB, token)
+        tab = (self.headers.get(TAB_HEADER) or "").strip() or None
+        api = Api(DB, token, tab)
 
         if method == "GET" and sub == "health":
             return self._send_json(200, {"ok": True, "app": "Avtomaktab"})
@@ -192,6 +196,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if method == "POST" and sub == "auth/logout":
             status, payload = api.auth_logout()
+            if tab:
+                # Tab'ga xos rejim: cookie'da QURILMA kaliti turibdi, u boshqa
+                # tab'lar uchun ham kerak. Uni o'chirsak, qo'shni tab'lar
+                # sessiyasini yo'qotamiz. Qurilma kaliti credential emas —
+                # o'zi bilan kirish mumkin emas — shuning uchun saqlanadi.
+                return self._send_json(status, payload)
             extra = {"Set-Cookie": "sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"}
             return self._send_json(status, payload, extra)
 

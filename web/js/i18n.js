@@ -566,6 +566,8 @@ const I18N = (function () {
     "logout.done": { uz: "Hisobdan chiqdingiz", ru: "Вы вышли из аккаунта", en: "You have signed out" },
     "logout.sidebar": { uz: "Chiqish", ru: "Выйти", en: "Sign out" },
     "logout.server_error": { uz: "Serverga ulanib bo'lmadi — sessiya yopilmagan bo'lishi mumkin. Brauzerni yopib qayta oching.", ru: "Не удалось связаться с сервером — сессия могла не завершиться. Закройте и снова откройте браузер.", en: "Could not reach the server — the session may not have ended. Close and reopen your browser." },
+    /* Sessiya almashib qolgan holat (tab'ga xos sessiya himoyasi) */
+    "session.switched": { uz: "Sessiya boshqa foydalanuvchiga o'tdi. Xavfsizlik uchun ma'lumotlar yashirildi — qayta kiring.", ru: "Сессия перешла к другому пользователю. Данные скрыты в целях безопасности — войдите снова.", en: "This session now belongs to another user. Your data was hidden for safety — please sign in again." },
   };
 
   const LANGS = { uz: "O'zbek", ru: "Русский", en: "English" };

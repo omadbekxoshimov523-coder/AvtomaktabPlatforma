@@ -73,6 +73,50 @@ class Client:
     def delete(self, p): return self.req("DELETE", p)
 
 
+class TabClient(Client):
+    """Brauzer tab'ini taqlid qiladi: `X-Avto-Tab` sarlavhasini yuboradi.
+
+    Bitta brauzerda bir nechta tab ochilganda har bir tab' o'z sessiyasini
+    oladi (cookie esa barcha tab'larda umumiy) — shu sarlavha orqali.
+    `jar` parametri orqali bir nechta tab bitta cookie jarni ham ulaydi.
+    """
+
+    def __init__(self, tab, jar=None):
+        super().__init__()
+        self.tab = tab
+        if jar is not None:
+            self.jar = jar
+            self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+    def req(self, method, path, body=None, cookie=None, tab=None):
+        data = None
+        headers = {}
+        if body is not None:
+            data = json.dumps(body).encode()
+            headers["Content-Type"] = "application/json"
+        if method in ("POST", "PUT", "DELETE"):
+            headers["X-Requested-With"] = "Avtomaktab"
+        # `tab=False` -> sarlavha yuborilmaydi (eski mijoz kabi: curl, bot)
+        if tab is not False:
+            headers["X-Avto-Tab"] = tab if tab else self.tab
+        if cookie:
+            headers["Cookie"] = "sid=" + cookie
+        req = urllib.request.Request(f"http://{HOST}:{PORT}{path}", data=data, headers=headers, method=method)
+        try:
+            with self.opener.open(req, timeout=15) as resp:
+                raw = resp.read()
+                try:
+                    return resp.status, json.loads(raw.decode("utf-8"))
+                except Exception:
+                    return resp.status, {"raw": True}
+        except urllib.error.HTTPError as e:
+            raw = e.read()
+            try:
+                return e.code, json.loads(raw.decode("utf-8"))
+            except Exception:
+                return e.code, {}
+
+
 # Barcha test klasslari BIRTA umumiy server ishlatadi (har klassda yangi server ochish
 # Windows'da SO_REUSEADDR tufayli o'lik serverga ulanish/osilish muammosini keltiradi)
 _SERVER = {"httpd": None, "owners": 0}
@@ -1888,6 +1932,230 @@ class TestM9LessonDuration(Base):
         db.upd("DELETE FROM notifications WHERE data LIKE ?", (f'%"session_id": {r["id"]}%',))
         db.upd("DELETE FROM lesson_sessions WHERE id=?", (r["id"],))
         admin.put("/api/admin/settings", {"lesson_duration_min": 90})
+
+
+class TestSessionIsolation(Base):
+    """MODUL 1 — foydalanuvchi sessiyalari ARALASHMASLIGI (xavfsizlik).
+
+    Xato: sessiya bitta `sid` cookie'siga bog'langan edi. Cookie esa bitta
+    brauzer bo'ylab UMUMIY — barcha tab'lar bir xil qiymatni ko'radi.
+    Shuning uchun bir brauzerda ikki odam kirsa, ikkinchisi birinchisining
+    sessiyasini almashtirib yuborardi va birinchi oyna boshqa odamning
+    profilini, jadvalini, xabarlarini ko'ra boshlardi.
+
+    Tuzatma: kalit ikki qismdan yig'iladi — HttpOnly cookie'dagi QURILMA
+    kaliti + `X-Avto-Tab` sarlavhasidagi TAB kaliti.
+    """
+
+    INSTR = ("usrL_00001", "usrP_00001", "instructor")
+    STUD = ("usrL_00004", "usrP_00004", "student")
+    ADMIN = ("admin", "admin123", "admin")
+
+    def _login(self, tab_client, creds):
+        st, r = tab_client.post("/api/auth/login", {
+            "login": creds[0], "password": creds[1], "role": creds[2]})
+        self.assertEqual(st, 200, r)
+        return r["user"]
+
+    def _device(self, tab_client):
+        for ck in tab_client.jar:
+            if ck.name == "sid":
+                return ck.value
+        return None
+
+    # ------------------------------------------------------------------ asosiy
+    def test_100_two_tabs_same_browser_stay_independent(self):
+        """Bir brauzer, ikki tab: 2-tab kirmasi 1-tabni buzmasin."""
+        jar = http.cookiejar.CookieJar()
+        tab1 = TabClient("iso-tab-1", jar=jar)
+        tab2 = TabClient("iso-tab-2", jar=jar)
+
+        u1 = self._login(tab1, self.INSTR)
+        self.assertEqual(u1["role"], "instructor")
+
+        # Ikkala tab bir xil cookie jar'ni ko'radi — bitta brauzer taqdimoti
+        self.assertEqual(self._device(tab1), self._device(tab2))
+
+        u2 = self._login(tab2, self.STUD)
+        self.assertEqual(u2["role"], "student")
+
+        # MUIM: 1-tab o'zini hali ham instruktor deb o'ylaydi
+        st, me1 = tab1.get("/api/auth/me")
+        self.assertEqual(st, 200, me1)
+        self.assertEqual(me1["user"]["id"], u1["id"], "1-tab boshqa foydalanuvchiga o'tib ketgan!")
+        self.assertEqual(me1["user"]["role"], "instructor")
+
+        st, me2 = tab2.get("/api/auth/me")
+        self.assertEqual(st, 200, me2)
+        self.assertEqual(me2["user"]["id"], u2["id"])
+        self.assertEqual(me2["user"]["role"], "student")
+
+        # Rollararo endpoint'lar aralashmaydi
+        self.assertEqual(tab1.get("/api/student/home")[0], 403)
+        self.assertEqual(tab2.get("/api/instructor/students")[0], 403)
+
+    def test_101_three_roles_parallel_no_mixing(self):
+        """3 rol, 3 qurilma, 300 ta parallel so'rov — javoblar aralashmasin."""
+        clients = {}
+        expect = {}
+        for i, creds in enumerate((self.ADMIN, self.INSTR, self.STUD), start=1):
+            c = TabClient("iso-par-%d" % i)
+            expect[i] = self._login(c, creds)["id"]
+            clients[i] = c
+
+        bad = []
+        lock = threading.Lock()
+
+        def worker(idx):
+            c = clients[idx]
+            for _ in range(100):
+                st, r = c.get("/api/auth/me")
+                if st != 200 or r.get("user", {}).get("id") != expect[idx]:
+                    with lock:
+                        bad.append((idx, st, r))
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in (1, 2, 3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(bad, [], "parallel so'rovlarda sessiya aralashdi: %s" % bad[:5])
+
+    def test_102_role_data_isolation(self):
+        """Har bir rol faqat o'z ma'lumotini oladi."""
+        admin = TabClient("iso-iso-admin"); self._login(admin, self.ADMIN)
+        instr = TabClient("iso-iso-instr"); self._login(instr, self.INSTR)
+        stud = TabClient("iso-iso-stud"); self._login(stud, self.STUD)
+
+        self.assertEqual(admin.get("/api/admin/users")[0], 200)
+        self.assertEqual(instr.get("/api/instructor/students")[0], 200)
+        self.assertEqual(stud.get("/api/student/sessions")[0], 200)
+
+        self.assertEqual(stud.get("/api/admin/users")[0], 403)
+        self.assertEqual(stud.get("/api/instructor/students")[0], 403)
+        self.assertEqual(instr.get("/api/admin/users")[0], 403)
+        self.assertEqual(instr.get("/api/student/sessions")[0], 403)
+        self.assertEqual(admin.get("/api/student/sessions")[0], 403)
+
+    def test_103_logout_in_one_tab_keeps_others(self):
+        """Bitta tab chiqishi qo'shni tab'larni o'ldirmasin."""
+        jar = http.cookiejar.CookieJar()
+        tab1 = TabClient("iso-out-1", jar=jar)
+        tab2 = TabClient("iso-out-2", jar=jar)
+        self._login(tab1, self.INSTR)
+        self._login(tab2, self.STUD)
+
+        self.assertEqual(tab1.post("/api/auth/logout")[0], 200)
+        self.assertEqual(tab1.get("/api/auth/me")[0], 401, "chiqilgandan keyin sessiya o'chiqilmadi")
+        # Qurilma kaliti o'chmaydi — shuning uchun 2-tab ishlashda davom etadi
+        st, r = tab2.get("/api/auth/me")
+        self.assertEqual(st, 200, "bitta tab chiqishi ikkinchisini buzdi")
+        self.assertEqual(r["user"]["role"], "student")
+
+    # ---------------------------------------------------------------- xavfsizlik
+    def test_104_device_cookie_alone_is_not_a_credential(self):
+        """FAQAT cookie (tab kalitisiz) bilan kirib bo'lmasin."""
+        c = TabClient("iso-sec-1")
+        self._login(c, self.ADMIN)
+        dev = self._device(c)
+        self.assertTrue(dev)
+
+        # 1) Qurilma kaliti yalang'och — hech qanday sarlavhasiz
+        self.assertEqual(Client().req("GET", "/api/auth/me", cookie=dev)[0], 401)
+        # 2) Noto'g'ri tab kaliti bilan
+        self.assertEqual(TabClient("iso-sec-bogus").req("GET", "/api/auth/me", cookie=dev)[0], 401)
+
+    def test_105_tab_id_alone_is_not_a_credential(self):
+        """FAQAT tab kaliti (cookiesiz) bilan kirib bo'lmasin."""
+        import urllib.request as _u
+        c = TabClient("iso-sec-2")
+        self._login(c, self.ADMIN)
+        # So'rov tab sarlavhasini yuboradi, lekin cookie'siz (oddiy klient)
+        req = _u.Request(f"http://{HOST}:{PORT}/api/auth/me",
+                         headers={"X-Avto-Tab": c.tab}, method="GET")
+        try:
+            with _u.urlopen(req, timeout=15) as resp:
+                st = resp.status
+        except urllib.error.HTTPError as e:
+            st = e.code
+        self.assertEqual(st, 401, "faqat tab kaliti bilan kirish mumkin bo'lsa — zaiflik")
+
+    def test_106_legacy_client_without_header_works(self):
+        """Eski mijozlar (curl, test, bot) sarlavhasiz ham ishlayveradi."""
+        c = Client()
+        st, r = c.post("/api/auth/login", {"login": "admin", "password": "admin123", "role": "admin"})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(c.get("/api/auth/me")[0], 200)
+        self.assertEqual(c.post("/api/auth/logout")[0], 200)
+        self.assertEqual(c.get("/api/auth/me")[0], 401)
+
+    def test_107_legacy_and_tab_sessions_do_not_leak(self):
+        """Sarlavhasiz (legacy) sessiya bilan tab'ga xos sessiya aralashmasin."""
+        legacy = Client()
+        st, _ = legacy.post("/api/auth/login", {"login": "admin", "password": "admin123", "role": "admin"})
+        self.assertEqual(st, 200)
+        token = None
+        for ck in legacy.jar:
+            if ck.name == "sid":
+                token = ck.value
+        self.assertTrue(token)
+
+        # O'sha cookie qiymati + tab kaliti bilan kirish MUMKIN EMAS
+        self.assertEqual(TabClient("iso-mix-1").req("GET", "/api/auth/me", cookie=token)[0], 401)
+        # ... lekin legacy ko'rinishida ishlaydi
+        self.assertEqual(legacy.get("/api/auth/me")[0], 200)
+        legacy.post("/api/auth/logout")
+
+    def test_108_remember_me_cookie_max_age(self):
+        """"Meni eslab qolish" — checkbox yoqilgan/o'chirilgan holat."""
+        import urllib.request as _u
+        for remember, want in ((True, 2592000), (False, 86400)):
+            cj = http.cookiejar.CookieJar()
+            op = _u.build_opener(_u.HTTPCookieProcessor(cj))
+            req = _u.Request(
+                f"http://{HOST}:{PORT}/api/auth/login",
+                data=json.dumps({"login": "admin", "password": "admin123",
+                                 "role": "admin", "remember": remember}).encode(),
+                headers={"Content-Type": "application/json",
+                         "X-Requested-With": "Avtomaktab",
+                         "X-Avto-Tab": "iso-rm-%d" % int(remember)},
+                method="POST")
+            with op.open(req, timeout=15) as resp:
+                sc = resp.headers.get("Set-Cookie", "")
+            self.assertIn("Max-Age=%d" % want, sc, "remember=%s" % remember)
+            self.assertIn("HttpOnly", sc)
+
+    def test_109_relogin_same_tab_ok(self):
+        """Bir xil tab'da qayta-qayta kirish xatosiz ishlashi (UNIQUE constraint)."""
+        jar = http.cookiejar.CookieJar()
+        c = TabClient("iso-relog", jar=jar)
+        u1 = self._login(c, self.STUD)
+        st, r = c.post("/api/auth/logout")
+        self.assertEqual(st, 200, r)
+        # Chiqish so'rovi serverga YETIB BORMAGAN holatni ham modellashtiramiz:
+        # boshqa tab chiqib ketsin, bu tab esa o'z holicha kalsin.
+        c2 = TabClient("iso-relog-2", jar=jar)
+        self._login(c2, self.INSTR)
+        u2 = self._login(c, self.STUD)
+        self.assertEqual(u2["id"], u1["id"])
+        st, me = c.get("/api/auth/me")
+        self.assertEqual(st, 200, me)
+        self.assertEqual(me["user"]["id"], u1["id"])
+
+    def test_110_revoke_all_still_works_per_tab(self):
+        """'Barcha qurilmalardan chiqish' — har bir tab'ning sessiyasi."""
+        jar = http.cookiejar.CookieJar()
+        t1 = TabClient("iso-rev-1", jar=jar)
+        t2 = TabClient("iso-rev-2", jar=jar)
+        self._login(t1, self.ADMIN)
+        self._login(t2, self.ADMIN)
+
+        self.assertEqual(t1.get("/api/auth/me")[0], 200)
+        self.assertEqual(t2.get("/api/auth/me")[0], 200)
+
+        self.assertEqual(t2.post("/api/me/sessions/revoke-all")[0], 200)
+        self.assertEqual(t1.get("/api/auth/me")[0], 401)
+        self.assertEqual(t2.get("/api/auth/me")[0], 401)
 
 
 if __name__ == "__main__":
