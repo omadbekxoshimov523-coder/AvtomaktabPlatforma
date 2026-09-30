@@ -86,6 +86,10 @@ DEFAULT_PLATFORM_SETTINGS = {
     "work_start": "09:00",       # ish vaqti boshlanishi
     "work_end": "18:00",         # ish vaqti tugashi
     "reminder_minutes": 60,      # avtomatik eslatma — necha daqiqa oldin
+    # MODUL 5: "Jami darslar" — kurst o'rtasida talaba o'tishi kerak bo'lgan
+    # umumiy darslar soni (OMMAVIY rejim). Talabada individual qiymat
+    # (students.total_lessons_target) bo'lsa, u shu yerda ustun keladi.
+    "total_lessons_target": 30,
 }
 
 
@@ -729,12 +733,20 @@ class Api:
         )
         uid = cur.lastrowid
         if role == "student":
+            # MODUL 5: individual jami-darslar maqsadi (bo'sh = ommaviy sozlama)
+            try:
+                _tgt = int(body["total_lessons_target"]) if body.get("total_lessons_target") else None
+            except (TypeError, ValueError):
+                _tgt = None
+            if _tgt is not None and (_tgt < 1 or _tgt > 999):
+                raise ApiError(BAD, "user.bad_total_lessons")
             c.execute(
-                """INSERT INTO students(user_id, group_name, license_category, study_status, enrolled_at, address, notes, status)
-                   VALUES(?,?,?,?,?,?,?,?)""",
+                """INSERT INTO students(user_id, group_name, license_category, study_status, enrolled_at,
+                                        address, notes, total_lessons_target, status)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
                 (uid, str(body.get("group_name", "")).strip(), str(body.get("license_category", "B")).strip(),
                  "active", str(body.get("enrolled_at") or _now()[:10]).strip(),
-                 str(body.get("address", "")).strip(), str(body.get("notes", "")).strip(), "active"),
+                 str(body.get("address", "")).strip(), str(body.get("notes", "")).strip(), _tgt, "active"),
             )
         else:
             c.execute(
@@ -786,6 +798,17 @@ class Api:
         # student profili
         if u["role"] == "student" and body.get("student"):
             s = body["student"]
+            # MODUL 5: individual "jami darslar" maqsadi. None/0/bo'sh = ommaviy
+            # (platforma) sozlamasiga qaytish.
+            target = s.get("total_lessons_target", "__keep__")
+            if target != "__keep__":
+                try:
+                    tv = int(target) if target not in (None, "", 0, "0") else None
+                except (TypeError, ValueError):
+                    return BAD, err("user.bad_total_lessons")
+                if tv is not None and (tv < 1 or tv > 999):
+                    return BAD, err("user.bad_total_lessons")
+                self.db.upd("UPDATE students SET total_lessons_target=? WHERE user_id=?", (tv, uid))
             self.db.upd(
                 """UPDATE students SET group_name=?, license_category=?, study_status=?, enrolled_at=?, address=?, notes=? WHERE user_id=?""",
                 (str(s.get("group_name", "")).strip(), str(s.get("license_category", "B")).strip(),
@@ -1587,6 +1610,19 @@ class Api:
     def admin_settings_put(self, body):
         self._require("admin")
         for k, v in body.items():
+            # MODUL 5: "jami darslar" maqsadi 1..999 oralig'ida bo'lishi SHART.
+            # 0, bo'sh yoki noto'g'ri qiymat standartga qaytariladi — shunda
+            # talaba sahifasidagi foiz hisobi hech qachon nolga bo'linib xato
+            # bermaydi ( ZeroDivisionError ).
+            if k == "total_lessons_target":
+                try:
+                    v = int(v)
+                except (TypeError, ValueError):
+                    v = 0
+                if v < 1:
+                    v = DEFAULT_PLATFORM_SETTINGS["total_lessons_target"]
+                elif v > 999:
+                    v = 999
             self.db.ex(
                 "INSERT INTO system_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
                 (k, jdump(v), now()))
@@ -1897,7 +1933,32 @@ class Api:
                  AND (ls.date > ? OR (ls.date=? AND ls.end_time > ?))
                ORDER BY ls.date, ls.start_time LIMIT 1""",
             (st["id"], today(), today(), now()[11:16]))
-        return OK, {"ok": True, "weekly": agg(wk_rows), "overall": agg(rows), "next": nxt}
+        # MODUL 5 — "Jami darslar": individual yoki ommaviy rejim.
+        # Individual: students.total_lessons_target (NULL bo'lmasa) ustun keladi,
+        # ommaviy: system_settings.total_lessons_target.
+        try:
+            global_target = int(_platform_setting(self.db, "total_lessons_target", 30) or 30)
+        except (TypeError, ValueError):
+            global_target = 30
+        try:
+            individual = int(st["total_lessons_target"]) if st.get("total_lessons_target") else None
+        except (TypeError, ValueError):
+            individual = None
+        target = individual if individual and individual > 0 else global_target
+        done_all = sum(1 for r in rows if r["status"] == "completed")
+        progress = {
+            "target": target,
+            "done": done_all,
+            "remaining": max(0, target - done_all),
+            "mode": "individual" if individual else "group",
+            "group_target": global_target,
+            "individual_target": individual,
+            # Bajarilgan foiz. Maqsad 0 bo'lsa (admin o'chirib qo'ygan bo'lsa)
+            # foiz 0 qoladi — xatolik chiqmasligi uchun.
+            "pct": round(done_all * 100 / target) if target > 0 else 0,
+        }
+        return OK, {"ok": True, "weekly": agg(wk_rows), "overall": agg(rows),
+                    "progress": progress, "next": nxt}
 
     def student_today(self):
         """M6: Talaba 'Bugun' bo'limi — bugungi mashg'ulotlar ro'yxati."""

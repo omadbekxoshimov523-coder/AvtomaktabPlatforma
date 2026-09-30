@@ -127,6 +127,16 @@ const I18N = (function () {
     "week.sessions": { uz: "Haftadagi darslar", ru: "Занятий за неделю", en: "Lessons this week" },
     "week.done": { uz: "Bajarilgan", ru: "Выполнено", en: "Completed" },
     "week.hours": { uz: "Amaliy soatlar", ru: "Практических часов", en: "Hours" },
+    /* MODUL 5: "Haftadagi darslar" -> "Jami darslar" (kurst maqsadi bo'yicha).
+       "Amaliy soatlar" kartasi talaba bosh sahifasidan olib tashlandi. */
+    "week.total_lessons": { uz: "Jami darslar", ru: "Всего занятий", en: "Total lessons" },
+    "week.done_lessons": { uz: "Bajarilgan darslar", ru: "Выполнено занятий", en: "Completed lessons" },
+    "week.remaining_lessons": { uz: "Qolgan: {n}", ru: "Осталось: {n}", en: "Remaining: {n}" },
+    "users.mode_group": { uz: "Umumiy sozlama", ru: "Общая настройка", en: "Platform setting" },
+    "users.mode_individual": { uz: "Individual reja", ru: "Индивидуальный план", en: "Individual plan" },
+    "users.total_lessons": { uz: "Jami darslar (individual)", ru: "Всего занятий (индивидуально)", en: "Total lessons (individual)" },
+    "users.total_lessons_hint": { uz: "Bo'sh qoldirilsa — platformaning umumiy sozlamasi qo'llaniladi.", ru: "Если оставить пустым — применяется общая настройка платформы.", en: "Leave empty to use the platform-wide setting." },
+    "users.total_lessons_group_placeholder": { uz: "Umumiy sozlamadan", ru: "Из общей настройки", en: "From platform setting" },
     "week.students": { uz: "Talabalar", ru: "Ученики", en: "Students" },
     "week.requests": { uz: "Yangi so'rovlar", ru: "Новых заявок", en: "New requests" },
     "week.new_users": { uz: "Yangi foydalanuvchilar", ru: "Новых пользователей", en: "New users" },
@@ -576,6 +586,10 @@ const I18N = (function () {
     "settings.work_end": { uz: "Ish vaqti tugashi", ru: "Конец рабочего времени", en: "Work end" },
     "settings.reminder_minutes": { uz: "Avtomatik eslatma vaqti (daqiqa oldin)", ru: "Время напоминания (за N минут)", en: "Auto reminder (minutes before)" },
     "settings.reminder_hint": { uz: "Mashg'ulot boshlanishidan necha daqiqa oldin ishtirokchilarga eslatma yuboriladi", ru: "За сколько минут до занятия отправлять напоминание участникам", en: "How many minutes before the lesson to remind participants" },
+    /* MODUL 5: ommaviy (platforma) jami-darslar maqsadi */
+    "settings.total_lessons": { uz: "Jami darslar (barcha talabalar uchun)", ru: "Всего занятий (для всех учеников)", en: "Total lessons (all students)" },
+    "settings.total_lessons_hint": { uz: "Talabada individual qiymat belgilangan bo'lsa, u shu yer ustun keladi", ru: "Если у ученика задан индивидуальный план, он имеет приоритет", en: "An individual student plan overrides this value" },
+    "err.user.bad_total_lessons": { uz: "Jami darslar soni 1 dan 999 gacha bo'lishi kerak (yoki bo'sh qoldiring)", ru: "Количество занятий — от 1 до 999 (или оставьте пустым)", en: "Total lessons must be 1–999 (or leave empty)" },
     /* Chiqish (logout) — Admin, Instruktor va Talaba uchun umumiy */
     "settings.logout_title": { uz: "Sessiya va chiqish", ru: "Сессия и выход", en: "Session & sign out" },
     "settings.logout_hint": { uz: "Hisobingizdan xavfsiz chiqing. Joriy sessiya serverda ham yakunlanadi.", ru: "Безопасно выйдите из аккаунта. Текущая сессия завершится и на сервере.", en: "Sign out safely. The current session is ended on the server too." },

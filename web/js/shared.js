@@ -622,9 +622,18 @@ const Shared = (function () {
       f.license_category = input({ value: user && user.student ? user.student.license_category : "B" });
       f.address = input({ value: user && user.student ? user.student.address : "" });
       f.notes = input({ value: user && user.student ? user.student.notes : "" });
+      f.total_lessons_target = input({
+        type: "number", min: "1", max: "999",
+        placeholder: t("users.total_lessons_group_placeholder"),
+        value: user && user.student && user.student.total_lessons_target
+          ? user.student.total_lessons_target : "",
+      });
       extra.append(
         field(t("student.group"), f.group_name), field(t("student.category"), f.license_category),
         field(t("student.address"), f.address), field(t("common.notes"), f.notes),
+        // MODUL 5: individual "Jami darslar" maqsadi. Bo'sh qoldirilsa —
+        // platformaning umumiy (ommaviy) sozlamasi qo'llaniladi.
+        field(t("users.total_lessons"), f.total_lessons_target, { hint: t("users.total_lessons_hint") }),
       );
     } else {
       f.license_categories = input({ value: user && user.instructor ? user.instructor.license_categories : "B" });
@@ -681,6 +690,8 @@ const Shared = (function () {
               payload.secondary_phone = f.secondary_phone.value;
               payload.group_name = f.group_name.value; payload.license_category = f.license_category.value;
               payload.address = f.address.value; payload.notes = f.notes.value;
+              // MODUL 5: bo'sh = ommaviy sozlamaga qaytish (NULL)
+              payload.total_lessons_target = f.total_lessons_target.value.trim();
             } else {
               const selDays = Array.from(f.work_days.selectedOptions).map((o) => o.value);
               payload.license_categories = f.license_categories.value; payload.experience_years = parseInt(f.experience_years.value || 0);
@@ -1139,6 +1150,8 @@ const Shared = (function () {
     const wsI = input({ type: "time", value: s.work_start || "" });
     const weI = input({ type: "time", value: s.work_end || "" });
     const remI = input({ type: "number", min: 1, step: 5, value: s.reminder_minutes || 60 });
+    // MODUL 5: ommaviy (platforma) "Jami darslar" maqsadi
+    const tgtI = input({ type: "number", min: 1, max: 999, step: 1, value: s.total_lessons_target || 30 });
     return el("div", { class: "card" }, [
       el("h3", { class: "card-title", text: "🛠️ " + t("settings.platform_title") }),
       el("div", { class: "muted sm mb", text: t("settings.platform_hint") }),
@@ -1153,8 +1166,11 @@ const Shared = (function () {
         field(t("settings.work_start"), wsI),
         field(t("settings.work_end"), weI),
         field(t("settings.reminder_minutes"), remI),
+        // MODUL 5: ommaviy maqsad
+        field(t("settings.total_lessons"), tgtI),
       ]),
       el("small", { class: "field-hint mb", text: t("settings.reminder_hint") }),
+      el("small", { class: "field-hint mb", text: t("settings.total_lessons_hint") }),
       el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.save"), onclick: async () => {
         try {
           await API.put("admin/settings", {
@@ -1162,6 +1178,7 @@ const Shared = (function () {
             lesson_duration_min: Math.max(15, parseInt(durI.value, 10) || 90),
             work_start: wsI.value, work_end: weI.value,
             reminder_minutes: Math.max(1, parseInt(remI.value, 10) || 60),
+            total_lessons_target: Math.max(1, Math.min(999, parseInt(tgtI.value, 10) || 30)),
           });
           toast(t("misc.saved"));
         } catch (e) { errToast(e); }

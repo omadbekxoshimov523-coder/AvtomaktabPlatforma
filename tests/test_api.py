@@ -2361,5 +2361,199 @@ class TestUsersByRole(Base):
                                  f"{role} admin ro'yxatini ko'ra oladi!")
 
 
+class TestTotalLessonsTarget(Base):
+    """MODUL 5 — "Jami darslar": admin belgilaydigan maqsad.
+    Rejimlar: individual (talaba uchun alohida) va ommaviy (platforma)."""
+
+    STUD = ("usrL_00004", "usrP_00004", "student")
+
+    def setUp(self):
+        self.admin = Client()
+        from app.auth import reset_login_attempts
+        reset_login_attempts("login:admin")
+        st, r = self.admin.post("/api/auth/login",
+                                {"login": "admin", "password": "admin123", "role": "admin"})
+        self.assertEqual(st, 200, r)
+        self.db = Db(str(TMP / "test.db"))
+        # Har bir test toza holatdan boshlanishi uchun individual qiymatni
+        # ommaviy sozlamaga qaytaramiz.
+        self._set_individual(None)
+        self._set_group(30)
+
+    # ------------------------------------------------------------------ yordamchi
+    def _set_group(self, n):
+        st, r = self.admin.put("/api/admin/settings", {"total_lessons_target": n})
+        self.assertEqual(st, 200, r)
+
+    def _set_individual(self, val):
+        st, r = self.admin.get("/api/admin/users?role=student&q=usrL_00004")
+        self.assertEqual(st, 200, r)
+        uid = r["users"][0]["id"]
+        body = {"student": {"total_lessons_target": val}}
+        st, r2 = self.admin.put(f"/api/admin/users/{uid}", body)
+        self.assertEqual(st, 200, r2)
+
+    def _home(self):
+        c = Client()
+        st, r = c.post("/api/auth/login",
+                       {"login": self.STUD[0], "password": self.STUD[1], "role": "student"})
+        self.assertEqual(st, 200, r)
+        st, h = c.get("/api/student/home")
+        self.assertEqual(st, 200, h)
+        return h
+
+    def _done_count(self):
+        """Bazadagi haqiqiy bajarilgan darslar soni."""
+        row = self.db.q1(
+            """SELECT COUNT(*) AS n FROM session_students ss
+               JOIN lesson_sessions ls ON ls.id=ss.session_id
+               JOIN students s ON s.id=ss.student_id
+               JOIN users u ON u.id=s.user_id
+               WHERE u.login=? AND ss.student_status='active'
+                 AND ls.status!='cancelled' AND ls.status='completed'""",
+            (self.STUD[0],))
+        return row["n"]
+
+    # ------------------------------------------------------------------ testlar
+    def test_400_home_returns_progress(self):
+        h = self._home()
+        pr = h["progress"]
+        for k in ("target", "done", "remaining", "pct", "mode"):
+            self.assertIn(k, pr)
+        self.assertEqual(pr["done"], self._done_count())
+        self.assertEqual(pr["mode"], "group", "individual qiymat yo'q — ommaviy rejim kerak")
+        self.assertEqual(pr["target"], 30)
+        self.assertEqual(pr["pct"], round(self._done_count() * 100 / 30))
+
+    def test_401_group_target_applies_to_all(self):
+        for n in (10, 45, 100):
+            self._set_group(n)
+            self.assertEqual(self._home()["progress"]["target"], n,
+                             f"ommaviy maqsad {n} qo'llanmadi")
+
+    def test_402_individual_overrides_group(self):
+        self._set_group(30)
+        self._set_individual(12)
+        pr = self._home()["progress"]
+        self.assertEqual(pr["mode"], "individual")
+        self.assertEqual(pr["target"], 12, "individual maqsad ustun kelmadi")
+        self.assertEqual(pr["group_target"], 30)
+        self.assertEqual(pr["individual_target"], 12)
+
+    def test_403_clearing_individual_returns_to_group(self):
+        self._set_individual(12)
+        self.assertEqual(self._home()["progress"]["mode"], "individual")
+        self._set_individual(None)
+        pr = self._home()["progress"]
+        self.assertEqual(pr["mode"], "group")
+        self.assertEqual(pr["target"], 30)
+        self.assertIsNone(pr["individual_target"])
+
+    def test_404_pct_and_remaining_are_consistent(self):
+        self._set_group(20)
+        pr = self._home()["progress"]
+        self.assertEqual(pr["remaining"], max(0, pr["target"] - pr["done"]))
+        self.assertEqual(pr["pct"], round(pr["done"] * 100 / pr["target"]))
+        self.assertTrue(0 <= pr["pct"] <= 100)
+
+    def test_405_invalid_group_target_normalized(self):
+        """Admin noto'g'ri qiymat yuborsa — standartga qaytariladi (xato chiqmaydi)."""
+        for bad, want in ((0, 30), (-5, 30), (1000, 999), ("abc", 30), (None, 30), ("45", 45)):
+            st, r = self.admin.put("/api/admin/settings", {"total_lessons_target": bad})
+            self.assertEqual(st, 200, f"{bad!r}: {r}")
+            pr = self._home()["progress"]
+            self.assertEqual(pr["target"], want, f"{bad!r} -> {pr['target']}, kutilgan {want}")
+            self.assertGreaterEqual(pr["target"], 1, "maqsad 0 bo'lsa foiz hisobi buziladi")
+            self.assertTrue(0 <= pr["pct"] <= 100)
+
+    def test_406_invalid_individual_target_rejected(self):
+        self._set_individual(20)
+        for bad in (-5, 1000, 99999, "abc", "1.5"):
+            st, r = self.admin.put(f"/api/admin/users/{self._uid()}",
+                                   {"student": {"total_lessons_target": bad}})
+            self.assertEqual(st, 400, f"{bad!r} qabul qilindi: {r}")
+            self.assertEqual(r["error"], "user.bad_total_lessons")
+        # Xato qabul qilinmagan qiymat maqsadni buzmasin
+        self.assertEqual(self._ind_value(), 20)
+
+    def test_406b_zero_means_clear_individual(self):
+        """0 / bo'sh qiymat = individual rejimni bekor qilish (ommaviyga qaytish)."""
+        for empty in (0, "0", "", None):
+            self._set_individual(15)
+            self._set_individual(empty)
+            self.assertIsNone(self._ind_value(), f"{empty!r} individual maqsadni tozalamadi")
+            self.assertEqual(self._home()["progress"]["mode"], "group")
+
+    def test_407_valid_individual_target_accepted(self):
+        for good in (1, 50, 999):
+            self._set_individual(good)
+            self.assertEqual(self._ind_value(), good)
+            self.assertEqual(self._home()["progress"]["target"], good)
+
+    def test_408_new_student_can_get_individual_target(self):
+        st, r = self.admin.post("/api/admin/users", {
+            "role": "student", "first_name": "Maqsad", "last_name": "Test",
+            "group_name": "G-1", "license_category": "B", "total_lessons_target": 7,
+        })
+        self.assertEqual(st, 200, r)
+        uid = r["user"]["id"]
+        row = self.db.q1("SELECT total_lessons_target FROM students WHERE user_id=?", (uid,))
+        self.assertEqual(row["total_lessons_target"], 7)
+        # Tozalash
+        self.db.upd("UPDATE users SET deleted_at=datetime('now') WHERE id=?", (uid,))
+
+    def test_409_new_student_without_target_uses_group(self):
+        st, r = self.admin.post("/api/admin/users", {
+            "role": "student", "first_name": "Kurs", "last_name": "Test",
+            "group_name": "G-2", "license_category": "B",
+        })
+        self.assertEqual(st, 200, r)
+        row = self.db.q1("SELECT total_lessons_target FROM students WHERE user_id=?",
+                         (r["user"]["id"],))
+        self.assertIsNone(row["total_lessons_target"], "individual maqsad berilmagan bo'lishi kerak")
+        self.db.upd("UPDATE users SET deleted_at=datetime('now') WHERE id=?", (r["user"]["id"],))
+
+    def test_410_settings_expose_target(self):
+        st, r = self.admin.get("/api/admin/settings")
+        self.assertEqual(st, 200, r)
+        self.assertIn("total_lessons_target", r["settings"])
+        self._set_group(44)
+        st, r = self.admin.get("/api/admin/settings")
+        self.assertEqual(r["settings"]["total_lessons_target"], 44)
+
+    def test_411_student_cannot_change_target(self):
+        st, r = self.admin.post("/api/admin/users", {
+            "role": "student", "first_name": "Sinov", "last_name": "Test", "group_name": "G-3"})
+        self.assertEqual(st, 200, r)
+        uid = r["user"]["id"]
+        login = r["credentials"]["login"]
+        pw = r["credentials"]["password"]
+        c = Client()
+        st, _ = c.post("/api/auth/login", {"login": login, "password": pw, "role": "student"})
+        self.assertEqual(st, 200)
+        self.assertEqual(c.put(f"/api/admin/users/{uid}",
+                               {"student": {"total_lessons_target": 1}})[0], 403)
+        self.assertEqual(c.put("/api/admin/settings", {"total_lessons_target": 1})[0], 403)
+        self.assertIsNone(self.db.q1(
+            "SELECT total_lessons_target FROM students WHERE user_id=?", (uid,))["total_lessons_target"])
+        self.db.upd("UPDATE users SET deleted_at=datetime('now') WHERE id=?", (uid,))
+
+    def test_412_instructor_cannot_change_target(self):
+        c = Client()
+        st, _ = c.post("/api/auth/login",
+                       {"login": "usrL_00001", "password": "usrP_00001", "role": "instructor"})
+        self.assertEqual(st, 200)
+        self.assertEqual(c.put("/api/admin/settings", {"total_lessons_target": 1})[0], 403)
+
+    # ------------------------------------------------------------------ kichik yordamchilar
+    def _uid(self):
+        st, r = self.admin.get("/api/admin/users?role=student&q=usrL_00004")
+        return r["users"][0]["id"]
+
+    def _ind_value(self):
+        return self.db.q1("SELECT total_lessons_target FROM students WHERE user_id=?",
+                          (self._uid(),))["total_lessons_target"]
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -51,6 +51,9 @@ CREATE TABLE IF NOT EXISTS students (
     enrolled_at TEXT DEFAULT '',
     address TEXT DEFAULT '',
     notes TEXT DEFAULT '',
+    -- MODUL 5: individual rejimda jami darslar soni. NULL = platformaning umumiy
+    -- sozlamasi (system_settings.total_lessons_target) qo'llaniladi.
+    total_lessons_target INTEGER,
     status TEXT NOT NULL DEFAULT 'active'
 );
 
@@ -378,6 +381,11 @@ def migrate(db: Db) -> None:
         db.upd("ALTER TABLE notifications ADD COLUMN sender_id INTEGER")
     if "sender_role" not in ncols:
         db.upd("ALTER TABLE notifications ADD COLUMN sender_role TEXT DEFAULT ''")
+    # MODUL 5: talaba uchun JUMLI darslar soni. NULL = platforma umumiy
+    # sozlamasidan foydalaniladi (individual rejim).
+    scols = {r["name"] for r in db.q("PRAGMA table_info(students)")}
+    if "total_lessons_target" not in scols:
+        db.upd("ALTER TABLE students ADD COLUMN total_lessons_target INTEGER")
     # M5: avtomobil fotosuratlari (eski bazalar uchun ham xavfsiz)
     db.upd(
         """CREATE TABLE IF NOT EXISTS car_photos (

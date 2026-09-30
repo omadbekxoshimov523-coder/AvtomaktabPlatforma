@@ -20,29 +20,60 @@ window.StudentViews = (function () {
       ]),
     ]));
 
-    // Haftalik statistika (umumiy holat)
-    const weekly = el("div", { class: "grid-stats grid-stats-compact mb" });
-    [
-      ["calendar", t("week.sessions"), home.weekly.sessions],
-      ["check_circle", t("week.done"), home.weekly.done],
-      ["clock", t("week.hours"), home.weekly.hours],
-    ].forEach(([icon, label, val]) => weekly.append(el("div", { class: "stat-card" }, [
-      el("div", { class: "stat-icon", icon }),
-      el("div", {}, [el("div", { class: "stat-value", text: String(val) }), el("div", { class: "stat-label", text: label })]),
-    ])));
-    wrap.append(weekly);
+    /* MODUL 5: "Haftadagi darslar" -> "Jami darslar", "Amaliy soatlar" kartasi
+       OLIB TASHLANDI. Endi faqat 2 ta karta bor — ikkalasi ham teng kenglik
+       va teng balandlikda (grid-2 + stat-card-equal), har birida progress
+       bar va foiz. Maqsad: individual (talaba) yoki ommaviy (platforma). */
+    const pr = home.progress || { target: 0, done: 0, remaining: 0, pct: 0, mode: "group" };
+    const ov = home.overall;
+    const isGroup = pr.mode !== "individual";
+
+    const statCard = (icon, label, value, sub, barPct, accent) => el("div", { class: "stat-card stat-card-equal" }, [
+      el("div", { class: "stat-icon" + (accent ? " stat-icon-" + accent : ""), icon }),
+      el("div", { class: "stat-body" }, [
+        el("div", { class: "stat-value", text: String(value) }),
+        el("div", { class: "stat-label", text: label }),
+        sub ? el("div", { class: "stat-sub", text: sub }) : el("div", { class: "stat-sub" }),
+        el("div", { class: "progress-bar mt" }, [
+          el("div", {
+            class: "progress-fill" + (accent ? " fill-" + accent : ""),
+            style: "width:" + Math.max(0, Math.min(100, barPct)) + "%",
+          }),
+        ]),
+        el("div", { class: "stat-pct", text: barPct + "%" }),
+      ]),
+    ]);
+
+    wrap.append(el("div", { class: "grid-2 mb stat-row" }, [
+      // 1-karta: Jami darslar (maqsad)
+      statCard(
+        "calendar",
+        t("week.total_lessons"),
+        pr.target,
+        isGroup ? t("users.mode_group") : t("users.mode_individual"),
+        pr.pct,
+        "navy"
+      ),
+      // 2-karta: Bajarilgan darslar
+      statCard(
+        "check_circle",
+        t("week.done_lessons"),
+        pr.done,
+        t("week.remaining_lessons", { n: pr.remaining }),
+        pr.pct,
+        "gold"
+      ),
+    ]));
 
     // Umumiy progress + muvaffaqiyat foizi
-    const ov = home.overall;
-    const pct = ov.sessions ? Math.round((ov.done / ov.sessions) * 100) : 0;
     const progCard = el("div", { class: "card mb" }, [
       el("h3", { class: "card-title", text: "📈 " + t("home.overall_progress") }),
       el("div", { class: "prog-line" }, [el("span", { text: t("progress.total") }), el("strong", { text: String(ov.sessions) })]),
       el("div", { class: "prog-line" }, [el("span", { text: t("progress.done") }), el("strong", { text: String(ov.done) })]),
       el("div", { class: "prog-line" }, [el("span", { text: t("progress.remaining") }), el("strong", { text: String(ov.sessions - ov.done) })]),
       el("div", { class: "prog-line" }, [el("span", { text: t("progress.hours") }), el("strong", { text: String(ov.hours) })]),
-      el("div", { class: "progress-bar mt" }, [el("div", { class: "progress-fill", style: "width:" + pct + "%" })]),
-      el("div", { class: "muted sm mt", text: t("stat.success_label") + ": " + pct + "%" }),
+      el("div", { class: "progress-bar mt" }, [el("div", { class: "progress-fill", style: "width:" + pr.pct + "%" })]),
+      el("div", { class: "muted sm mt", text: t("stat.success_label") + ": " + pr.pct + "%" }),
     ]);
     wrap.append(progCard);
 
