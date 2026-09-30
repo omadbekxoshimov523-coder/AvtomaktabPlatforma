@@ -2555,5 +2555,338 @@ class TestTotalLessonsTarget(Base):
                           (self._uid(),))["total_lessons_target"]
 
 
+class TestMapAndCoordinates(Base):
+    """MODUL 4 — XARITA (Yandex Maps JS API) va kenglik/uzunlik.
+
+    Tekshiriladi:
+      * `GET /api/config` — xarita sozlamalari KIRISHSIZ qaytariladi,
+        kalit faqat `.env` dan olinadi, hech qanday sirli ma'lumot yo'q.
+      * Xarita markazi — Toshkent (`.env` bilan o'zgartirilishi mumkin).
+      * "Kenglik"/"Uzunlik" validatsiyasi — noto'g'ri qiymat JIM QOLMAYDI,
+        aniq `coord.*` kodi qaytariladi va eski qiymat buzilmaydi.
+    """
+
+    ENV_KEYS = ("YANDEX_MAPS_API_KEY", "MAP_PROVIDER", "MAP_CENTER_LAT",
+                "MAP_CENTER_LNG", "MAP_CENTER_ZOOM")
+    TASHKENT = (41.311081, 69.240562)
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from app.auth import reset_login_attempts
+        reset_login_attempts("login:admin")
+        admin = Client()
+        st, _ = admin.post("/api/auth/login",
+                           {"login": "admin", "password": "admin123", "role": "admin"})
+        assert st == 200, "admin login muvaffaqiyatsiz"
+        st, cr = admin.post("/api/admin/users", {
+            "role": "student", "first_name": "Xarita", "last_name": "Sinov",
+            "group_name": "G-M4", "license_category": "B",
+        })
+        assert st == 200, cr
+        cls.user_id = cr["user"]["id"]
+        cls.login = cr["credentials"]["login"]
+        cls.password = cr["credentials"]["password"]
+        row = Db(str(TMP / "test.db")).q1("SELECT id FROM students WHERE user_id=?", (cls.user_id,))
+        assert row, "talaba yaratilmadi"
+        cls.student_id = row["id"]
+
+        # Yetarli masofadagi kun (seed sessiyalari bilan to'qnashmasligi uchun)
+        from datetime import datetime, timedelta
+        d = datetime.now()
+        day = (d + timedelta(days=(7 - d.weekday()) % 7 or 7) + timedelta(days=21)).strftime("%Y-%m-%d")
+        st, sr = admin.post("/api/admin/sessions", {
+            "date": day, "start_time": "08:00", "end_time": "09:00",
+            "instructor_id": 1, "student_ids": [cls.student_id], "notes": "M4MAP",
+        })
+        assert st == 200, sr
+        cls.session_id = sr["id"]
+
+    @classmethod
+    def tearDownClass(cls):
+        db = Db(str(TMP / "test.db"))
+        if getattr(cls, "session_id", None):
+            db.upd("DELETE FROM session_students WHERE session_id=?", (cls.session_id,))
+            db.upd("DELETE FROM notifications WHERE data LIKE ?",
+                   (f'%"session_id": {cls.session_id}%',))
+            db.upd("DELETE FROM lesson_sessions WHERE id=?", (cls.session_id,))
+        if getattr(cls, "user_id", None):
+            db.upd("DELETE FROM students WHERE user_id=?", (cls.user_id,))
+            db.upd("DELETE FROM users WHERE id=?", (cls.user_id,))
+        super().tearDownClass()
+
+    def setUp(self):
+        from app.auth import reset_login_attempts
+        reset_login_attempts("login:admin")
+        reset_login_attempts("login:" + self.login)
+        reset_login_attempts("login:usrL_00001")
+        self.admin = Client()
+        st, r = self.admin.post("/api/auth/login",
+                                {"login": "admin", "password": "admin123", "role": "admin"})
+        self.assertEqual(st, 200, r)
+        self.db = Db(str(TMP / "test.db"))
+        # .env kalitlarini o'zgartirmaslik uchun zaxira
+        self._env_backup = {k: os.environ.get(k) for k in self.ENV_KEYS}
+        self._clear_env()
+        self._reset_pickup(None, None, "")
+
+    def tearDown(self):
+        self._restore_env()
+
+    def _clear_env(self):
+        for k in self.ENV_KEYS:
+            os.environ.pop(k, None)
+
+    def _restore_env(self):
+        for k, v in self._env_backup.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _reset_pickup(self, lat, lng, address=""):
+        self.db.upd("""UPDATE session_students
+                       SET pickup_address=?, pickup_lat=?, pickup_lng=?
+                       WHERE session_id=? AND student_id=?""",
+                    (address, lat, lng, self.session_id, self.student_id))
+
+    def _pickup(self):
+        return self.db.q1("""SELECT pickup_address, pickup_lat, pickup_lng
+                             FROM session_students WHERE session_id=? AND student_id=?""",
+                          (self.session_id, self.student_id))
+
+    def _student(self):
+        c = Client()
+        st, r = c.post("/api/auth/login",
+                       {"login": self.login, "password": self.password, "role": "student"})
+        self.assertEqual(st, 200, r)
+        return c
+
+    def _put(self, c, body, sid=None):
+        return c.put(f"/api/student/sessions/{sid or self.session_id}/pickup", body)
+
+    # ------------------------------------------------------------ /api/config
+    def test_500_config_is_public(self):
+        """Sessiyasiz (cookie'siz) so'rov ham ishlashi SHART — login sahifasi
+        ham xaritadan foydalanadi."""
+        anon = Client()
+        st, r = anon.get("/api/config")
+        self.assertEqual(st, 200, r)
+        self.assertTrue(r["ok"])
+        self.assertIn("maps", r["config"])
+
+    def test_501_config_shape(self):
+        st, r = self.admin.get("/api/config")
+        self.assertEqual(st, 200, r)
+        m = r["config"]["maps"]
+        for k in ("provider", "api_key", "enabled", "center", "zoom"):
+            self.assertIn(k, m, f"/api/config.maps.{k} yo'q")
+        self.assertIn("lat", m["center"])
+        self.assertIn("lng", m["center"])
+        self.assertIsInstance(m["api_key"], str)
+        self.assertIsInstance(m["enabled"], bool)
+
+    def test_502_center_is_tashkent_by_default(self):
+        m = self.admin.get("/api/config")[1]["config"]["maps"]
+        self.assertAlmostEqual(m["center"]["lat"], self.TASHKENT[0], places=4)
+        self.assertAlmostEqual(m["center"]["lng"], self.TASHKENT[1], places=4)
+        self.assertEqual(m["zoom"], 12)
+        # Toshkent chegaralarida bo'lishi SHART (41°N, 69°E)
+        self.assertTrue(40 < m["center"]["lat"] < 42)
+        self.assertTrue(68 < m["center"]["lng"] < 70)
+
+    def test_503_center_from_env(self):
+        os.environ["MAP_CENTER_LAT"] = "39.6542"
+        os.environ["MAP_CENTER_LNG"] = "66.9597"
+        os.environ["MAP_CENTER_ZOOM"] = "14"
+        m = self.admin.get("/api/config")[1]["config"]["maps"]
+        self.assertAlmostEqual(m["center"]["lat"], 39.6542, places=4)
+        self.assertAlmostEqual(m["center"]["lng"], 66.9597, places=4)
+        self.assertEqual(m["zoom"], 14)
+
+    def test_504_bad_center_falls_back_to_tashkent(self):
+        """`.env` da noto'g'ri son bo'lsa — xarita JOYNI bo'sh qolmasligi uchun
+        Toshkentga qaytariladi (jim qolmaydi, lekin xarita ishlayveradi)."""
+        os.environ["MAP_CENTER_LAT"] = "Toshkent"
+        m = self.admin.get("/api/config")[1]["config"]["maps"]
+        self.assertAlmostEqual(m["center"]["lat"], self.TASHKENT[0], places=4)
+        os.environ["MAP_CENTER_LAT"] = "41.311081,5"   # vergulli son
+        m = self.admin.get("/api/config")[1]["config"]["maps"]
+        self.assertAlmostEqual(m["center"]["lat"], 41.311081, places=4)
+
+    def test_505_disabled_without_key(self):
+        m = self.admin.get("/api/config")[1]["config"]["maps"]
+        self.assertFalse(m["enabled"], "kalit yo'q bo'lsa xarita 'ochilgan' bo'lmasligi kerak")
+        self.assertEqual(m["api_key"], "")
+
+    def test_506_enabled_with_key_from_env(self):
+        os.environ["YANDEX_MAPS_API_KEY"] = "test-abc123.Yx-mapKey"
+        m = self.admin.get("/api/config")[1]["config"]["maps"]
+        self.assertTrue(m["enabled"])
+        self.assertEqual(m["api_key"], "test-abc123.Yx-mapKey")
+        self.assertEqual(m["provider"], "yandex")
+
+    def test_507_provider_none_disables_map(self):
+        os.environ["YANDEX_MAPS_API_KEY"] = "test-abc123.Yx-mapKey"
+        os.environ["MAP_PROVIDER"] = "none"
+        m = self.admin.get("/api/config")[1]["config"]["maps"]
+        self.assertFalse(m["enabled"], "MAP_PROVIDER=none — xarita ko'rsatilmasligi kerak")
+        self.assertEqual(m["provider"], "none")
+
+    def test_508_config_never_leaks_secrets(self):
+        """Ommaviy endpoint parol/token YOK, faqat xarita kalitini beradi."""
+        os.environ["YANDEX_MAPS_API_KEY"] = "map-key-777"
+        os.environ.setdefault("BOT_TOKEN", "123456:SECRET-BOT-TOKEN")
+        os.environ.setdefault("ADMIN_INITIAL_PASSWORD", "SECRET-ADMIN-PW")
+        st, r = self.admin.get("/api/config")
+        self.assertEqual(st, 200)
+        raw = json.dumps(r, ensure_ascii=False)
+        self.assertNotIn("SECRET-BOT-TOKEN", raw)
+        self.assertNotIn("SECRET-ADMIN-PW", raw)
+        self.assertNotIn("BOT_TOKEN", raw)
+        self.assertNotIn("ADMIN_INITIAL_PASSWORD", raw)
+        self.assertNotIn("password", raw.lower())
+        self.assertNotIn("token", raw.lower())
+
+    def test_509_config_only_get(self):
+        self.assertEqual(self.admin.post("/api/config", {"x": 1})[0], 404)
+        self.assertEqual(self.admin.put("/api/config", {"x": 1})[0], 404)
+        self.assertEqual(self.admin.delete("/api/config")[0], 404)
+        self.assertEqual(self.admin.get("/api/config/maps")[0], 404)
+
+    # ------------------------------------------------------------ kenglik/uzunlik
+    def test_510_valid_coords_saved(self):
+        c = self._student()
+        st, r = self._put(c, {"address": "Yunusobod 12", "lat": 41.3364, "lng": 69.2785})
+        self.assertEqual(st, 200, r)
+        row = self._pickup()
+        self.assertEqual(row["pickup_address"], "Yunusobod 12")
+        self.assertAlmostEqual(row["pickup_lat"], 41.3364, places=5)
+        self.assertAlmostEqual(row["pickup_lng"], 69.2785, places=5)
+
+    def test_511_coords_as_strings(self):
+        """Frontend `input` dan qiymat STRING bo'lib keladi — qabul qilinishi kerak."""
+        c = self._student()
+        for lat, lng in (("41.311081", "69.240562"), (" 41.311081 ", " 69.240562 "),
+                         ("41,311081", "69,240562")):
+            st, r = self._put(c, {"lat": lat, "lng": lng})
+            self.assertEqual(st, 200, f"{lat}/{lng}: {r}")
+            row = self._pickup()
+            self.assertAlmostEqual(row["pickup_lat"], 41.311081, places=5)
+            self.assertAlmostEqual(row["pickup_lng"], 69.240562, places=5)
+
+    def test_512_coords_rounded_to_7_decimals(self):
+        c = self._student()
+        st, _ = self._put(c, {"lat": 41.31108150000, "lng": 69.24056240000})
+        self.assertEqual(st, 200)
+        row = self._pickup()
+        self.assertEqual(row["pickup_lat"], 41.3110815)
+        self.assertEqual(row["pickup_lng"], 69.2405624)
+
+    def test_513_bounds_are_allowed(self):
+        """Chegara qiymatlari xato EMAS (Toshkentdan ancha uzoq nuqta ham kerak)."""
+        c = self._student()
+        for lat, lng in ((90, 180), (-90, -180), (0, 0)):
+            st, r = self._put(c, {"lat": lat, "lng": lng})
+            self.assertEqual(st, 200, f"{lat}/{lng}: {r}")
+
+    def test_514_bad_lat_rejected(self):
+        c = self._student()
+        for bad in ("abc", 90.0001, -90.0001, 1000, True, "NaN", "Infinity", "1,2,3", [], {}):
+            st, r = self._put(c, {"lat": bad, "lng": 69.24})
+            self.assertEqual(st, 400, f"kenglik {bad!r} qabul qilindi: {r}")
+            self.assertEqual(r["error"], "coord.bad_lat", f"{bad!r}: {r}")
+
+    def test_515_bad_lng_rejected(self):
+        c = self._student()
+        for bad in ("abc", 180.0001, -180.0001, 99999, "NaN", "1e400"):
+            st, r = self._put(c, {"lat": 41.31, "lng": bad})
+            self.assertEqual(st, 400, f"uzunlik {bad!r} qabul qilindi: {r}")
+            self.assertEqual(r["error"], "coord.bad_lng", f"{bad!r}: {r}")
+
+    def test_516_incomplete_pair_rejected(self):
+        """Faqat bittasi to'ldirilgan holat — chalkash, xato qaytariladi."""
+        c = self._student()
+        for body in ({"lat": 41.31}, {"lng": 69.24}, {"lat": 41.31, "lng": ""},
+                     {"lat": "", "lng": 69.24}):
+            st, r = self._put(c, body)
+            self.assertEqual(st, 400, f"{body}: {r}")
+            self.assertEqual(r["error"], "coord.pair_incomplete", f"{body}: {r}")
+
+    def test_517_clear_both(self):
+        self._reset_pickup(41.33, 69.27, "Eski manzil")
+        c = self._student()
+        st, r = self._put(c, {"address": "", "lat": "", "lng": ""})
+        self.assertEqual(st, 200, r)
+        row = self._pickup()
+        self.assertIsNone(row["pickup_lat"])
+        self.assertIsNone(row["pickup_lng"])
+        self.assertEqual(row["pickup_address"], "")
+
+    def test_518_rejected_value_keeps_old_data(self):
+        """Xatoli so'rov yuborilganda ESKI koordinata buzilmasligi SHART."""
+        self._reset_pickup(41.3333, 69.2727, "Saqlangan manzil")
+        c = self._student()
+        st, r = self._put(c, {"address": "Yangi manzil", "lat": 91, "lng": 69.24})
+        self.assertEqual(st, 400, r)
+        row = self._pickup()
+        self.assertAlmostEqual(row["pickup_lat"], 41.3333, places=5)
+        self.assertAlmostEqual(row["pickup_lng"], 69.2727, places=5)
+        self.assertEqual(row["pickup_address"], "Saqlangan manzil",
+                         "xato so'rovda manzil ham o'zgarib ketmasligi kerak")
+
+    def test_519_address_only_keeps_coords(self):
+        """Faqat manzil o'zgartirilsa — koordinata o'zgarMAYdi."""
+        self._reset_pickup(41.3333, 69.2727, "Eski")
+        c = self._student()
+        st, r = self._put(c, {"address": "Yangi manzil"})
+        self.assertEqual(st, 200, r)
+        row = self._pickup()
+        self.assertEqual(row["pickup_address"], "Yangi manzil")
+        self.assertAlmostEqual(row["pickup_lat"], 41.3333, places=5)
+        self.assertAlmostEqual(row["pickup_lng"], 69.2727, places=5)
+
+    def test_520_other_roles_forbidden(self):
+        c = Client()
+        st, r = c.post("/api/auth/login",
+                       {"login": "usrL_00001", "password": "usrP_00001", "role": "instructor"})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(self._put(c, {"lat": 41.31, "lng": 69.24})[0], 403)
+        self.assertEqual(self._put(self.admin, {"lat": 41.31, "lng": 69.24})[0], 403)
+
+    def test_521_unknown_session_404(self):
+        """Noto'g'ri sessiya — validatsiyadan keyin 404 (koordinata o'zgarMAYdi)."""
+        self._reset_pickup(41.3333, 69.2727, "Saqlangan")
+        c = self._student()
+        st, r = self._put(c, {"lat": 41.5, "lng": 69.5}, sid=999999)
+        self.assertEqual(st, 404, r)
+        self.assertEqual(r["error"], "session.student_not_found")
+        row = self._pickup()
+        self.assertAlmostEqual(row["pickup_lat"], 41.3333, places=5)
+
+    def test_522_saved_coords_visible_in_session(self):
+        """Saqlangan koordinata session detallarida QAYTARILISHI shart
+        ("Xaritada ko'rish" havolasi uchun)."""
+        c = self._student()
+        st, _ = self._put(c, {"address": "Chilonzor 40", "lat": 41.3299, "lng": 69.2902})
+        self.assertEqual(st, 200)
+        st, r = c.get(f"/api/student/sessions/{self.session_id}")
+        self.assertEqual(st, 200, r)
+        ss = r["session"]
+        self.assertAlmostEqual(ss["pickup_lat"], 41.3299, places=5)
+        self.assertAlmostEqual(ss["pickup_lng"], 69.2902, places=5)
+        self.assertEqual(ss["pickup_address"], "Chilonzor 40")
+
+    def test_523_session_without_coords_returns_null(self):
+        """Koordinata yo'q bo'lsa frontend "Xaritada ko'rish" havolasi
+        ko'rsatmasligi kerak — qiymat NULL bo'lishi SHART (0 emas)."""
+        c = self._student()
+        st, r = c.get(f"/api/student/sessions/{self.session_id}")
+        self.assertEqual(st, 200, r)
+        ss = r["session"]
+        self.assertIsNone(ss["pickup_lat"])
+        self.assertIsNone(ss["pickup_lng"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

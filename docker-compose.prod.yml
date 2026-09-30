@@ -21,6 +21,14 @@ services:
       AVTOMAKTAB_DB: /app/data/avtomaktab.db
       # Birinchi ishga tushirishda admin paroli (bo'sh bo'lsa demo: admin123)
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      # MODUL 4: Yandex Maps JS API kaliti — `.env` dan. KODGA EMAS.
+      # Bo'sh bo'lsa xarita ishlamaydi (frontend aniq xato ko'rsatadi),
+      # kenglik/uzunlik esa qo'lda kiritiladi.
+      YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY:-}
+      MAP_PROVIDER: ${MAP_PROVIDER:-yandex}
+      MAP_CENTER_LAT: ${MAP_CENTER_LAT:-41.311081}
+      MAP_CENTER_LNG: ${MAP_CENTER_LNG:-69.240562}
+      MAP_CENTER_ZOOM: ${MAP_CENTER_ZOOM:-12}
     ports:
       - "${APP_PORT:-8080}:8080"
     volumes:

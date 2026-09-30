@@ -338,12 +338,19 @@ const UI = (function () {
     ]);
   }
 
-  // OSM xarita havolasi
-  function mapLink(lat, lng, label) {
-    if (!lat || !lng) return el("span", { class: "muted", text: label || "—" });
+  /* MODUL 4: xarita havolasi — Yandex Maps (avval OpenStreetMap edi).
+     `MapView` `map.js` da yuklanadi va bu funksiya faqat runtime'da
+     chaqiriladi, shuning uchun yuklanish tartibi muhim emas.
+     Kalit yo'q bo'lsa ham havola ishlaydi: u oddiy Yandex URL manziliga
+     olib boradi (maxfiy kalit talab qilmaydi). */
+  function mapLink(lat, lng, label, zoom) {
+    const M = (typeof MapView !== "undefined") ? MapView : null;
+    if (!M || !M.isNum(lat) || !M.isNum(lng)) {
+      return el("span", { class: "muted", text: label || "—" });
+    }
     return el("a", {
-      class: "link", href: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`,
-      target: "_blank", rel: "noopener", text: label || "🗺️",
+      class: "link", href: M.linkUrl(lat, lng, zoom),
+      target: "_blank", rel: "noopener", text: label || t("map.open"),
     });
   }
 

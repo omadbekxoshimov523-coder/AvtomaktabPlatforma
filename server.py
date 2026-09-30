@@ -19,11 +19,21 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 BACKUP_DIR = DATA_DIR / "backups"
 WEB_DIR = ROOT / "web"
+
+# ---- `.env` ni YUKLASH (faqat python stdlib, hech qanday qo'shimcha paket yo'q)
+# MUHIM: bu qator `HOST`/`PORT`/`ADMIN_INITIAL_PASSWORD`/`YANDEX_MAPS_API_KEY`
+# dan OLDIN bajarilishi kerak. Haqiqiy muhit o'zgaruvchilari `.env` dan ustun
+# turadi (Docker `env_file` shu bilan ishlaydi). `.env` yo'q bo'lsa — xatosiz
+# davom etiladi. `.env` `.gitignore`'da: hech qachon commit qilinmaydi.
+from app.config import load_dotenv  # noqa: E402
+
+load_dotenv()
+
 DB_PATH = Path(os.environ.get("AVTOMAKTAB_DB") or (DATA_DIR / "avtomaktab.db"))
 # Telefon/kabel tarmog'idan kirish uchun 0.0.0.0 (barcha interfeyslar).
 # Faqat lokalga qaytish uchun: HOST=127.0.0.1 shaklida ishga tushiring.
-HOST = os.environ.get("HOST", "0.0.0.0")
-PORT = int(os.environ.get("PORT", "8080"))
+HOST = os.environ.get("HOST") or "0.0.0.0"
+PORT = int(os.environ.get("PORT") or 8080)
 
 # Windows konsolida o'zbekcha belgilar (—, →) xato bermasligi uchun
 for _s in (sys.stdout, sys.stderr):

@@ -2,7 +2,7 @@
 window.StudentViews = (function () {
   const { t, fmtDate } = I18N;
   const UI = window.UI;
-  const { el, toast, errToast, badge, statusText, avatar, emptyState, spinner, field, input, timeline, checklist, notifMini } = UI;
+  const { el, toast, errToast, badge, statusText, avatar, emptyState, spinner, field, input, timeline, checklist, notifMini, mapLink } = UI;
 
   async function dashboard() {
     const [home, notifRes] = await Promise.all([API.get("student/home"), API.get("me/notifications")]);
@@ -118,7 +118,13 @@ window.StudentViews = (function () {
         el("div", { icon: "instructor", text: "" + (s.instructor_name || "") }),
         el("div", { icon: "car", text: "" + (s.car_name_snapshot || "") + " · " + s.car_plate_snapshot }),
         el("div", { icon: "users", text: "" + (s.student_count || 0) + "/" + s.capacity_snapshot }),
-        el("div", { icon: "map", text: "📍 " + (s.pickup_address || "—") }),
+        // MODUL 4: olish manzili + "Xaritada ko'rish" (Yandex Maps) havolasi
+        el("div", { icon: "map" }, [
+          el("span", { text: "📍 " + (s.pickup_address || "—") }),
+          s.pickup_lat && s.pickup_lng
+            ? el("span", {}, ["  ", mapLink(s.pickup_lat, s.pickup_lng, t("map.open"))])
+            : null,
+        ]),
       ]),
     ]);
   }

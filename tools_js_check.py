@@ -6,7 +6,7 @@ which is a SyntaxError in every JS engine.
 import sys
 from pathlib import Path
 
-WEB = Path(r"C:\Users\hp\Desktop\AvtomaktabPlatforma\web\js")
+WEB = Path(__file__).resolve().parent / "web" / "js"
 
 EXPR_KEYS = {"(", "[", "{", ",", ";", ":", "=", "!", "?", "&", "|", "+", "-", "*", "%", "<", ">", "^", "~", "=>", "return", "case", "in", "of", "typeof", "void", "delete", "new", "do", "else", "yield", "await"}
 
@@ -225,6 +225,13 @@ def main():
     # window.X global bog'lanish tekshiruvi:
     # agar fayl `window.UI` ni O'QISA (≈ `const X = window.UI`), kodi biron joyda
     # `window.UI = ...` yozilgan bo'lishi shart. Aks holda brauzerda UI undefined bo'ladi.
+    #
+    # ISTISNO: tashqi kutubxonalar o'zlari `window.X` ni yozadi (masalan Yandex
+    # Maps skripti `window.ymaps` ni yaratadi) — ularni ro'yxatga olamiz,
+    # aks holda tekshiruv yolg'on xato beradi.
+    EXTERNAL_GLOBALS = {
+        "ymaps": "Yandex Maps JS API (web/js/map.js da skript orqali yuklanadi)",
+    }
     assigned = set()
     reads = []  # (filename, line, name)
 
@@ -245,7 +252,7 @@ def main():
     for f in sorted(WEB.glob("*.js")):
         scan(f)
     for fn, line, name in reads:
-        if name not in assigned:
+        if name not in assigned and name not in EXTERNAL_GLOBALS:
             total += 1
             print(f"  {fn}:{line}: window.{name} o'qilgan, lekin hech bir faylda window.{name} = ... yozilmagan")
 

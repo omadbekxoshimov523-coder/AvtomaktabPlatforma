@@ -43,7 +43,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Birlik testlari (78 ta)
+      - name: Birlik testlari
         run: python -m tests.test_api
 
       - name: JS sintaksis tekshiruvi

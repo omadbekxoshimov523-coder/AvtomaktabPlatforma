@@ -24,6 +24,7 @@ from .rules import check_session_rules, session_auto_data, parse_date, validate_
 from .notify import notify, notify_session_participants, audit, DEFAULT_NOTIF
 from .export import export_table
 from . import export as expmod
+from .config import public_map_config
 
 DB_PATH = None
 DATA_DIR = None
@@ -42,6 +43,41 @@ MAX_CAR_PHOTOS = 8               # bitta avtomobil uchun fotosuratlar soni
 # Tizimdagi mavjud rollar — login paytida yuborilgan rol shu ro'yxamdandagi
 # bo'lishi SHART (MODUL 2). Noma'lum rol ham "wrong_role" bilan rad etiladi.
 ROLES = ("admin", "instructor", "student")
+
+# MODUL 4 — kenglik/uzunlik chegaralari (WGS84, Yandex xaritasi uchun).
+COORD_RANGE = {"lat": (-90.0, 90.0), "lng": (-180.0, 180.0)}
+
+
+def parse_coord(value, kind):
+    """MODUL 4: kenglik/uzunlikni tekshiradi va `float` ga aylantiradi.
+
+    Qoidalar:
+      * `None` / bo'sh satr  -> `None` (koordinata tozalanadi)
+      * noto'g'ri son / chegaradan tashqarida -> `ValueError` (400 qaytariladi)
+    Noto'g'ri qiymat JIM QOLMAYDI: `coord.bad_lat` / `coord.bad_lng` kodi
+    orqali aniq xato qaytariladi.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        v = value.strip().replace(",", ".")
+        if not v:
+            return None
+    elif isinstance(value, bool):
+        raise ValueError(kind)  # True/False — koordinata emas
+    else:
+        v = value
+    try:
+        num = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(kind)
+    if num != num or num in (float("inf"), float("-inf")):  # NaN / Infinity
+        raise ValueError(kind)
+    lo, hi = COORD_RANGE[kind]
+    if not (lo <= num <= hi):
+        raise ValueError(kind)
+    # 7 ta kasr belgisidan ko'p — ortiqcha aniqlik (baza TEXT da saqlanadi)
+    return round(num, 7)
 
 
 def _week_monday() -> str:
@@ -2018,10 +2054,43 @@ class Api:
     def student_update_pickup(self, body, sid):
         self._require("student")
         st = self._stud_record()
+        # MODUL 4: kenglik/uzunlik validatsiyasi. Noto'g'ri qiymat ("abc",
+        # 200, "NaN") JIM QOLMAYDI — 400 + aniq kod qaytariladi.
+        # MUHIM: so'rovda `lat`/`lng` KALITI yo'q bo'lsa — mavjud koordinata
+        # o'zgartirilmaydi (faqat manzil o'zgaradi). Bo'sh string yuborilsa
+        # esa koordinata ataylab tozalanadi.
+        has_lat = "lat" in body or "pickup_lat" in body
+        has_lng = "lng" in body or "pickup_lng" in body
+        lat = lng = None
+        if has_lat or has_lng:
+            raw_lat = body["lat"] if "lat" in body else body.get("pickup_lat")
+            raw_lng = body["lng"] if "lng" in body else body.get("pickup_lng")
+            try:
+                lat = parse_coord(raw_lat, "lat")
+                lng = parse_coord(raw_lng, "lng")
+            except ValueError as e:
+                kind = e.args[0] if e.args else "lat"
+                return BAD, err("coord.bad_" + kind)
+            # Bir tomoni bo'sh, ikkinchisi to'ldirilgan bo'lsa — chalkash holat
+            if (lat is None) != (lng is None):
+                return BAD, err("coord.pair_incomplete")
+        # Hali saqlanmagan koordinatani saqlashga urinish -> 404
+        if not self.db.q1(
+                """SELECT id FROM session_students
+                   WHERE session_id=? AND student_id=? AND student_status='active'""",
+                (int(sid), st["id"])):
+            return NOTFOUND, err("session.student_not_found")
+        sets = ["pickup_address=?"]
+        params = [str(body.get("address", "")).strip()]
+        if has_lat or has_lng:
+            sets += ["pickup_lat=?", "pickup_lng=?"]
+            params += [lat, lng]
+        params += [int(sid), st["id"]]
         upd = self.db.upd(
-            """UPDATE session_students SET pickup_address=?, pickup_lat=?, pickup_lng=?
-               WHERE id=(SELECT id FROM session_students WHERE session_id=? AND student_id=? AND student_status='active')""",
-            (str(body.get("address", "")).strip(), body.get("lat"), body.get("lng"), int(sid), st["id"]))
+            """UPDATE session_students SET %s
+               WHERE id=(SELECT id FROM session_students
+                         WHERE session_id=? AND student_id=? AND student_status='active')"""
+            % ", ".join(sets), params)
         if upd == 0:
             return NOTFOUND, err("session.student_not_found")
         return OK, {"ok": True}
@@ -2109,6 +2178,19 @@ class Api:
         return OK, {"ok": True, "id": rid}
 
     # ------------------------------------------------------------ ichki router
+    def public_config(self):
+        """MODUL 4 — `GET /api/config`: OMMAVIY sozlamalar (KIRISH KERAK EMAS).
+
+        Bu frontend ilk ochilishida (login sahifasida ham) chaqiriladi, shuning
+        uchun sessiya talab qilinmaydi. Qaytariladigan yagona narsa — xarita
+        sozlamalari: Yandex Maps JS API kaliti (bu kalit ommaviy — brauzerda
+        ko'rinishi shart) va xarita markazi (Toshkent).
+
+        Parol, token yoki boshqa sirli ma'lumot shu endpoint orqali
+        QAYTMAYDI — qaytariladigan kalit faqat `YANDEX_MAPS_API_KEY`.
+        """
+        return OK, {"ok": True, "config": {"maps": public_map_config()}}
+
     def route(self, method: str, path: str, query: dict, body: dict):
         seg = [urllib.parse.unquote(s) for s in path.strip("/").split("/")]
         try:
@@ -2123,6 +2205,10 @@ class Api:
             return 500, {"ok": False, "error": "server_error", "message": str(ex)}
 
     def _dispatch(self, method, seg, query, body):
+        # MODUL 4: ommaviy sozlamalar — sessiyasiz, rolda qat'i nazar.
+        if seg[0] == "config":
+            if method == "GET" and len(seg) == 1: return self.public_config()
+            return NOTFOUND, err("not_found")
         if seg[0] == "auth":
             if method == "POST" and seg[1] == "login": return self.auth_login(body)
             if method == "POST" and seg[1] == "logout": return self.auth_logout()

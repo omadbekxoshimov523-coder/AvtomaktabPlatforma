@@ -301,8 +301,8 @@ const Shared = (function () {
             el("div", { class: "muted sm", text: (stu.group_name || "") + " · " + t("lesson.pickup") + ": " + (stu.pickup_address || "—") }),
           ]));
         const acts = el("div", { class: "row gap-sm wrap" }, []);
-        // xarita
-        if (stu.pickup_lat && stu.pickup_lng) acts.append(mapLink(stu.pickup_lat, stu.pickup_lng, "🗺️ " + t("lesson.map")));
+        // MODUL 4: xarita (Yandex Maps) — matni endi "Xaritada ko'rish"
+        if (stu.pickup_lat && stu.pickup_lng) acts.append(mapLink(stu.pickup_lat, stu.pickup_lng, "🗺️ " + t("map.open")));
         if (role === "instructor" || role === "admin") {
           acts.append(callLink(stu.phone));
           acts.append(el("button", { class: "btn btn-light btn-sm", icon: "message", text: "" + t("lesson.message"),
@@ -344,7 +344,7 @@ const Shared = (function () {
           el("div", { class: "muted sm", text: t("lesson.pickup") + ": " + (s.pickup_address || "—") }),
         ]));
       const acts = el("div", { class: "row gap-sm wrap" }, []);
-      if (s.pickup_lat && s.pickup_lng) acts.append(mapLink(s.pickup_lat, s.pickup_lng, "🗺️ " + t("lesson.map")));
+      if (s.pickup_lat && s.pickup_lng) acts.append(mapLink(s.pickup_lat, s.pickup_lng, "🗺️ " + t("map.open")));
       if (s.status === "scheduled") {
         acts.append(el("button", { class: "btn btn-light btn-sm", icon: "map", text: "" + t("lesson.pickup_edit"),
           onclick: () => openPickupEdit(s, m) }));
@@ -369,29 +369,70 @@ const Shared = (function () {
     return el("div", {}, kids);
   }
 
+  /* MODUL 4: "Olish manzili" (pickup) tahrirlash.
+     - Xarita: Yandex Maps JS API (Toshkent markazida). Nuqtani bosish
+       kenglik/uzunlikni avtomatik to'ldiradi.
+     - Maydonlar: "Kenglik" (latitude) va "Uzunlik" (longitude) — avvalgi
+       "lat"/"lng" yozuvlari tushunarsiz edi. Qo'lda kiritish ham saqlanib
+       qoladi (agar xarita yuklanmasa yoki kalit yo'q bo'lsa ham). */
   function openPickupEdit(s, m) {
     const addr = input({ value: s.pickup_address || "", placeholder: t("lesson.pickup") });
-    const mapHint = el("p", { class: "field-hint", icon: "map", text: "" + t("lesson.map") + ": xaritada nuqta tanlang, lat/lng kiriting" });
-    const lat = input({ value: s.pickup_lat || "", placeholder: "lat", class: "input" });
-    const lng = input({ value: s.pickup_lng || "", placeholder: "lng", class: "input" });
-    const osm = el("a", { class: "link", href: "https://www.openstreetmap.org/", target: "_blank", text: "OpenStreetMap" });
+    const lat = input({ value: s.pickup_lat || "", placeholder: "41.311081", inputmode: "decimal" });
+    const lng = input({ value: s.pickup_lng || "", placeholder: "69.240562", inputmode: "decimal" });
+    const err = el("div", { class: "map-msg map-msg-err hidden" });
+    const mapBox = el("div", { class: "map-picker" });
+    const mapHint = el("p", { class: "field-hint", icon: "map", text: t("map.pick_hint") });
+    const yandex = el("a", { class: "link", href: "https://yandex.uz/maps/", target: "_blank", rel: "noopener", text: "Yandex Maps" });
+
+    function showErr(code) {
+      err.textContent = errorText(code);
+      err.classList.remove("hidden");
+    }
+    function clearErr() { err.textContent = ""; err.classList.add("hidden"); }
+
+    /* Kenglik/uzunlikni tekshirish (backend ham tekshiradi, lekin bu yerda
+       foydalanuvchi darhol ko'radigan xato beradi — jim qolmasligi uchun). */
+    function coords() {
+      clearErr();
+      const la = String(lat.value).trim().replace(",", ".");
+      const ln = String(lng.value).trim().replace(",", ".");
+      if (la === "" && ln === "") return { lat: null, lng: null };
+      if (la === "" || ln === "") { showErr("coord.pair_incomplete"); return null; }
+      const a = Number(la), b = Number(ln);
+      if (!isFinite(a) || a < -90 || a > 90) { showErr("coord.bad_lat"); return null; }
+      if (!isFinite(b) || b < -180 || b > 180) { showErr("coord.bad_lng"); return null; }
+      return { lat: a, lng: b };
+    }
+
     const sm = modal(t("lesson.pickup"), [
       field(t("lesson.pickup"), addr),
-      el("div", { class: "row" }, [field("lat", lat, { class: "f1" }), field("lng", lng, { class: "f1" })]),
-      mapHint, osm,
+      el("div", { class: "row" }, [
+        field(t("map.lat"), lat, { class: "f1", hint: t("map.lat_hint") }),
+        field(t("map.lng"), lng, { class: "f1", hint: t("map.lng_hint") }),
+      ]),
+      err,
+      mapBox, mapHint, yandex,
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => sm.close() }),
         el("button", { class: "btn btn-primary", text: t("common.save"),
           onclick: async () => {
+            const c = coords();
+            if (!c) return; // xatoli maydon — saqlash TO'XTATILADI
             try {
               await API.put(`student/sessions/${s.id}/pickup`, {
-                address: addr.value, lat: lat.value ? parseFloat(lat.value) : null, lng: lng.value ? parseFloat(lng.value) : null,
+                address: addr.value, lat: c.lat, lng: c.lng,
               });
               toast(t("misc.saved")); sm.close(); m.close(); openSession(s.id, "student");
             } catch (e) { errToast(e); }
           } }),
       ]),
     ]);
+
+    /* Xarita modal ichida yuklanadi (lazy) — sahifa ochilganda emas. */
+    MapView.mount(mapBox, {
+      lat: s.pickup_lat, lng: s.pickup_lng,
+      onChange: (la, ln) => { lat.value = Number(la).toFixed(6); lng.value = Number(ln).toFixed(6); clearErr(); },
+    });
   }
 
   /* ---------- ADMIN: session boshqarish ---------- */
