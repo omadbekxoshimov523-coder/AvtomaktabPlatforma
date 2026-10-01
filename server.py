@@ -31,10 +31,17 @@ from app.config import load_dotenv  # noqa: E402
 load_dotenv()
 
 DB_PATH = Path(os.environ.get("AVTOMAKTAB_DB") or (DATA_DIR / "avtomaktab.db"))
+# MODUL 1: zaxira nusxa papkasi. Standart — bazaning yonidagi `backups/`, lekin
+# `AVTOMAKTAB_BACKUP_DIR` bilan boshqa joyga (Docker named volume, alohida
+# xavfsiz disk) ko'chirilishi mumkin. Sinov muhitida ham DB yoniga yoziladi.
+BACKUP_DIR = Path(os.environ.get("AVTOMAKTAB_BACKUP_DIR") or (DB_PATH.parent / "backups"))
 # Telefon/kabel tarmog'idan kirish uchun 0.0.0.0 (barcha interfeyslar).
 # Faqat lokalga qaytish uchun: HOST=127.0.0.1 shaklida ishga tushiring.
 HOST = os.environ.get("HOST") or "0.0.0.0"
 PORT = int(os.environ.get("PORT") or 8080)
+# MODUL 1: avtomatik kunlik zaxira nusxa va uni saqlash muddati.
+BACKUP_HOUR = int(os.environ.get("BACKUP_HOUR") or 3)          # soat (0-23)
+BACKUP_RETENTION_DAYS = int(os.environ.get("BACKUP_RETENTION_DAYS") or 30)
 
 # Windows konsolida o'zbekcha belgilar (—, →) xato bermasligi uchun
 for _s in (sys.stdout, sys.stderr):
@@ -201,6 +208,9 @@ class Handler(BaseHTTPRequestHandler):
         tab = (self.headers.get(TAB_HEADER) or "").strip() or None
         api = Api(DB, token, tab)
         client_ip = self._client_ip()
+        # MODUL 1: audit jurnalida mijoz IP'si ko'rsatilishi uchun kontekst.
+        from app.notify import set_audit_ip
+        set_audit_ip(client_ip)
 
         if method == "GET" and sub == "health":
             return self._send_json(200, {"ok": True, "app": "Avtomaktab"})
@@ -337,6 +347,41 @@ def main() -> None:
                 _t.sleep(40)
 
         _th.Thread(target=_reminder_loop, daemon=True).start()
+
+        # MODUL 1: avtomatik KUNLIK zaxira nusxa (soat `BACKUP_HOUR`, standart 03:00).
+        # Bitta fon thread: har daqiqa tekshiradi, soatga yetganda VACUUM INTO
+        # bilan xavfsiz nusxa oladi va eski nusxalarni (30 kundan ortiq) tozalaydi.
+        def _backup_loop():
+            from app.api import make_backup, cleanup_old_backups
+            from app.db import Db as _Db
+            from app.notify import audit as _audit
+            import datetime as _dtm
+            last_day = None
+            while True:
+                try:
+                    nm = _dtm.datetime.now()
+                    if nm.hour == BACKUP_HOUR and nm.minute == 0 and nm.day != last_day:
+                        last_day = nm.day
+                        try:
+                            info = make_backup(str(DB_PATH), str(BACKUP_DIR))
+                            removed = cleanup_old_backups(str(BACKUP_DIR), BACKUP_RETENTION_DAYS)
+                            _audit(_Db(str(DB_PATH)), None, action_type="backup_created",
+                                   target_type="backup", description=info["file"],
+                                   user_name="Avtomatik (fon vazifa)")
+                            if removed:
+                                _audit(_Db(str(DB_PATH)), None, action_type="backup_cleanup",
+                                       target_type="backup",
+                                       description="%d ta eski nusxa o'chirildi" % len(removed),
+                                       user_name="Avtomatik (fon vazifa)")
+                            print("  [backup] Avtomatik zaxira nusxa: %s (%d bayt)"
+                                  % (info["file"], info["size"]))
+                        except Exception as ex:
+                            print("  [backup] XATO: %s" % ex)  # server ishini buzmasin
+                except Exception:
+                    pass
+                _t.sleep(60)
+
+        _th.Thread(target=_backup_loop, daemon=True).start()
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nServer to'xtatildi.")

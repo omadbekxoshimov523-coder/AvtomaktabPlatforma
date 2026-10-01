@@ -304,6 +304,52 @@ const UI = (function () {
     return sel;
   }
 
+  function combobox({ options = [], value = "", placeholder = "", className = "", onChange = null } = {}) {
+    // options: array of {value, text} or {value,text,extra}
+    const wrap = el("div", { class: "combobox", tabindex: -1 });
+    const inputEl = input({ class: "input", placeholder, autocomplete: "off", spellcheck: false });
+    const list = el("div", { class: "combobox-list hidden" });
+    wrap.append(inputEl, list);
+    let filtered = [...options];
+    let currentValue = value;
+    function render() {
+      list.innerHTML = "";
+      const q = inputEl.value.toLowerCase().trim();
+      filtered = options.filter((o) => {
+        const t = (o.text || "").toString().toLowerCase();
+        const v = (o.value || "").toString().toLowerCase();
+        return !q || t.includes(q) || v.includes(q);
+      });
+      if (!filtered.length) {
+        list.append(el("div", { class: "combobox-empty", text: "Hech qanday talaba topilmadi" }));
+      } else {
+        filtered.forEach((o) => {
+          const item = el("div", { class: "combobox-item", text: o.text || String(o.value) });
+          item.addEventListener("click", () => {
+            inputEl.value = o.text || "";
+            currentValue = o.value;
+            list.classList.add("hidden");
+            if (onChange) onChange(currentValue, o);
+          });
+          list.append(item);
+        });
+      }
+    }
+    inputEl.addEventListener("input", render);
+    inputEl.addEventListener("focus", () => { render(); list.classList.remove("hidden"); });
+    document.addEventListener("click", (e) => {
+      if (!wrap.contains(e.target)) list.classList.add("hidden");
+    });
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { list.classList.add("hidden"); }
+    });
+    render();
+    wrap.value = () => currentValue;
+    wrap.setValue = (v) => { currentValue = v; const found = options.find((o) => String(o.value) === String(v)); if (found) inputEl.value = found.text || ""; else inputEl.value = ""; };
+    wrap.getInput = () => inputEl;
+    return wrap;
+  }
+
   /* ============================================================
      M13-M9: Toggle-switch (yoqish/o'chirish) — qayta ishlatiladigan
      komponent. Platformadagi BARCHA yoqish/o'chirish elementlari
@@ -494,7 +540,7 @@ const UI = (function () {
     return list;
   }
 
-  return { el, toast, errToast, modal, confirmDialog, spinner, emptyState, skeleton, badge, statusText, avatar, carPhoto, field, input, select, mapLink, callLink, timeline, checklist, quickLinks, notifMini, toggleSwitch, toggleRow };
+  return { el, toast, errToast, modal, confirmDialog, spinner, emptyState, skeleton, badge, statusText, avatar, carPhoto, field, input, select, mapLink, callLink, timeline, checklist, quickLinks, notifMini, toggleSwitch, toggleRow, combobox };
 })();
 
 /* `const UI` global leksik o'zgaruvchi bo'lgani uchun window.UI da ko'rinmaydi.

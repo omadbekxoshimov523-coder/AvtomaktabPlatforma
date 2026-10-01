@@ -29,6 +29,8 @@ BAND 17 — BILDIRISHNOMA SOZLAMALARI
     jadvalga yoziladi va `notify()` shu qiymatlarni tekshiradi.
     Brauzer yopilgandan keyin ham, boshqa qurilmadan kirilganda ham saqlanadi.
 """
+import threading
+
 from .db import now, jdump, jload
 
 # BAND 18 — manba (source) ro'yxati. Ro'yxatga qo'shilmagan manba "SYSTEM"
@@ -317,8 +319,112 @@ def notify_session_participants(db, session_row, verb: str, sender_id: int = Non
                source=verb_src, related_lesson_id=sid)
 
 
-def audit(db, admin_id, action: str, entity_type: str = "", entity_id=None, details: dict = None):
-    db.ex(
-        "INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details, created_at) VALUES(?,?,?,?,?,?)",
-        (admin_id, action, entity_type, entity_id, jdump(details or {}), now()),
-    )
+# ---------------------------------------------------------------------------
+# MODUL 1 — AUDIT JURNALI (faoliyat jurnali)
+#
+# Bitta `audit()` chaqiruvi IKKALA jadvalga yozadi:
+#   * `audit_log`  — yangi, to'liq jurnal (Kim / Nima qildi / Kimga / IP / Vaqt)
+#   * `audit_logs` — eski jadval (backward compatibility; uning o'qiluvchi
+#                    endpointlari va testlari saqlanib qoladi)
+#
+# `user_name` va `ip_address` avtomatik to'ldiriladi:
+#   * ism — `users` jadvalidan (foydalanuvchi o'zgargan bo'lsa ham, o'sha
+#     paytdagi ism saqlanib qoladi - jurnal "keyinchalik o'zgarmas" tamoyiliga)
+#   * IP  — so'rov kontekstida (`set_audit_ip`) orqali. Kontekst yo'q bo'lsa
+#     (fon vazifalar, seed skriptlar) bo'sh qoladi.
+#
+# Parol HECH QACHON yozilmaydi - faqat "parol o'zgartirildi" degan fakt.
+# ---------------------------------------------------------------------------
+
+_AUDIT_CTX = threading.local()
+
+# MODUL 1: eski inglizcha `action` satrlarini barqaror `action_type` slug'iga
+# tarjima qilish. Frontend filtri va badge'lari shu kalitlarni ishlatadi; eski
+# `audit_logs` jadvalidagi matn esa O'ZGARMAYDI (backward compatibility).
+# Noma'lum amal matni yo'qotilmaydi - o'zi saqlanadi.
+ACTION_ALIASES = {
+    "login": "login", "logout": "logout",
+    "user created": "user_created", "bulk created": "user_created",
+    "users imported": "user_created", "students imported": "user_created",
+    "user updated": "user_updated", "bulk updated": "user_updated",
+    "user blocked": "user_updated", "user unblocked": "user_updated",
+    "user archived": "user_updated", "user activated": "user_updated",
+    "user deleted (soft)": "user_deleted", "bulk deleted": "user_deleted",
+    "password reset": "password_reset", "password changed": "password_changed",
+    "session created": "session_created", "session rescheduled": "session_rescheduled",
+    "session cancelled": "session_cancelled", "session started": "session_started",
+    "session finished": "session_finished",
+    "request approved": "request_approved", "request rejected": "request_rejected",
+    "backup created": "backup_created", "backup restored": "backup_restored",
+}
+
+
+def action_slug(action: str) -> str:
+    """`action` matni -> `action_type` slug'i (noma'lom bo'lsa o'zi)."""
+    a = str(action or "").strip()
+    return ACTION_ALIASES.get(a.lower(), a)
+
+
+def set_audit_ip(ip: str) -> None:
+    """Joriy so'rov mijoz IP'sini audit yozuvlariga ulash uchun."""
+    _AUDIT_CTX.ip = str(ip or "")[:45]
+
+
+def get_audit_ip() -> str:
+    return str(getattr(_AUDIT_CTX, "ip", "") or "")
+
+
+def _resolve_user_name(db, user_id) -> str:
+    """Foydalanuvchi ismi (yoki 'Tizim' / bo'sh)."""
+    if not user_id:
+        return ""
+    try:
+        row = db.q1("SELECT first_name, last_name FROM users WHERE id=?", (int(user_id),))
+        if row:
+            name = ("%s %s" % (row.get("first_name") or "", row.get("last_name") or "")).strip()
+            return name or ("#%s" % user_id)
+    except Exception:
+        pass
+    return "#%s" % user_id
+
+
+def audit(db, admin_id=None, action: str = "", entity_type: str = "", entity_id=None,
+          details: dict = None, user_id=None, user_name: str = "", action_type: str = "",
+          target_type: str = "", target_id=None, description: str = "",
+          ip_address: str = "", timestamp=None):
+    """Journga yozuv qo'shish (ikkala jadvalga ham).
+
+    ESKI chaqiruv usuli saqlanadi:
+        audit(db, uid, "user created", "users", 12, {...})
+    YANGI (to'liq) usuli:
+        audit(db, user_id=1, action_type="user_updated", target_type="users",
+              target_id=12, description="Ism tahrirlandi", ip_address="1.2.3.4")
+    """
+    t = timestamp or now()
+    uid = user_id if user_id is not None else admin_id
+    aname = user_name or _resolve_user_name(db, uid)
+    atype = action_type or action_slug(action)
+    ttype = target_type or entity_type or ""
+    tid = target_id if target_id is not None else entity_id
+    desc = description
+    if not desc and details:
+        desc = ", ".join("%s=%s" % (k, v) for k, v in details.items())
+    ip = ip_address or get_audit_ip()
+    # `audit_log` dagi `target_id` TEXT - NULL-safe bo'lishi uchun str().
+    try:
+        db.ex(
+            "INSERT INTO audit_log(user_id, user_name, action_type, target_type, target_id,"
+            " description, ip_address, timestamp) VALUES(?,?,?,?,?,?,?,?)",
+            (uid, aname, atype, ttype, (None if tid is None else str(tid)), desc, ip, t),
+        )
+    except Exception:
+        pass  # jurnal yozilmasa ham asiy amali to'xtamasin
+    try:
+        db.ex(
+            "INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details, created_at)"
+            " VALUES(?,?,?,?,?,?)",
+            (uid, atype or action, ttype or entity_type, tid,
+             desc or jdump(details or {}), t),
+        )
+    except Exception:
+        pass

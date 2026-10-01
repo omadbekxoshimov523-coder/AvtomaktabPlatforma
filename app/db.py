@@ -506,6 +506,23 @@ def migrate(db: Db) -> None:
         "WHERE (source IS NULL OR source = '' OR source = 'SYSTEM') "
         "AND sender_id IS NOT NULL"
     )
+    # MODUL 1: Audit jurnali (yangi jadval)
+    db.upd(
+        """CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            user_name TEXT DEFAULT '',
+            action_type TEXT NOT NULL,
+            target_type TEXT DEFAULT '',
+            target_id INTEGER,
+            description TEXT DEFAULT '',
+            ip_address TEXT DEFAULT '',
+            timestamp TEXT NOT NULL
+        )"""
+    )
+    db.upd("CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp)")
+    db.upd("CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action_type)")
+    db.upd("CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id)")
 
 
 def init_db(path: str) -> Db:

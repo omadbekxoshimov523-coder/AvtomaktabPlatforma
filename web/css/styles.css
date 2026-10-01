@@ -1257,3 +1257,30 @@ a:focus-visible, button:focus-visible { outline-offset: 2px; }
 [data-theme="dark"] .b-cyan { background: rgba(45, 212, 204, .14); color: #5fe3dc; }
 [data-theme="dark"] .b-gray { background: rgba(150, 165, 195, .18); color: #c2cee4; }
 [data-theme="dark"] .car-plate { background: var(--surface-2); border-color: var(--border-strong); }
+
+/* MODUL 2 — QIDIRILADIGAN COMBOBOX (searchable combobox).
+   Oddiy `<select>` o'rniga: maydonga bosilganda BARCHA variantlar
+   ko'rinadi, foydalanuvchi yozganda ro'yxat REAL VAQTDA filtrlanadi
+   (ism yoki familiya bo'yicha). */
+.combobox { position: relative; width: 100%; }
+.combobox > .input { width: 100%; }
+.combobox-list {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
+  max-height: 260px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-sm, 8px); box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,.16));
+}
+.combobox-item {
+  padding: 9px 12px; cursor: pointer; font-size: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.combobox-item:last-child { border-bottom: none; }
+.combobox-item:hover { background: var(--gold-grad); color: #fff; }
+.combobox-empty { padding: 12px; color: var(--text-muted); font-size: 14px; text-align: center; }
+
+/* MODUL 1 - Audit filtrlari va jadval o'ramasi. */
+.tbl-wrap { overflow-x: auto; border-radius: var(--r-sm, 8px); }
+.tbl-wrap .tbl { min-width: 640px; }
+.fld-inline { display: flex; flex-direction: column; gap: 3px; min-width: 130px; }
+.fld-inline .input { min-width: 130px; }
+.input-error { border-color: var(--danger) !important; box-shadow: 0 0 0 3px rgba(229, 72, 77, .18) !important; }

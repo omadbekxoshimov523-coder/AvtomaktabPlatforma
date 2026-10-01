@@ -349,6 +349,87 @@ def lesson_reminder(db, lesson_id: int, user_id: int, date: str, start_time: str
 
 
 
+# ---------------------------------------------------------------------------
+# MODUL 1 — ZAXIRA NUSXA YORDAMCHILARI
+#
+# `BACKUP_RETENTION_DAYS` kunidan ortiq yotayotgan `.db` nusxalari avtomatik
+# o'chiriladi (joy tejash). Barcha nusxalar BIZ yaratgan nom bilan
+# (`db_*.db`) — qo'lda qo'yilgan boshqa fayllar tegilmaydi.
+# ---------------------------------------------------------------------------
+BACKUP_RETENTION_DAYS = 30
+
+
+def _retention_days() -> int:
+    try:
+        v = int(os.environ.get("BACKUP_RETENTION_DAYS") or BACKUP_RETENTION_DAYS)
+        return v if v > 0 else BACKUP_RETENTION_DAYS
+    except (TypeError, ValueError):
+        return BACKUP_RETENTION_DAYS
+
+
+def cleanup_old_backups(directory, retention_days=None) -> list:
+    """`retention_days`dan eski nusxalarni o'chiradi, o'chirilgan nomlar ro'yxati."""
+    days = retention_days if retention_days is not None else _retention_days()
+    if not directory or not os.path.isdir(directory):
+        return []
+    cutoff = _time.time() - days * 86400
+    removed = []
+    for f in sorted(os.listdir(directory)):
+        if not f.startswith("db_") or not f.endswith(".db"):
+            continue
+        fp = os.path.join(directory, f)
+        try:
+            if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
+                os.remove(fp)
+                removed.append(f)
+        except OSError:
+            continue
+    return removed
+
+
+def make_backup(db_path, directory) -> dict:
+    """VACUUM INTO bilan xavfsiz (WAL-safe) nusxa oladi.
+
+    Server ISHLAB turib ham bajariladi — `VACUUM INTO` yaxlit (consistent)
+    snapshot beradi. Natija: {file, name, path, size, created_at}
+    """
+    os.makedirs(directory, exist_ok=True)
+    name = "db_" + now().replace("-", "").replace(":", "").replace(" ", "_") + ".db"
+    path = os.path.join(directory, name)
+    try:
+        import sqlite3 as _sq
+        con = _sq.connect(db_path)
+        try:
+            con.execute("VACUUM INTO ?", (path,))
+        finally:
+            con.close()
+    except Exception:
+        import shutil
+        shutil.copy2(db_path, path)
+    return {"file": name, "name": name, "path": path,
+            "size": os.path.getsize(path), "created_at": now()}
+
+
+# ---------------------------------------------------------------------------
+# MODUL 1 — audit yordamchilari: foydalanuvchi ismi va roli.
+# `audit_log.user_name` vaqt chegarasidagi ismni saqlaydi (jurnal keyinchalik
+# o'zgarmasligi kerak), shuning uchun u har bir yozuvda alohida yoziladi.
+# ---------------------------------------------------------------------------
+_ROLE_UZ = {"admin": "Admin", "instructor": "Instruktor", "student": "Talaba"}
+
+
+def user_name(u) -> str:
+    if not u:
+        return ""
+    if isinstance(u, str):
+        return u
+    return ("%s %s" % (u.get("first_name") or "", u.get("last_name") or "")).strip()
+
+
+def role_name(role) -> str:
+    return _ROLE_UZ.get(str(role or ""), str(role or ""))
+
+
 def upload_dir(*parts: str) -> str:
     """web/uploads/<...> papkasi (loyiha ildiziga nisbatan)."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -441,12 +522,22 @@ class Api:
             # (cookie qiymati endi qurilma kaliti sifatida ishlatiladi).
             destroy_session(self.db, self.token)
         self.db.upd("UPDATE users SET last_login_at=? WHERE id=?", (now(), u["id"]))
+        # MODUL 1: har bir rol (admin / instruktor / talaba) kirishi JURNALGA
+        # yoziladi. Parol yozilmaydi - faqat "kim, qachon, qayerdan" fakt.
+        audit(self.db, u["id"], action_type="login", target_type="users",
+              target_id=u["id"], user_name=user_name(u),
+              description="%s tizimga kirdi" % role_name(u["role"]),
+              ip_address=client_ip)
         sess = get_session(self.db, token, self.tab)
         return OK, {"ok": True, "token": token, "user": user_public(u),
                     "csrf": (sess or {}).get("csrf_token", "")}
 
 
     def auth_logout(self):
+        if self.user:
+            audit(self.db, self.user["id"], action_type="logout", target_type="users",
+                  target_id=self.user["id"], user_name=user_name(self.user),
+                  description="Tizimdan chiqdi")
         destroy_session(self.db, self.token, self.tab)
         return OK, {"ok": True}
 
@@ -489,6 +580,11 @@ class Api:
             "DELETE FROM sessions_ring WHERE user_id=? AND token_hash!=?",
             (self.user["id"], (self.session or {}).get("token_hash") or ""),
         )
+        # MODUL 1: parolning O'ZI yozilmaydi - faqat o'zgargan fakt.
+        audit(self.db, self.user["id"], action_type="password_changed",
+              target_type="users", target_id=self.user["id"],
+              user_name=user_name(self.user),
+              description="Parol o'zgartirildi")
         return OK, {"ok": True}
 
     def auth_request_reset(self, body):
@@ -2437,23 +2533,83 @@ class Api:
     # ---- backup
     def admin_backup_create(self):
         self._require("admin")
-        import shutil
         if not BACKUP_DIR:
             return BAD, err("backup.disabled")
-        name = f"backup_{today().replace('-', '')}_{now().replace(':', '').replace(' ', '_')}.db"
-        path = os.path.join(BACKUP_DIR, name)
-        shutil.copy2(DB_PATH, path)
-        audit(self.db, self.user["id"], "backup created", "backup", None, {"file": name})
-        return OK, {"ok": True, "file": name, "size": os.path.getsize(path)}
+        # VACUUM INTO — server ISHLAB turib ham xavfsiz, yaxlit (WAL-safe) nusxa.
+        info = make_backup(DB_PATH, BACKUP_DIR)
+        name = info["file"]
+        path = info["path"]
+        # MODUL 1 (5): eski nusxalarni avtomatik tozalash (30 kundan ortiq)
+        removed = cleanup_old_backups(BACKUP_DIR, BACKUP_RETENTION_DAYS)
+        audit(self.db, self.user["id"], action_type="backup_created", target_type="backup",
+              target_id=None, description=name, user_name=user_name(self.user))
+        if removed:
+            audit(self.db, self.user["id"], action_type="backup_cleanup", target_type="backup",
+                  description="%d ta eski nusxa o'chirildi" % len(removed))
+        return OK, {"ok": True, "file": name, "size": os.path.getsize(path),
+                    "removed": removed, "retention_days": BACKUP_RETENTION_DAYS}
 
     def admin_backup_list(self):
         self._require("admin")
         if not BACKUP_DIR or not os.path.isdir(BACKUP_DIR):
             return OK, {"ok": True, "backups": []}
-        files = sorted(os.listdir(BACKUP_DIR), reverse=True)[:30]
+        files = sorted(os.listdir(BACKUP_DIR), reverse=True)[:100]
         out = [{"name": f, "size": os.path.getsize(os.path.join(BACKUP_DIR, f)),
-                "time": os.path.getmtime(os.path.join(BACKUP_DIR, f))} for f in files]
+                "time": os.path.getmtime(os.path.join(BACKUP_DIR, f))} for f in files if os.path.isfile(os.path.join(BACKUP_DIR, f))]
         return OK, {"ok": True, "backups": out}
+
+    def admin_backup_download(self, filename: str):
+        self._require("admin")
+        import os as _os
+        if not filename or ".." in filename:
+            return BAD, err("backup.bad")
+        path = _os.path.join(BACKUP_DIR, filename) if BACKUP_DIR else filename
+        if not _os.path.exists(path) or not _os.path.isfile(path):
+            return NOTFOUND, err("not_found")
+        import base64
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        return OK, {"download": {"b64": b64, "filename": filename, "mime": "application/octet-stream"}}
+
+    def admin_backup_restore(self, body):
+        self._require("admin")
+        filename = str(body.get("filename", ""))
+        if not filename or ".." in filename:
+            return BAD, err("backup.bad")
+        path = os.path.join(BACKUP_DIR, filename) if BACKUP_DIR else filename
+        if not os.path.exists(path):
+            return NOTFOUND, err("not_found")
+        # XAVFSIZLIK: tiklashdan OLDIN joriy bazaning "zaxira nusxasi"ni
+        # olamiz — noto'g'ri nusxa tanlansa ham ma'lumot yo'qolmaydi.
+        try:
+            self.admin_backup_create()
+        except Exception:
+            pass
+        import shutil, sqlite3 as _sq
+        # WAL yordamchi fayllarini o'chiramiz (eski holat qolmasin)
+        for suf in ("-wal", "-shm"):
+            p = DB_PATH + suf
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+        shutil.copy2(path, DB_PATH)
+        # Nusxa haqiqiy SQLite bazasi ekanini tekshiramiz
+        try:
+            vc = _sq.connect(DB_PATH)
+            ok = vc.execute("PRAGMA integrity_check").fetchone()[0]
+            vc.close()
+        except Exception:
+            return BAD, err("backup.restore_bad")
+        if ok != "ok":
+            return BAD, err("backup.restore_bad")
+        try:
+            uname = (self.user.get("first_name") or "") + " " + (self.user.get("last_name") or "")
+        except Exception:
+            uname = ""
+        audit(self.db, self.user["id"], action_type="backup_restored", target_type="backup", description=filename, user_name=uname)
+        return OK, {"ok": True}
 
     # ---- audit
     def admin_audit(self, query):
@@ -2461,12 +2617,34 @@ class Api:
         where = []
         params = []
         if query.get("action"):
-            where.append("action LIKE ?")
+            where.append("action_type LIKE ?")
             params.append("%" + query["action"] + "%")
+        if query.get("q"):
+            where.append("(action_type LIKE ? OR description LIKE ? OR user_name LIKE ?)")
+            qv = "%" + query["q"] + "%"
+            params.extend([qv, qv, qv])
+        if query.get("user"):
+            try:
+                uid = int(query["user"])
+                where.append("user_id = ?")
+                params.append(uid)
+            except Exception:
+                pass
+        if query.get("from"):
+            where.append("timestamp >= ?")
+            params.append(query["from"] + " 00:00:00")
+        if query.get("to"):
+            where.append("timestamp <= ?")
+            params.append(query["to"] + " 23:59:59")
         rows = self.db.q(
-            "SELECT * FROM audit_logs WHERE " + (" AND ".join(where) if where else "1=1") +
-            " ORDER BY id DESC LIMIT 400", params)
-        return OK, {"ok": True, "logs": rows}
+            "SELECT id,user_id,user_name,action_type,target_type,target_id,description,ip_address,timestamp FROM audit_log WHERE " + (" AND ".join(where) if where else "1=1") +
+            " ORDER BY id DESC LIMIT 500", params)
+        users = self.db.q(
+            "SELECT DISTINCT user_id AS id, user_name AS name FROM audit_log WHERE user_id IS NOT NULL ORDER BY name LIMIT 200")
+        acts = self.db.q("SELECT DISTINCT action_type FROM audit_log ORDER BY action_type LIMIT 200")
+        return OK, {"ok": True, "logs": rows,
+                    "user_options": users,
+                    "action_options": [a["action_type"] for a in acts if a.get("action_type")]}
 
     # ---- settings, translations
     def admin_settings_get(self):
@@ -3243,8 +3421,15 @@ class Api:
         if seg[0] == "analytics": return self.admin_analytics(query)
         if seg[0] == "export": return self.admin_export(query)
         if seg[0] == "backup":
-            if method == "POST": return self.admin_backup_create()
-            if method == "GET": return self.admin_backup_list()
+            if method == "POST":
+                # restore or create?
+                if body and body.get("action") == "restore":
+                    return self.admin_backup_restore(body)
+                return self.admin_backup_create()
+            if method == "GET":
+                if query.get("download"):
+                    return self.admin_backup_download(str(query.get("download")))
+                return self.admin_backup_list()
         if seg[0] == "audit": return self.admin_audit(query)
         if seg[0] == "settings":
             if method == "GET": return self.admin_settings_get()

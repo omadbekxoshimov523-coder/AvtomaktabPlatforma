@@ -1326,13 +1326,14 @@ window.AdminViews = (function () {
 
     function renderStudents() {
       studSelWrap.innerHTML = "";
-      const sel = select({});
+      const opts = [];
       allStudents.forEach((u) => {
-        if (!added.includes(String(u.student.id))) sel.append(el("option", { value: u.student.id, text: `${u.first_name} ${u.last_name} (${u.student.group_name || ""})` }));
+        if (!added.includes(String(u.student.id))) opts.push({ value: u.student.id, text: `${u.first_name} ${u.last_name} (${u.student.group_name || ""})` });
       });
+      const combo = UI.combobox({ options: opts, placeholder: t("lesson.search_student"), onChange: (val) => { if (val && !added.includes(String(val))) { added.push(String(val)); } renderStudents(); } });
       const addBtn = el("button", { class: "btn btn-cyan btn-sm", icon: "plus", text: "" + t("lesson.add_student"),
-        onclick: () => { const v = sel.value; if (v && !added.includes(v)) added.push(v); renderStudents(); } });
-      studSelWrap.append(el("div", { class: "row" }, [el("div", { class: "f1" }, [sel]), addBtn]));
+        onclick: () => { const v = combo.value(); if (v && !added.includes(String(v))) { added.push(String(v)); renderStudents(); } } });
+      studSelWrap.append(el("div", { class: "row" }, [el("div", { class: "f1" }, [combo]), addBtn]));
       addedList.innerHTML = "";
       // f.cap div elementi — sig'im "🔒 N" shaklida textContent'da turadi
       const capNum = f.cap.textContent !== "—" ? parseInt(String(f.cap.textContent).replace("🔒 ", "") || "0") : 0;
@@ -1857,44 +1858,182 @@ window.AdminViews = (function () {
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 600);
   }
 
-  /* ============================ AUDIT ============================ */
-  async function audit() {
-    const res = await API.get("admin/audit");
-    const wrap = el("div", {}, [el("h3", { class: "mb", icon: "file", text: "" + t("audit.title") })]);
-    if (!res.logs.length) { wrap.append(emptyState("📜", t("auth.no_registration"))); return wrap; }
-    const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
-      el("th", { text: t("common.date") }), el("th", { text: "Admin" }), el("th", { text: t("common.actions") }),
-      el("th", { text: "Entity" }), el("th", { text: t("common.notes") }),
-    ])]), el("tbody", {}, res.logs.map((l) => el("tr", {}, [
-      el("td", { text: fmtDateTime(l.created_at) }),
-      el("td", { text: String(l.admin_id || "—") }),
-      el("td", {}, [badge("blue", l.action)]),
-      el("td", { text: `${l.entity_type || ""} #${l.entity_id || ""}` }),
-      el("td", { text: JSON.stringify(JSON.parse(l.details || "{}")), class: "muted" }),
-    ])))]);
-    wrap.append(tbl);
+  /* ============================ AUDIT (faoliyat jurnali) ============================ */
+  /* MODUL 1: jadval ko'rinishida (Vaqt / Kim / Nima qildi / Kimga),
+     filtrar: sana oralig'i, foydalanuvchi, amal turi, qidiruv maydoni. */
+  const ACT_COLORS = {
+    backup_created: "green", backup_restored: "red",
+    login: "blue", logout: "gray",
+    user_created: "green", user_updated: "blue", user_deleted: "red",
+    password_changed: "orange", password_reset: "orange",
+    session_created: "green", session_cancelled: "red", session_rescheduled: "blue",
+    request_approved: "green", request_rejected: "red",
+  };
+
+  async function audit(params) {
+    params = params || {};
+    const wrap = el("div", {}, [el("h3", { class: "mb", icon: "list", text: "" + t("audit.title") })]);
+
+    /* --- filtrlar --- */
+    const fFrom = input({ type: "date", class: "input" });
+    const fTo = input({ type: "date", class: "input" });
+    const fUser = select({ "": t("audit.all_users") });
+    const fAction = select({ "": t("audit.all_actions") });
+    const fQ = input({ class: "input", placeholder: t("audit.search_ph") });
+    if (params.from) fFrom.value = params.from;
+    if (params.to) fTo.value = params.to;
+    if (params.user_id) fUser.value = String(params.user_id);
+    if (params.action) fAction.value = params.action;
+
+    const filters = el("div", { class: "card mb" }, [
+      el("div", { class: "row wrap gap-sm" }, [
+        el("label", { class: "fld-inline" }, [el("span", { class: "sm muted", text: t("audit.from") }), fFrom]),
+        el("label", { class: "fld-inline" }, [el("span", { class: "sm muted", text: t("audit.to") }), fTo]),
+        el("label", { class: "fld-inline" }, [el("span", { class: "sm muted", text: t("audit.user") }), fUser]),
+        el("label", { class: "fld-inline" }, [el("span", { class: "sm muted", text: t("audit.action") }), fAction]),
+        el("div", { class: "f1" }, [fQ]),
+      ]),
+      el("p", { class: "sm muted mt", text: t("audit.immutable_hint") }),
+    ]);
+    wrap.append(filters);
+    const host = el("div", {});
+    wrap.append(host);
+
+    async function load() {
+      host.innerHTML = ""; host.append(spinner());
+      const qs = [];
+      if (fFrom.value) qs.push("from=" + encodeURIComponent(fFrom.value));
+      if (fTo.value) qs.push("to=" + encodeURIComponent(fTo.value));
+      if (fUser.value) qs.push("user=" + encodeURIComponent(fUser.value));
+      if (fAction.value) qs.push("action=" + encodeURIComponent(fAction.value));
+      if (fQ.value.trim()) qs.push("q=" + encodeURIComponent(fQ.value.trim()));
+      const res = await API.get("admin/audit" + (qs.length ? "?" + qs.join("&") : ""));
+
+      /* filtr dropdownlarini to'ldirish (ma'lumotdan keladi) */
+      if (res.user_options && res.user_options.length) {
+        const cur = fUser.value;
+        fUser.innerHTML = "";
+        fUser.append(el("option", { value: "", text: t("audit.all_users") }));
+        res.user_options.forEach((u) => fUser.append(el("option", { value: String(u.id), text: u.name })));
+        fUser.value = cur;
+      }
+      if (res.action_options && res.action_options.length) {
+        const cur = fAction.value;
+        fAction.innerHTML = "";
+        fAction.append(el("option", { value: "", text: t("audit.all_actions") }));
+        res.action_options.forEach((a) => fAction.append(el("option", { value: a, text: t("audit.act." + a) !== ("audit.act." + a) ? t("audit.act." + a) : a })));
+        fAction.value = cur;
+      }
+
+      host.innerHTML = "";
+      if (!res.logs.length) { host.append(emptyState("📜", t("audit.empty"))); return; }
+      const tbl = el("table", { class: "tbl" }, [
+        el("thead", {}, [el("tr", {}, [
+          el("th", { text: t("audit.time") }), el("th", { text: t("audit.who") }),
+          el("th", { text: t("audit.did") }), el("th", { text: t("audit.target") }),
+        ])]),
+        el("tbody", {}, res.logs.map((l) => el("tr", {}, [
+          el("td", { text: fmtDateTime(l.timestamp) }),
+          el("td", {}, [el("span", { class: "cell-strong", text: l.user_name || t("audit.system") })]),
+          el("td", {}, [badge(ACT_COLORS[l.action_type] || "blue", t("audit.act." + l.action_type) !== ("audit.act." + l.action_type) ? t("audit.act." + l.action_type) : l.action_type)]),
+          el("td", { text: (l.description || (l.target_type ? l.target_type + (l.target_id ? " #" + l.target_id : "") : "")) || "—", class: "muted" }),
+        ]))),
+      ]);
+      host.append(el("div", { class: "tbl-wrap" }, [tbl]));
+    }
+    [fFrom, fTo, fUser, fAction].forEach((c) => c.addEventListener("change", load));
+    let qt = null;
+    fQ.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(load, 250); });
+    load();
     return wrap;
   }
 
-  /* ============================ BACKUP ============================ */
+  /* ============================ BACKUP (zaxira nusxa) ============================ */
+  /* MODUL 1: qo'lda yaratish, ro'yxat, yuklab olish va tiklash.
+     Tiklash JUDA xavfli amal -> ikki bosqichli tasdiqlash:
+     1) ogohlantirish oynasi, 2) "TASDIQLASH" so'zini qo'lda kiritish. */
+  function backupSize(bytes) {
+    const b = Number(bytes) || 0;
+    if (b >= 1048576) return (b / 1048576).toFixed(2) + " MB";
+    return (b / 1024).toFixed(1) + " KB";
+  }
+
+  function backupTime(ts) {
+    const n = Number(ts) * 1000;
+    if (!n) return "—";
+    const d = new Date(n);
+    return d.toLocaleString("uz-UZ");
+  }
+
+  /* Ikki bosqichli tiklash tasdig'i: avval ogohlantirish, keyin
+     "TASDIQLASH" so'zini qo'lda kiritish shart. */
+  function restoreConfirm(name, onDone) {
+    const inp = input({ class: "input", placeholder: t("backup.restore_word"), autocomplete: "off" });
+    const m = modal("⚠️ " + t("backup.restore_title"), [
+      el("p", { class: "confirm-text", text: t("backup.restore_warn") }),
+      el("p", { class: "muted sm", text: name }),
+      el("p", { class: "mt sm", text: t("backup.restore_type") }),
+      inp,
+      el("div", { class: "row end mt" }, [
+        el("button", { class: "btn btn-danger", text: t("backup.restore_go"), onclick: () => {
+          if (String(inp.value).trim().toUpperCase() !== "TASDIQLASH") {
+            inp.classList.add("input-error");
+            toast(t("backup.restore_wrong"), "error");
+            return;
+          }
+          m.close(); onDone();
+        } }),
+      ]),
+    ]);
+    return m;
+  }
+
   async function backup() {
     const wrap = el("div", {}, []);
-    const listB = el("button", { class: "btn btn-primary", icon: "save", text: "" + t("backup.create"), onclick: async () => {
-      try { const r = await API.post("admin/backup"); toast(t("backup.created") + ": " + r.file); loadList(); }
+    const createBtn = el("button", { class: "btn btn-primary", icon: "save", text: "" + t("backup.create"), onclick: async () => {
+      createBtn.disabled = true;
+      try { const r = await API.post("admin/backup"); toast(t("backup.created") + ": " + r.file); await loadList(); }
       catch (e) { errToast(e); }
+      finally { createBtn.disabled = false; }
     } });
-    const host = el("div", { class: "mt" });
-    wrap.append(listB, host);
+    const host = el("div", {});
+    wrap.append(el("div", { class: "row between mb" }, [
+      el("h3", { icon: "download", text: "" + t("backup.title") }),
+      createBtn,
+    ]), host);
+
     async function loadList() {
       host.innerHTML = ""; host.append(spinner());
       const r = await API.get("admin/backup");
       host.innerHTML = "";
-      if (!r.backups.length) { host.append(emptyState("💾", t("backup.title"))); return; }
-      const list = el("div", { class: "grid-2" });
-      r.backups.forEach((b) => list.append(el("div", { class: "card row between" }, [
-        el("div", {}, [el("div", { class: "cell-strong", text: b.name }), el("div", { class: "muted sm", text: (b.size / 1024).toFixed(1) + " KB" })]),
-      ])));
-      host.append(list);
+      if (!r.backups.length) { host.append(emptyState("🖾", t("backup.empty"))); return; }
+      const tbl = el("table", { class: "tbl" }, [
+        el("thead", {}, [el("tr", {}, [
+          el("th", { text: t("backup.file") }), el("th", { text: t("common.date") }),
+          el("th", { text: t("backup.size") }), el("th", { text: t("common.actions") }),
+        ])]),
+        el("tbody", {}, r.backups.map((b) => el("tr", {}, [
+          el("td", { text: b.name }),
+          el("td", { text: backupTime(b.time) }),
+          el("td", { text: backupSize(b.size) }),
+          el("td", {}, [el("div", { class: "row gap-sm" }, [
+            el("button", { class: "btn btn-light btn-sm", icon: "download", text: "" + t("backup.download"),
+              onclick: async () => {
+                try {
+                  const res = await API.get("admin/backup?download=" + encodeURIComponent(b.name));
+                  if (res.download && res.download.b64) saveBlob(res.download.b64, res.download.filename || b.name, res.download.mime || "application/octet-stream");
+                  else toast(t("backup.download_failed"), "error");
+                } catch (e) { errToast(e); }
+              } }),
+            el("button", { class: "btn btn-danger btn-sm", icon: "refresh", text: "" + t("backup.restore"),
+              onclick: () => restoreConfirm(b.name, async () => {
+                try { await API.post("admin/backup", { action: "restore", filename: b.name }); toast(t("backup.restored")); }
+                catch (e) { errToast(e); }
+              }) }),
+          ])]),
+        ]))),
+      ]);
+      host.append(el("div", { class: "tbl-wrap" }, [tbl]));
     }
     loadList();
     return wrap;
