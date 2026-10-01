@@ -382,6 +382,33 @@ def main() -> None:
                 _t.sleep(60)
 
         _th.Thread(target=_backup_loop, daemon=True).start()
+
+        # MODUL 5: so'rovlar MUDDATI — eskirgan `pending` so'rovlarni belgilash.
+        #
+        # MANTIQ (so'rov YARATILGAN vaqtdan emas, so'ralgan MASHG'ULOT sanasidan):
+        #   * `preferred_date` KELAJAKDA (bugun yoki keyin) -> faol ro'yxatda
+        #     qoladi, qancha vaqt o'tishidan qat'i nazar;
+        #   * `preferred_date` O'TGAN va holat hali `pending` -> sana o'tganidan
+        #     keyingi 1 kun o'tgach so'rov "Eskirgan"ga o'tadi.
+        # Ro'yxat mantiqining o'zi `app.api.filter_requests` da (so'rov
+        # qachon yaratilganidan QAT'I NAZAR); bu fon vazifa faqat
+        # `expired_at` vaqtini yozib qo'yadi (tarixda ko'rinadi).
+        # Har 5 daqiqada tekshiriladi (server o'zgarganda ham darhol ishlaydi —
+        # eski muddatli so'rovlar `expired_at`siz ham to'g'ri hisoblanadi).
+        def _requests_loop():
+            from app.api import expire_stale_requests
+            from app.db import Db as _Db
+            while True:
+                try:
+                    n = expire_stale_requests(_Db(str(DB_PATH)))
+                    if n:
+                        print("  [requests] %d ta so'rov muddati o'tgani uchun eskirgan"
+                              % n)
+                except Exception:
+                    pass  # xato server ishini buzmasin
+                _t.sleep(300)
+
+        _th.Thread(target=_requests_loop, daemon=True).start()
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nServer to'xtatildi.")

@@ -215,7 +215,7 @@ const I18N = (function () {
     "err.auth.user_blocked": { uz: "Foydalanuvchi bloklangan", ru: "Пользователь заблокирован", en: "User is blocked" },
     "err.auth.wrong_role": { uz: "Login yoki parol noto'g'ri", ru: "Неверный логин или пароль", en: "Wrong login or password" },
     "err.auth.required": { uz: "Tizimga kirish kerak", ru: "Необходимо войти", en: "Login required" },
-    "err.auth.password_short": { uz: "Parol kamida 5 belgi bo'lsin", ru: "Пароль должен быть не менее 5 символов", en: "Password must be at least 5 characters" },
+    "err.auth.password_short": { uz: "Parol kamida 10 belgidan iborat bo'lishi kerak", ru: "Пароль должен содержать не менее 10 символов", en: "Password must be at least 10 characters" },
     "err.auth.wrong_old": { uz: "Eski parol noto'g'ri", ru: "Старый пароль неверен", en: "Old password is wrong" },
     "err.auth.wrong_old_password": { uz: "Eski parol noto'g'ri", ru: "Старый пароль неверен", en: "Old password is wrong" },
     "err.auth.otp_required": { uz: "Bu hisobda 2FA yoqilgan. SMS'dan 6 raqamli kodni kiriting.", ru: "На этом аккаунте включена 2FA. Введите 6-значный код из SMS.", en: "2FA is enabled on this account. Enter the 6-digit SMS code." },
@@ -257,6 +257,9 @@ const I18N = (function () {
     "err.notif.empty": { uz: "Xabar matni bo'sh", ru: "Текст сообщения пуст", en: "Message text is empty" },
     "err.msg.empty": { uz: "Xabar matni bo'sh", ru: "Текст сообщения пуст", en: "Message text is empty" },
     "err.backup.disabled": { uz: "Zaxira nusxa o'chirilgan", ru: "Резервное копирование отключено", en: "Backup is disabled" },
+    "err.backup.bad": { uz: "Fayl nomi noto'g'ri", ru: "Неверное имя файла", en: "Invalid file name" },
+    "err.backup.not_found": { uz: "Bunday zaxira nusxa topilmadi", ru: "Такой резервной копии не найдено", en: "No such backup" },
+    "err.backup.delete_failed": { uz: "Faylni o'chirib bo'lmadi", ru: "Не удалось удалить файл", en: "Failed to delete file" },
     "err.capacity_full": { uz: "Avtomobilning amaliy mashg'ulot sig'imi to'lgan", ru: "Вместимость автомобиля заполнена", en: "Car practice capacity is full" },
     "err.student_busy": { uz: "Talaba shu vaqtda boshqa mashg'ulotga yozilgan", ru: "Ученик записан на другое занятие в это время", en: "Student is booked in another lesson at this time" },
     "err.instructor_busy": { uz: "Instruktor shu vaqtda boshqa mashg'ulot bilan band", ru: "Инструктор занят в это время", en: "Instructor is busy at this time" },
@@ -530,14 +533,14 @@ const I18N = (function () {
     "base.go_reports_hint": { uz: "Hisobotlar bo'limiga o'tish", ru: "Перейти в раздел Отчёты", en: "Go to Reports section" },
 
     // ====================================================================
-    // MODUL 4 — Eskirgan so'rovlar (24 soat)
+    // MODUL 5 — Eskirgan so'rovlar (so'ralgan mashg'ulot sanasidan +1 KUN)
     // ====================================================================
     "req.expired": { uz: "Muddati o'tgan", ru: "Срок истёк", en: "Expired" },
-    "req.expired_hint": { uz: "24 soatdan ko'p vaqt o'tdi, hali tasdiqlanmagan", ru: "Прошло более 24 часов, не подтверждён", en: "Over 24 hours, still not confirmed" },
+    "req.expired_hint": { uz: "So'ralgan mashg'ulot sanasidan 1 kun o'tib ketgan, lekin hali tasdiqlanmagan", ru: "С указанной даты занятия прошёл 1 день, заявка не подтверждена", en: "1 day has passed since the requested lesson date and it is still unconfirmed" },
     "req.filter_active": { uz: "Faol", ru: "Активные", en: "Active" },
     "req.filter_expired": { uz: "Eskirgan", ru: "Просроченные", en: "Expired" },
     "req.filter_history": { uz: "Tarix", ru: "История", en: "History" },
-    "req.auto_hidden": { uz: "Eskirgan so'rovlar asosiy ro'yxatdan avtomatik yashiriladi", ru: "Просроченные заявки автоматически скрываются из основного списка", en: "Expired requests are automatically hidden from the main list" },
+    "req.auto_hidden": { uz: "Muddati o'tgan so'rovlar asosiy ro'yxatdan avtomatik yashiriladi va \"Eskirgan\" bo'limiga o'tadi", ru: "Просроченные заявки автоматически скрываются из основного списка и переходят в раздел «Просроченные»", en: "Expired requests are automatically hidden from the main list and move to the Expired tab" },
 
     // ====================================================================
     // MODUL 5 — TO'LIQ HISOBOTLAR TIZIMI
@@ -653,6 +656,8 @@ const I18N = (function () {
     "audit.act.request_rejected": { uz: "So'rovni rad etdi", ru: "Отказал запрос", en: "Rejected request" },
     "audit.act.backup_created": { uz: "Zaxira nusxa yaratdi", ru: "Создал резервную копию", en: "Created backup" },
     "audit.act.backup_restored": { uz: "Zaxira nusxani tikladi", ru: "Восстановил из резервной копии", en: "Restored backup" },
+    "audit.act.backup_deleted": { uz: "Zaxira nusxani o'chirdi", ru: "Удалил резервную копию", en: "Deleted backup" },
+    "audit.act.login_changed": { uz: "Loginni o'zgartirdi", ru: "Изменил логин", en: "Changed login" },
 
     /* ---- MODUL 1: Zaxira nusxa */
     "backup.empty": { uz: "Hozircha zaxira nusxa yo'q", ru: "Копий есь нет", en: "No backups yet" },
@@ -669,6 +674,9 @@ const I18N = (function () {
     "backup.restore_wrong": { uz: "So'z noto'g'ri - tasdiqlash uchun TASDIQLASH deb yozish shart", ru: "Неверное слово", en: "Wrong word - type TASDIQLASH" },
     "backup.download_failed": { uz: "Faylni yuklab olib bo'lmadi", ru: "Не удалось скачать", en: "Download failed" },
     "backup.created": { uz: "Zaxira nusxa yaratildi", ru: "Резервная копия создана", en: "Backup created" },
+    "backup.delete": { uz: "O'chirish", ru: "Удалить", en: "Delete" },
+    "backup.delete_confirm": { uz: "Bu zahira nusxani o'chirmoqchisiz? Bu amalni qaytarib bo'lmaydi.", ru: "Удалить эту резервную копию? Это действие необратимо.", en: "Delete this backup? This action cannot be undone." },
+    "backup.deleted": { uz: "Zaxira nusxa o'chirildi", ru: "Резервная копия удалена", en: "Backup deleted" },
 
     // ---- settings
     "settings.title": { uz: "Sozlamalar", ru: "Настройки", en: "Settings" },
@@ -679,6 +687,22 @@ const I18N = (function () {
     "profile.edit": { uz: "Profilni tahrirlash", ru: "Редактировать профиль", en: "Edit profile" },
     "profile.credentials": { uz: "Hisob", ru: "Аккаунт", en: "Account" },
     "profile.change_pass": { uz: "Parolni o'zgartirish", ru: "Сменить пароль", en: "Change password" },
+    /* MODUL 4: parol VA login bir xil, alohida xavfsiz oqimda o'zgaradi. */
+    "profile.change_credentials": { uz: "Parol va login o'zgartirish", ru: "Смена пароля и логина", en: "Change password and login" },
+    "profile.change_credentials_hint": { uz: "Joriy parol bilan tasdiqlanadi. Kamida bittasi — login yoki parol — o'zgarishi shart.", ru: "Подтверждается текущим паролем. Нужно изменить хотя бы одно: логин или пароль.", en: "Confirmed with the current password. At least one of login or password must change." },
+    "profile.new_login": { uz: "Yangi login (ixtiyoriy)", ru: "Новый логин (необязательно)", en: "New login (optional)" },
+    "profile.new_password": { uz: "Yangi parol (ixtiyoriy)", ru: "Новый пароль (необязательно)", en: "New password (optional)" },
+    "profile.confirm_new_password": { uz: "Yangi parolni takrorlang", ru: "Повторите новый пароль", en: "Repeat the new password" },
+    "profile.current_password": { uz: "Joriy parol", ru: "Текущий пароль", en: "Current password" },
+    "profile.credentials_saved": { uz: "Parol va login yangilandi. Boshqa qurilmalardagi sessiyalar bekor qilindi.", ru: "Пароль и логин обновлены. Сессии на других устройствах завершены.", en: "Password and login updated. Sessions on other devices were revoked." },
+    "auth.pw_rules": { uz: "Parol talablari", ru: "Требования к паролю", en: "Password requirements" },
+    "auth.pw_rule_len": { uz: "Kamida 10 ta belgi", ru: "Не менее 10 символов", en: "At least 10 characters" },
+    "auth.pw_rule_lower": { uz: "Kamida bitta kichik harf (a-z)", ru: "Строчная буква (a-z)", en: "A lowercase letter (a-z)" },
+    "auth.pw_rule_upper": { uz: "Kamida bitta bosh harf (A-Z)", ru: "Заглавная буква (A-Z)", en: "An uppercase letter (A-Z)" },
+    "auth.pw_rule_digit": { uz: "Kamida bitta raqam (0-9)", ru: "Цифра (0-9)", en: "A digit (0-9)" },
+    "auth.pw_rule_special": { uz: "Maxsus belgi (!@#$%^&*) — tavsiya etiladi", ru: "Спецсимвол (!@#$%^&*) — рекомендуется", en: "A special character (!@#$%^&*) — recommended" },
+    "auth.pw_match_ok": { uz: "Parollar mos keldi", ru: "Пароли совпадают", en: "Passwords match" },
+    "auth.pw_match_bad": { uz: "Parollar mos emas", ru: "Пароли не совпадают", en: "Passwords do not match" },
     "profile.my_car": { uz: "Mening avtomobilim", ru: "Мой автомобиль", en: "My car" },
     "profile.upload_photo": { uz: "Rasm yuklash", ru: "Загрузить фото", en: "Upload photo" },
     "profile.change_photo": { uz: "Rasmini o'zgartirish", ru: "Изменить фото", en: "Change photo" },
@@ -779,7 +803,10 @@ const I18N = (function () {
     "err.auth.ip_blocked": { uz: "Juda ko'p urinish. {seconds} soniya kutib, qayta urinib ko'ring.", ru: "Слишком много попыток. Подождите {seconds} секунд и повторите.", en: "Too many attempts. Wait {seconds} seconds and try again." },
     "err.auth.password_same": { uz: "Yangi parol eskisidan farq qilishi kerak.", ru: "Новый пароль должен отличаться от старого.", en: "The new password must be different from the old one." },
     "err.auth.password_used": { uz: "Bu parol allaqachon ishlatilgan - boshqasini tanlang.", ru: "Этот пароль уже использовался - выберите другой.", en: "This password was already used - choose another one." },
-    "err.auth.password_weak": { uz: "Parol yetarli emas", ru: "Пароль недостаточно надёжен", en: "Password is not strong enough" },
+    "err.auth.password_weak": { uz: "Parol kamida 10 belgidan, bosh harf va raqamdan iborat bo'lishi kerak", ru: "Пароль должен содержать не менее 10 символов, заглавную букву и цифру", en: "Password must be at least 10 characters and contain an uppercase letter and a digit" },
+    "err.auth.nothing_to_change": { uz: "Yangi login yoki yangi parol kiritish shart", ru: "Укажите новый логин или новый пароль", en: "Enter a new login or a new password" },
+    "err.auth.password_mismatch": { uz: "Yangi parol va uning takrori bir-biriga mos kelmadi", ru: "Новый пароль и его повтор не совпадают", en: "The new password and its repeat do not match" },
+    "err.auth.confirm_required": { uz: "Yangi parolni takrorlash shart", ru: "Необходимо повторить новый пароль", en: "Please repeat the new password" },
     "err.csrf_invalid": { uz: "Xavfsizlik tokeni yaroqli emas. Sahifani yangilang va qayta urinib ko'ring.", ru: "Недействительный токен безопасности. Обновите страницу и повторите.", en: "Invalid security token. Refresh the page and try again." },
     "err.csrf_origin": { uz: "So'rov manzili mos kelmadi. Sahifani yangilang va qayta urinib ko'ring.", ru: "Адрес запроса не совпадает. Обновите страницу и повторите.", en: "The request origin does not match. Refresh the page and try again." },
     "err.map.address_too_long": { uz: "Manzil juda uzun (maksimum 400 belgi).", ru: "Адрес слишком длинный (максимум 400 символов).", en: "The address is too long (maximum 400 characters)." },

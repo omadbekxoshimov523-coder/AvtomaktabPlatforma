@@ -185,8 +185,13 @@ CREATE TABLE IF NOT EXISTS practice_requests (
     admin_note TEXT DEFAULT '',
     session_id INTEGER,
     created_at TEXT NOT NULL,
-    processed_at TEXT DEFAULT ''
+    processed_at TEXT DEFAULT '',
+    -- MODUL 5: so'rov eskirgan VAQTI (fon vazifa to'ldiradi). Bo'sh = hali
+    -- muddati kelmagan. Ro'yxat mantig'i bu ustunga emas, `preferred_date`
+    -- (so'ralgan mashg'ulot sanasi) ga tayanadi — bu faqat tarix uchun.
+    expired_at TEXT DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS idx_pr_pending ON practice_requests(status, preferred_date);
 
 -- BAND 11/12/18: har bir bildirishnoma MUSTAQIL DB record. `source` — uning
 -- TABIATI (kim yuborgan / qanday hodisa):
@@ -455,6 +460,13 @@ def migrate(db: Db) -> None:
     lcols = {r["name"] for r in db.q("PRAGMA table_info(lesson_sessions)")}
     if "confirm_state" not in lcols:
         db.upd("ALTER TABLE lesson_sessions ADD COLUMN confirm_state TEXT NOT NULL DEFAULT 'pending'")
+    # MODUL 5: so'rov eskirgan vaqti (fon vazifa to'ldiradi). Mavjud ma'lumot
+    # O'CHIRILMAYDI — eski qatorlarda bo'sh qoladi va ulardagi muddat
+    # `preferred_date` dan to'g'ri hisoblanadi.
+    prcols = {r["name"] for r in db.q("PRAGMA table_info(practice_requests)")}
+    if "expired_at" not in prcols:
+        db.upd("ALTER TABLE practice_requests ADD COLUMN expired_at TEXT DEFAULT ''")
+    db.upd("CREATE INDEX IF NOT EXISTS idx_pr_pending ON practice_requests(status, preferred_date)")
     # M5: avtomobil fotosuratlari (eski bazalar uchun ham xavfsiz)
     db.upd(
         """CREATE TABLE IF NOT EXISTS car_photos (

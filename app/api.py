@@ -201,6 +201,108 @@ def _row_get(row, key, default=None):
     return default if v is None else v
 
 
+# --------------------------------------------------------------------------
+# MODUL 5 — SO'ROVLAR MUDDATI (eskirgan so'rovlar "Tarix"ga o'tadi)
+#
+# ANIQ QOIDA (avvalgi "so'rov yaratilgan vaqtdan +1 kun" MEZONI NOTO'G'RI edi):
+#
+#   Muddat HISOBLANADIGAN narsa — so'rov YARATILGAN VAQT EMAS, balki
+#   so'ralgan MASHG'ULOT SANASI (`preferred_date`).
+#
+#   * Sana KELAJAKDA bo'lsa  -> so'rov QANCHA VAQT o'tishidan qat'i nazar
+#                              faol ro'yxatda qoladi (u hali amalga oshirilishi
+#                              mumkin), ya'ni "2 hafta keyingi" so'rov kechkirib
+#                              yashirilMAYdi.
+#   * Sana O'TGAN bo'lsa VA holat hali `pending` (Kutilmoqda) bo'lsa
+#                          -> so'rov endi dolzarb emas: sana o'tganidan keyingi
+#                             1 KUN o'tgach avtomatik "Eskirgan"ga o'tadi va
+#                             asosiy (faol) ro'yxatdan yashiriladi.
+#   * Holat `approved/rejected/cancelled` bo'lsa -> "Tarix"ga xos
+#                             (bu allaqachon to'g'ri ishlaydi).
+#
+# Saqlash: `practice_requests.expired_at` (fon vazifa to'ldiradi) — tarixda
+# "qachon eskirgani" ko'rinadi. Lekin ro'yxat mantig'i UNIEMAS, so'rov
+# yaratilgan/kiritilgan bo'lishidan QAT'I NAZAR `preferred_date` dan hisoblanadi
+# (eski yozuvlar ham to'g'ri ishlaydi).
+# --------------------------------------------------------------------------
+REQUEST_FILTERS = ("active", "expired", "history")
+
+
+def request_is_expired(row, today_iso: str = None) -> bool:
+    """So'rov "eskirgan"mi? (asosiy ro'yxatdan yashirilishi kerakmi)
+
+    Faqat `pending` + `preferred_date` O'TGAN bo'lsa. Kelajakdagi sana
+    (bugun yoki keyin) hech qachon eskirgan hisoblanmaydi.
+    """
+    today_iso = today_iso or today()
+    if _row_get(row, "status", "") != "pending":
+        return False
+    d = str(_row_get(row, "preferred_date", "") or "")[:10]
+    if not d:
+        return False
+    return d < today_iso
+
+
+def request_bucket(row, today_iso: str = None) -> str:
+    """So'rov qaysi bo'limga tegishli: `active` | `expired` | `history`."""
+    if _row_get(row, "status", "") == "pending":
+        return "expired" if request_is_expired(row, today_iso) else "active"
+    return "history"
+
+
+def decorate_requests(rows, today_iso: str = None):
+    """Har bir so'rovga `_bucket` va `is_expired` qo'shib, sanalarni qaytaradi."""
+    today_iso = today_iso or today()
+    out = []
+    for r in rows:
+        b = request_bucket(r, today_iso)
+        r["_bucket"] = b
+        r["is_expired"] = (b == "expired")
+        out.append(r)
+    return out
+
+
+def filter_requests(rows, mode: str = "active", today_iso: str = None):
+    """`mode` bo'yicha ajratadi. Noma'lum `mode` -> `active`."""
+    today_iso = today_iso or today()
+    mode = mode if mode in REQUEST_FILTERS else "active"
+    out = []
+    counts = {"active": 0, "expired": 0, "history": 0}
+    for r in rows:
+        b = request_bucket(r, today_iso)
+        counts[b] += 1
+        if b == mode:
+            r["_bucket"] = b
+            r["is_expired"] = (b == "expired")
+            out.append(r)
+    return out, counts
+
+
+def expire_stale_requests(db) -> int:
+    """FON VAZIFA: eskirgan `pending` so'rovlarni `expired_at` bilan belgilaydi.
+
+    Ro'yxat mantig'i `preferred_date` dan hisoblanadi (yuqoriga qarang), bu
+    funksiya esa faqat "qachon eskirgani" faktini yozib qo'yadi — shu tariqa
+    tarixda aniq vaqt ko'rinadi va qayta tiklash oson bo'ladi.
+
+    Qaytaradi: bu safar belgilangan so'rovlar soni.
+    """
+    today_iso = today()
+    rows = db.q(
+        "SELECT id, preferred_date FROM practice_requests "
+        "WHERE status='pending' AND (expired_at IS NULL OR expired_at='') "
+        "AND preferred_date IS NOT NULL AND preferred_date!=''",
+    )
+    n = 0
+    for r in rows:
+        d = str(r["preferred_date"] or "")[:10]
+        if not d or d >= today_iso:
+            continue          # kelajakdagi sana — muddat kelmagan
+        db.upd("UPDATE practice_requests SET expired_at=? WHERE id=?", (now(), r["id"]))
+        n += 1
+    return n
+
+
 def session_business_status(row, today_iso: str = None, hhmm: str = None):
     """Qatorga `_display_status` va `_is_future` qo'shadi (mutatsiyali)."""
     today_iso = today_iso or today()
@@ -542,50 +644,100 @@ class Api:
         return OK, {"ok": True}
 
     def auth_change_password(self, body):
-        """Parolni o'zgartirish — alohida xavfsiz oqim (BAND 15).
+        """Parol va/yoki loginni o'zgartirish — YAGONA xavfsiz oqim (MODUL 4).
 
-        Profil tahrirlash orqali parol ALMASHMAYDI: bu endpoint
-        `auth/change-password`. Eski parol har doim talab qilinadi
-        (`must_change_password=1` bo'lsa ham — admin tomonidan berilgan
-        parolni bilmasligi mumkin, shuning uchun majburiy emas).
+        Bitta formada:
+          * `old_password`     — joriy parol (tasdiqlash uchun) MAJBURIY,
+          * `new_login`        — ixtiyoriy yangi login,
+          * `new_password`     — ixtiyoriy yangi parol,
+          * `confirm_password` — yangi parolni takrorlash (mosligi tekshiriladi).
+
+        Kamida bittasi (login yoki parol) o'zgarishi shart. Yangi parol kuch
+        talablariga javob berishi shart — bu yerda, backendda QAYTA tekshiriladi
+        (frontend tekshiruviga ishonilmaydi). Yangi login `usrL_` formatida va
+        UNIKAL bo'lishi kerak. Muvaffaqiyatdan so'ng boshqa qurilmalardagi
+        sessiyalar bekor qilinadi (joriy sessiya qoladi). Auditga parolning
+        O'ZI emas, faqat o'zgargan FAKT yoziladi.
         """
         if not self.user:
             return UNAUTH, err("auth.required")
         old = str(body.get("old_password", ""))
         new = str(body.get("new_password", ""))
-        if not self.user["must_change_password"]:
-            if not verify_password(old, self.user["password_hash"]):
-                return BAD, err("auth.wrong_old_password")
-        strength = password_strength_errors(new)
-        if strength:
-            return BAD, err("auth.password_weak", {"errors": strength})
-        if new == old:
-            return BAD, err("auth.password_same")
-        # Yangi parol boshqa foydalanuvchining paroli bilan bir xil bo'lmasin
-        # (BAND 7) — buni tekshirish uchun barcha hash'larni tekshiramiz.
-        pd = credential_digest(new)
-        if self.db.q1("SELECT 1 FROM used_credentials WHERE password_digest=?", (pd,)):
-            return BAD, err("auth.password_used")
-        self.db.transaction(lambda c: c.execute(
-            "INSERT INTO used_credentials(login_digest, password_digest, created_at) VALUES(?,?,?)",
-            (credential_digest("manual:" + str(self.user["id"]) + ":" + new), pd, now()),
-        ))
-        self.db.upd(
-            "UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?",
-            (hash_password(new), now(), self.user["id"]),
-        )
-        # BAND 6: parol o'zgarganda boshqa qurilmalardagi sessiyalar
-        # bekor qilinadi (faqat joriy sessiya qoladi).
+        confirm = body.get("confirm_password")
+        new_login = body.get("new_login")
+        new_login = str(new_login).strip() if new_login is not None else ""
+
+        changing_pw = bool(new)
+        changing_login = bool(new_login) and new_login != self.user["login"]
+        if not changing_pw and not changing_login:
+            return BAD, err("auth.nothing_to_change")
+
+        # MODUL 4: JORIY PAROL HAR DOIM MAJBURIY. Bu — login va parol
+        # o'zgartirish uchun YAGONA xavfsiz oqim; uni tasdiqlamay o'tish
+        # mumkin emas (hatto `must_change_password=1` holatida ham: foydalanuvchi
+        # vaqtinchalik parolni admin'dan olgan, demak uni biladi).
+        if not verify_password(old, self.user["password_hash"]):
+            return BAD, err("auth.wrong_old_password")
+
+        if changing_pw and confirm is not None and str(confirm) != new:
+            return BAD, err("auth.password_mismatch")
+
+        sets = []
+        params = []
+        changed = []
+        if changing_pw:
+            strength = password_strength_errors(new)
+            if strength:
+                return BAD, err("auth.password_weak", {"errors": strength})
+            if new == old:
+                return BAD, err("auth.password_same")
+            pd = credential_digest(new)
+            if self.db.q1("SELECT 1 FROM used_credentials WHERE password_digest=?", (pd,)):
+                return BAD, err("auth.password_used")
+            sets += ["password_hash=?", "must_change_password=0"]
+            params.append(hash_password(new))
+            changed.append("password_changed")
+        if changing_login:
+            if not is_valid_login(new_login):
+                return BAD, err("profile.login_format")
+            # `deleted_at` filtrisiz: arxivlangan login ham qayta ishlatilmasin.
+            if self.db.q1("SELECT id FROM users WHERE login=? AND id!=?",
+                          (new_login, self.user["id"])):
+                return BAD, err("profile.login_taken")
+            sets.append("login=?")
+            params.append(new_login)
+            changed.append("login_changed")
+
+        sets.append("updated_at=?")
+        params.append(now())
+        params.append(self.user["id"])
+
+        def _apply(c):
+            if changing_pw:
+                # Ishlatilgan parollar ro'yxatiga qo'shamiz (qayta ishlatilmasin).
+                c.execute(
+                    "INSERT INTO used_credentials(login_digest, password_digest, created_at)"
+                    " VALUES(?,?,?)",
+                    (credential_digest("manual:" + str(self.user["id"]) + ":" + new),
+                     credential_digest(new), now()),
+                )
+            c.execute("UPDATE users SET " + ", ".join(sets) + " WHERE id=?", params)
+
+        self.db.transaction(_apply)
+        # Xavfsizlik: parol yoki login o'zgarganda boshqa qurilmalardagi
+        # sessiyalar bekor qilinadi (faqat joriy sessiya qoladi).
         self.db.upd(
             "DELETE FROM sessions_ring WHERE user_id=? AND token_hash!=?",
             (self.user["id"], (self.session or {}).get("token_hash") or ""),
         )
-        # MODUL 1: parolning O'ZI yozilmaydi - faqat o'zgargan fakt.
-        audit(self.db, self.user["id"], action_type="password_changed",
-              target_type="users", target_id=self.user["id"],
-              user_name=user_name(self.user),
-              description="Parol o'zgartirildi")
-        return OK, {"ok": True}
+        for act in changed:
+            audit(self.db, self.user["id"], action_type=act, target_type="users",
+                  target_id=self.user["id"], user_name=user_name(self.user),
+                  description=("Parol o'zgartirildi" if act == "password_changed"
+                               else "Login o'zgartirildi"))
+        return OK, {"ok": True, "password_changed": changing_pw,
+                    "login_changed": changing_login,
+                    "login": new_login if changing_login else self.user["login"]}
 
     def auth_request_reset(self, body):
         login = str(body.get("login", "")).strip()
@@ -1143,11 +1295,15 @@ class Api:
                    WHERE ss.student_status='active' AND ls.status!='cancelled'
                    GROUP BY ss.student_id"""
             ):
-                total = p["total"] or 0
+                # MUHIM: o'zgaruvchi nomi `total` EMAS — yuqorida hisoblangan
+                # "Jami: N ta talaba" soni shu yerda qayta yozilib ketardi
+                # (natijada hisoblagich oxirgi talabaning dars sonini
+                # ko'rsatgan: "Jami: 1 ta talaba").
+                s_total = p["total"] or 0
                 done = p["done"] or 0
                 prog[p["sid"]] = {
-                    "total": total, "done": done,
-                    "pct": round(done * 100 / total) if total else 0,
+                    "total": s_total, "done": done,
+                    "pct": round(done * 100 / s_total) if s_total else 0,
                 }
 
         # BAND 22: admin ro'yxatida maqsadli (jami) darslar soni va qolgani
@@ -1482,20 +1638,39 @@ class Api:
         audit(self.db, self.user["id"], f"user {new_status}", "users", int(uid))
         return OK, {"ok": True}
 
-    def admin_user_reset_password(self, uid):
-        """`POST /api/admin/users/{id}/reset-password` — "Yangi parol yaratish".
+    def admin_user_reset_password(self, uid, body=None):
+        """`POST /api/admin/users/{id}/reset-password` — parolni tiklash.
 
-        BAND 5/6/7: parol `usrP_` + 14 ta xavfsiz random belgi (katta/kichik
-        harf, raqam, maxsus belgi majburiy). Parol BIR MARTA qaytariladi —
-        keyin uni hech kim, shu jumladan admin, ko'ra OLMAYDI (faqat hash).
-        Generator `secrets` (CSPRNG) ishlatadi; takrorlanish bo'lsa —
-        avtomatik qayta generatsiya (UNIQUE constraint).
+        Ikki rejim:
+          * `body.new_password` berilmasa — `usrP_` + 14 ta xavfsiz random
+            belgi generatsiya qilinadi (katta/kichik harf, raqam, maxsus belgi).
+          * `body.new_password` berilsa — ADMIN qo'lda belgilagan parol; u ham
+            bir xil kuch talablariga (10+ belgi, bosh/kichik harf, raqam)
+            javob berishi SHART (MODUL 4 — backendda qayta tekshiriladi).
+
+        Parol BIR MARTA qaytariladi — keyin uni hech kim, shu jumladan admin,
+        ko'ra OLMAYDI (faqat hash).
         """
         self._require("admin")
+        body = body or {}
         u = self.db.q1("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (int(uid),))
         if not u:
             return NOTFOUND, err("user.not_found")
-        newpass = self.db.transaction(lambda c: generate_credentials(c)[1])
+        custom = str(body.get("new_password", "") or "")
+        if custom:
+            strength = password_strength_errors(custom)
+            if strength:
+                return BAD, err("auth.password_weak", {"errors": strength})
+            pd = credential_digest(custom)
+            if self.db.q1("SELECT 1 FROM used_credentials WHERE password_digest=?", (pd,)):
+                return BAD, err("auth.password_used")
+            newpass = custom
+            self.db.transaction(lambda c: c.execute(
+                "INSERT INTO used_credentials(login_digest, password_digest, created_at)"
+                " VALUES(?,?,?)",
+                (credential_digest("reset:" + str(uid) + ":" + custom), pd, now())))
+        else:
+            newpass = self.db.transaction(lambda c: generate_credentials(c)[1])
         self.db.upd(
             "UPDATE users SET password_hash=?, must_change_password=1, updated_at=? WHERE id=?",
             (hash_password(newpass), now(), int(uid)),
@@ -1504,7 +1679,8 @@ class Api:
         self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (int(uid),))
         audit(self.db, self.user["id"], "password reset", "users", int(uid))
         return OK, {"ok": True, "login": u["login"], "password": newpass,
-                    "password_format": "usrP_<14 random>", "shown_once": True}
+                    "password_format": "usrP_<14 random>" if not custom else "custom",
+                    "shown_once": True}
 
     # ---- BAND 3: jami mashg'ulotlar sonini o'zgartirish ----
     def _student_progress(self, student_id: int) -> dict:
@@ -2171,14 +2347,48 @@ class Api:
         return OK, {"ok": True, "view": view, "start": start.strftime("%Y-%m-%d"), "end": end.strftime("%Y-%m-%d"), "events": rows}
 
     # ---- requests
+    REQUEST_SQL = (
+        """SELECT r.*, u.first_name, u.last_name, u.phone, u.profile_image, s.group_name
+           FROM practice_requests r JOIN students s ON s.id=r.student_id
+           JOIN users u ON u.id=s.user_id """
+    )
+
     def admin_requests(self, query):
+        """`GET /api/admin/requests[?filter=active|expired|history]`
+
+        MODUL 5: javob uchta bo'limga bo'linadi —
+          * `active`  — hali dolzarb (kelajakdagi/bugungi sana, `pending`),
+          * `expired` — mashg'ulot sanasi o'tib, 1 kun o'tgan `pending` so'rovlar,
+          * `history` — tasdiqlangan / rad etilgan / bekor qilingan so'rovlar.
+
+        Muhim: filtr `LIMIT` dan KEYIN qo'llanadi, ya'ni hech bir so'rov
+        "yo'qolmaydi" — faqat boshqa bo'limga o'tadi (eski so'rovni id bo'yicha
+        ochish uchun `GET /api/admin/requests/{id}` ishlating).
+        """
         self._require("admin")
-        rows = self.db.q(
-            """SELECT r.*, u.first_name, u.last_name, u.phone, u.profile_image, s.group_name
-               FROM practice_requests r JOIN students s ON s.id=r.student_id
-               JOIN users u ON u.id=s.user_id
-               ORDER BY (r.status='pending') DESC, r.id DESC LIMIT 300""")
-        return OK, {"ok": True, "requests": rows}
+        rows = self.db.q(self.REQUEST_SQL +
+                         "ORDER BY (r.status='pending') DESC, r.id DESC")
+        selected, counts = filter_requests(rows, (query or {}).get("filter", "active"))
+        return OK, {"ok": True, "requests": selected, "counts": counts,
+                    "filter": (query or {}).get("filter", "active")}
+
+    def admin_request_detail(self, rid):
+        """`GET /api/admin/requests/{id}` — bitta so'rovni TO'LIQ ochadi.
+
+        Ro'yxatdan topish ishlatilmaydi, shuning uchun eski so'rov ham
+        (300+ yozuv ichida qolib ketgani yoki "Tarix"/"Eskirgan"ga o'tgani)
+        har doim to'g'ri tafsilotlar bilan ochiladi (MODUL 5A).
+        """
+        self._require("admin")
+        try:
+            rid_int = int(rid)
+        except (TypeError, ValueError):
+            return NOTFOUND, err("request.not_found")
+        row = self.db.q1(self.REQUEST_SQL + "WHERE r.id=?", (rid_int,))
+        if not row:
+            return NOTFOUND, err("request.not_found")
+        req = decorate_requests([row])[0]
+        return OK, {"ok": True, "request": req}
 
     def admin_request_approve(self, body, rid):
         self._require("admin")
@@ -2570,6 +2780,29 @@ class Api:
         with open(path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode()
         return OK, {"download": {"b64": b64, "filename": filename, "mime": "application/octet-stream"}}
+
+    def admin_backup_delete(self, filename: str):
+        """Zaxira nusxani serverdan BUTUNLAY o'chirish (MODUL 3).
+
+        Xavfsizlik: papkadan chiqib ketish (`..`, absolyut yo'l) bloklanadi;
+        faqat BACKUP_DIR ichidagi oddiy fayl o'chiriladi. Amal Audit
+        jurnaliga yoziladi (kim, qachon, qaysi faylni o'chirgani).
+        """
+        self._require("admin")
+        name = str(filename or "")
+        if not name or ".." in name or "/" in name or "\\" in name:
+            return BAD, err("backup.bad")
+        path = os.path.join(BACKUP_DIR, name) if BACKUP_DIR else name
+        if not os.path.isfile(path):
+            return NOTFOUND, err("backup.not_found")
+        try:
+            size = os.path.getsize(path)
+            os.remove(path)
+        except OSError:
+            return BAD, err("backup.delete_failed")
+        audit(self.db, self.user["id"], action_type="backup_deleted", target_type="backup",
+              target_id=None, description=name, user_name=user_name(self.user))
+        return OK, {"ok": True, "deleted": name, "size": size}
 
     def admin_backup_restore(self, body):
         self._require("admin")
@@ -3188,14 +3421,39 @@ class Api:
             return NOTFOUND, err("session.student_not_found")
         return OK, {"ok": True}
 
-    def student_requests(self):
+    def student_requests(self, query=None):
+        """`GET /api/student/requests[?filter=active|expired|history]`
+
+        MODUL 5: bo'limlar `admin_requests` bilan bir xil mantiqda bo'linadi
+        (mashg'ulot sanasi + 1 kun, faqat `pending` holda). Foydalanuvchi
+        tomonidan qo'lda yashirilgan so'rovlar (`hidden_requests`) umuman
+        ko'rsatilmaydi.
+        """
         self._require("student")
         st = self._stud_record()
         rows = self.db.q(
             "SELECT * FROM practice_requests WHERE student_id=? AND id NOT IN "
             "(SELECT request_id FROM hidden_requests WHERE user_id=?) ORDER BY id DESC",
             (st["id"], st["id"]))
-        return OK, {"ok": True, "requests": rows}
+        selected, counts = filter_requests(rows, (query or {}).get("filter", "active"))
+        return OK, {"ok": True, "requests": selected, "counts": counts,
+                    "filter": (query or {}).get("filter", "active")}
+
+    def student_request_detail(self, rid):
+        """`GET /api/student/requests/{id}` — bitta so'rovni ochish (MODUL 5A)."""
+        self._require("student")
+        st = self._stud_record()
+        try:
+            rid_int = int(rid)
+        except (TypeError, ValueError):
+            return NOTFOUND, err("request.not_found")
+        row = self.db.q1(
+            "SELECT * FROM practice_requests WHERE id=? AND student_id=?"
+            " AND id NOT IN (SELECT request_id FROM hidden_requests WHERE user_id=?)",
+            (rid_int, st["id"], st["id"]))
+        if not row:
+            return NOTFOUND, err("request.not_found")
+        return OK, {"ok": True, "request": decorate_requests([row])[0]}
 
     def student_request_delete(self, body):
         self._require("student")
@@ -3366,7 +3624,7 @@ class Api:
                 if method == "GET": return self.admin_user_profile(uid)
                 if method == "DELETE": return self.admin_user_delete(uid)
             if len(seg) == 3 and seg[2] == "status": return self.admin_users_status(body, seg[1])
-            if len(seg) == 3 and seg[2] == "reset-password": return self.admin_user_reset_password(seg[1])
+            if len(seg) == 3 and seg[2] == "reset-password": return self.admin_user_reset_password(seg[1], body)
         if seg[0] == "students" and len(seg) >= 2 and seg[1] == "import" and method == "POST":
             return self.admin_import_students(body)
         if seg[0] == "cars":
@@ -3409,6 +3667,8 @@ class Api:
         if seg[0] == "calendar": return self.admin_calendar(query)
         if seg[0] == "requests":
             if len(seg) == 1 and method == "GET": return self.admin_requests(query)
+            if len(seg) == 2 and method == "GET":
+                return self.admin_request_detail(seg[1])
             if len(seg) == 3:
                 if seg[2] == "approve": return self.admin_request_approve(body, seg[1])
                 if seg[2] == "reject": return self.admin_request_reject(body, seg[1])
@@ -3430,6 +3690,8 @@ class Api:
                 if query.get("download"):
                     return self.admin_backup_download(str(query.get("download")))
                 return self.admin_backup_list()
+            if method == "DELETE":
+                return self.admin_backup_delete(str(query.get("name") or ""))
         if seg[0] == "audit": return self.admin_audit(query)
         if seg[0] == "settings":
             if method == "GET": return self.admin_settings_get()
@@ -3509,11 +3771,12 @@ class Api:
             if len(seg) == 3 and seg[2] == "pickup": return self.student_update_pickup(body, seg[1])
         if seg[0] == "requests":
             if len(seg) == 1:
-                if method == "GET": return self.student_requests()
+                if method == "GET": return self.student_requests(query)
                 if method == "POST": return self.student_request_create(body)
             if len(seg) == 2:
                 if seg[1] == "delete" and method == "POST": return self.student_request_delete(body)
                 if seg[1] == "clear" and method == "POST": return self.student_requests_clear()
+                if method == "GET": return self.student_request_detail(seg[1])
         if seg[0] == "history":
             if len(seg) == 2:
                 if seg[1] == "delete" and method == "POST": return self.student_history_delete(body)

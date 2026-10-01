@@ -343,8 +343,10 @@
       buildTopbar();
       App.go("dashboard");
       if (me.user.must_change_password) {
+        // MODUL 4: majburiy parol o'zgartirish ham XUDDI SHU xavfsiz oqimdan
+        // o'tadi (joriy parol + yangi parol) — alohida "easiy" yo'l yo'q.
         setTimeout(() => {
-          const m = Shared.openChangePassword(false);
+          const m = Shared.openChangeCredentials();
           const inp = m.querySelectorAll("input");
           inp.forEach((i) => i.value = "");
         }, 300);
@@ -660,7 +662,7 @@
       buildSidebar(); buildTopbar();
       App.go("dashboard");
       if (me.user.must_change_password) {
-        Shared.openChangePassword(false);
+        Shared.openChangeCredentials();
       }
     } catch (e) {
       // Sessiya yo'q (yoki bekor qilingan) — login sahifasida qolamiz.

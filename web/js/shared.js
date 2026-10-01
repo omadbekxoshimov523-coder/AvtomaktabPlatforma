@@ -125,15 +125,18 @@ const Shared = (function () {
   }
 
   async function openRequest(requestId, role) {
+    /* MODUL 5A: so'rov ID bo'yicha OCHILADI (ro'yxatdan qidirib topish emas).
+       Aks holda eski so'rov (300+ yozuv ichida qolib ketgan, yoki "Eskirgan"/
+       "Tarix" bo'limiga o'tgan) umuman topilmaydi va hech narsa ochilmaydi. */
     let req = null;
-    if (role === "admin") {
-      const res = await API.get("admin/requests");
-      req = (res.requests || []).find((x) => String(x.id) === String(requestId));
-    } else {
-      const res = await API.get("student/requests");
-      req = (res.requests || []).find((x) => String(x.id) === String(requestId));
-    }
-    if (!req) return toast(t("err.generic"), "error");
+    try {
+      const url = role === "admin"
+        ? "admin/requests/" + encodeURIComponent(requestId)
+        : "student/requests/" + encodeURIComponent(requestId);
+      const res = await API.get(url);
+      req = res.request || null;
+    } catch (e) { return errToast(e); }
+    if (!req) return toast(t("err.request.not_found"), "error");
     const m = modal("📨 " + t("nav.requests"), [], { wide: true });
     const body = [];
     if (role === "admin") {
@@ -156,6 +159,13 @@ const Shared = (function () {
     body.push(el("div", { class: "card" }, [
       el("div", { class: "muted", icon: "message", text: "" + (req.message || "—") }),
     ]));
+    /* MODUL 5B: eskirgan so'rovda holat aniq ko'rsatiladi. */
+    if (req.is_expired) {
+      body.push(el("div", { class: "map-msg map-msg-warn mt" }, [
+        el("div", { class: "map-msg-title", text: "⏳ " + t("req.expired") }),
+        el("div", { class: "map-msg-sub", text: t("req.expired_hint") }),
+      ]));
+    }
     if (role === "admin" && req.status === "pending") {
       body.push(el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-danger btn-sm f1", icon: "checkup", text: "" + t("req.reject"),
@@ -225,35 +235,123 @@ const Shared = (function () {
     if (data.message_id && n.sender_id) { openThread(n.sender_id, senderFullName(n)); return; }
   }
 
-  /* ---------- PAROLNI O'ZGARTIRISH ---------- */
-  function openChangePassword(vanity = false) {
+  /* ---------- MODUL 4: PAROL VA LOGIN O'ZGARTIRISH ----------
+     Alohida xavfsizlik oqimi (Profil sahifasidagi "Parol va login
+     o'zgartirish" tugmasi orqali ochiladi). "Profilni tahrirlash"da login
+     maydoni yo'q — login faqat shu oqim orqali, JORIY PAROL bilan
+     o'zgaradi.
+
+     Yangi parol talablari (REAL VAQTDA, foydalanuvchi yozayotganda yangilanadi):
+       * kamida 10 ta belgi,
+       * kamida bitta kichik harf (a-z),
+       * kamida bitta bosh harf (A-Z),
+       * kamida bitta raqam (0-9),
+       * tavsiya: maxsus belgi (!@#$%^&*).
+     Bu tekshiruv FAQAT qulaylik uchun — xuddi shu qoidalar backendda ham
+     QAYTA bajariladi (frontendga ishonilmaydi). */
+  const PW_RULES = [
+    { key: "len",   test: (p) => String(p || "").length >= 10 },
+    { key: "lower", test: (p) => /[a-z]/.test(String(p || "")) },
+    { key: "upper", test: (p) => /[A-Z]/.test(String(p || "")) },
+    { key: "digit", test: (p) => /\d/.test(String(p || "")) },
+    { key: "special", test: (p) => /[^A-Za-z0-9]/.test(String(p || "")) },
+  ];
+
+  function pwChecklist(pw) {
+    const rows = PW_RULES.map((r) => {
+      const ok = r.test(pw);
+      const item = el("div", { class: "pw-rule" + (ok ? " ok" : " bad") }, [
+        el("span", { class: "pw-rule-mark", text: ok ? "✓" : "✗" }),
+        el("span", { class: "pw-rule-text", text: t("auth.pw_rule_" + r.key) }),
+      ]);
+      return item;
+    });
+    const box = el("div", { class: "pw-rules" }, [
+      el("div", { class: "pw-rules-title", text: "" + t("auth.pw_rules") }),
+      el("div", { class: "pw-rules-list" }, rows),
+    ]);
+    return box;
+  }
+
+  function openChangeCredentials() {
+    const u = App.me.user;
     const oldP = input({ type: "password", placeholder: "••••••", autocomplete: "current-password" });
+    const newLogin = input({ value: u.login || "", placeholder: "usrL_…", autocapitalize: "off",
+      autocomplete: "off", spellcheck: false });
     const newP = input({ type: "password", placeholder: "••••••", autocomplete: "new-password" });
-    const m = modal(vanity ? t("profile.change_pass") : t("auth.change_password_title"), [
-      ...(vanity ? [field(t("auth.old_password"), oldP)] : []),
-      field(t("auth.new_password"), newP),
+    const repP = input({ type: "password", placeholder: "••••••", autocomplete: "new-password" });
+
+    const rulesBox = pwChecklist("");
+    const matchBox = el("div", { class: "pw-match hidden" });
+
+    function refresh() {
+      const pw = String(newP.value || "");
+      const all = PW_RULES.slice(0, 4);
+      const allOk = all.every((r) => r.test(pw));
+      /* Faqat parol kiritilgan paytda tegzilgan holda parol talablari ko'rsatiladi. */
+      rulesBox.classList.toggle("hidden", !pw);
+      PW_RULES.forEach((r, i) => {
+        const row = rulesBox.querySelectorAll(".pw-rule")[i];
+        if (!row) return;
+        const ok = r.test(pw);
+        row.classList.toggle("ok", ok);
+        row.classList.toggle("bad", !ok);
+        row.querySelector(".pw-rule-mark").textContent = ok ? "✓" : "✗";
+      });
+      const rep = String(repP.value || "");
+      if (!pw && !rep) {
+        matchBox.classList.add("hidden");
+      } else {
+        matchBox.classList.remove("hidden");
+        const same = !!rep && pw === rep;
+        matchBox.className = "pw-match " + (same ? "ok" : "bad");
+        matchBox.textContent = same ? "✓ " + t("auth.pw_match_ok") : "✗ " + t("auth.pw_match_bad");
+      }
+      return allOk;
+    }
+    [newP, repP].forEach((i) => i.addEventListener("input", refresh));
+    refresh();
+
+    const m = modal("🔐 " + t("profile.change_credentials"), [
+      el("p", { class: "field-hint mb", text: t("profile.change_credentials_hint") }),
+      field(t("profile.current_password"), oldP),
+      field(t("profile.new_login"), newLogin, { hint: t("profile.login_hint") }),
+      field(t("profile.new_password"), newP),
+      rulesBox,
+      field(t("profile.confirm_new_password"), repP),
+      matchBox,
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
-        el("button", { class: "btn btn-primary", text: t("auth.save"),
+        el("button", { class: "btn btn-primary", text: "" + t("common.save"),
           onclick: async () => {
+            const cur = String(oldP.value || "");
+            const login = String(newLogin.value || "").trim();
+            const pw = String(newP.value || "");
+            const rep = String(repP.value || "");
+            if (!cur) return toast(t("auth.err.empty_password"), "error");
+            const loginChanged = !!login && login !== (u.login || "");
+            const pwChanged = !!pw;
+            if (!loginChanged && !pwChanged) return toast(t("err.auth.nothing_to_change"), "error");
+            if (pwChanged) {
+              if (!refresh()) return toast(t("err.auth.password_weak"), "error");
+              if (!rep) return toast(t("err.auth.confirm_required"), "error");
+              if (pw !== rep) return toast(t("err.auth.password_mismatch"), "error");
+            }
             try {
-              await API.post("auth/change-password", { old_password: oldP.value, new_password: newP.value });
-              toast(t("misc.saved")); m.close();
+              await API.post("auth/change-password", {
+                old_password: cur,
+                new_login: loginChanged ? login : "",
+                new_password: pwChanged ? pw : "",
+                confirm_password: pwChanged ? rep : "",
+              });
+              m.close();
+              toast(t("profile.credentials_saved"));
+              try { await App.refreshMe(); } catch (e) { /* sessiya yangilanmasa ham xato ko'rsatilmaydi */ }
+              App.refreshView();
             } catch (e) { errToast(e); }
           } }),
       ]),
     ]);
-    if (!vanity) {
-      const okBtn = m.querySelector(".btn-primary");
-      okBtn.onclick = () => {
-        try {
-          API.post("auth/change-password", { old_password: oldP.value, new_password: newP.value })
-            .then(() => { toast(t("misc.saved")); m.close(); App.refreshMe(); })
-            .catch(errToast);
-        } catch (e) { errToast(e); }
-      };
-      m.querySelectorAll("button").forEach((b) => { if (b.classList.contains("btn-light")) b.onclick = () => m.close(); });
-    }
     return m;
   }
 
@@ -1001,14 +1099,8 @@ const Shared = (function () {
     const mName = input({ value: user.middle_name || "" });
     const phone = input({ value: user.phone || "", placeholder: "+998 90 123 45 67", inputmode: "tel" });
     const birth = input({ type: "date", value: user.birth_date || "", max: Shared.todayISO() });
-    /* LOGIN: `usrL_` + 14..32 belgi (harf/raqam). Boshqa foydalanuvchining
-       login'i bilan bir xil bo'lsa — backend `profile.login_taken` qaytaradi
-       va bu yerda tushunarli xabar ko'rsatiladi. */
-    const login = input({ value: user.login || "", placeholder: "usrL_…", autocapitalize: "off",
-      autocomplete: "off", spellcheck: false });
     const group = input({ value: stu.group_name || "", placeholder: t("student.group_ph") });
     const cat = input({ value: stu.license_category || "", placeholder: t("student.category_ph") });
-    const loginHint = el("p", { class: "field-hint", text: t("profile.login_hint") });
 
     const rows = [el("div", { class: "grid-2" }, [
       field(t("common.last_name"), lName),
@@ -1016,7 +1108,6 @@ const Shared = (function () {
       field(t("common.middle_name"), mName),
       field(t("common.phone"), phone),
       field(t("student.birth_date"), birth),
-      field(t("common.login"), login, { hint: t("profile.login_hint") }),
     ])];
     if (isStudent) {
       rows.push(el("div", { class: "grid-2" }, [
@@ -1034,7 +1125,7 @@ const Shared = (function () {
           const payload = {
             first_name: fName.value, last_name: lName.value,
             middle_name: mName.value, phone: phone.value,
-            birth_date: birth.value, login: String(login.value || "").trim(),
+            birth_date: birth.value,
           };
           if (isStudent) {
             payload.group_name = group.value;
@@ -1044,9 +1135,6 @@ const Shared = (function () {
             const r = await API.put("me/profile", payload);
             toast(t("misc.saved")); m.close();
             _profileRefresh();
-            /* Login o'zgarganda boshqa sessiyalar bekor qilinadi —
-               foydalanuvchiga buni aytib beramiz. */
-            if (r && r.login_changed) toast(t("profile.login_changed"));
           } catch (e) { errToast(e); }
         } }),
     ]));
@@ -1150,8 +1238,8 @@ const Shared = (function () {
       actions.append(el("button", { class: "btn btn-cyan btn-sm", icon: "edit", text: "" + t("profile.edit"),
         onclick: () => editProfileModal(u) }));
     }
-    actions.append(el("button", { class: "btn btn-primary btn-sm", icon: "lock", text: "" + t("profile.change_pass"),
-      onclick: () => openChangePassword(true) }));
+    actions.append(el("button", { class: "btn btn-primary btn-sm", icon: "lock", text: "" + t("profile.change_credentials"),
+      onclick: () => openChangeCredentials() }));
     const head = el("div", { class: "profile-head" }, [
       big,
       el("div", { class: "f1" }, [
@@ -1306,8 +1394,8 @@ const Shared = (function () {
       el("div", { class: "row between mb wrap" }, [
         el("div", { class: "muted sm", text: t("settings.sessions_title") + ": " + sessions.length }),
         el("div", { class: "row gap-sm wrap" }, [
-          el("button", { class: "btn btn-light btn-sm", icon: "lock", text: "" + t("settings.change_password"),
-            onclick: () => openChangePassword(true) }),
+          el("button", { class: "btn btn-light btn-sm", icon: "lock", text: "" + t("profile.change_credentials"),
+            onclick: () => openChangeCredentials() }),
           el("button", { class: "btn btn-danger btn-sm", text: t("settings.revoke_all"),
             onclick: () => confirmDialog(t("settings.revoke_all_confirm"), async () => {
               try {
@@ -1555,7 +1643,7 @@ const Shared = (function () {
   }
 
   return {
-    openSession, openMessage, openChangePassword, credBox, rulesList,
+    openSession, openMessage, openChangeCredentials, credBox, rulesList,
     openUserForm, openUserCredentials, openRequest, openThread, openNotif,
     renderProfile, profileFullName, pickAvatar, editProfileModal,
     settingsPage, applyTheme, notificationsPage, notifCategory,

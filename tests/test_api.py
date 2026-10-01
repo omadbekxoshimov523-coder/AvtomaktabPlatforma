@@ -168,6 +168,34 @@ class Client:
     def put(self, p, b=None): return self.req("PUT", p, b or {})
     def delete(self, p): return self.req("DELETE", p)
 
+    def get_file(self, p):
+        """Eksport yuklab olish — server `download` maydonini HAQIQIY faylga
+        aylantirib yuboradi (Content-Type + Content-Disposition), shuning uchun
+        javob JSON EMAS. Qaytaradi: (status, raw_bytes, headers)."""
+        return self._file_req("GET", p, None)
+
+    def post_file(self, p, body):
+        return self._file_req("POST", p, body)
+
+    def _file_req(self, method, path, body):
+        data = None
+        headers = {}
+        if body is not None:
+            data = json.dumps(body).encode()
+            headers["Content-Type"] = "application/json"
+        if method in ("POST", "PUT", "DELETE"):
+            headers["X-Requested-With"] = "Avtomaktab"
+            tok = self._csrf_token()
+            if tok:
+                headers["X-CSRF-Token"] = tok
+        req = urllib.request.Request(f"http://{HOST}:{PORT}{path}", data=data,
+                                     headers=headers, method=method)
+        try:
+            with self.opener.open(req, timeout=30) as resp:
+                return resp.status, resp.read(), dict(resp.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), dict(e.headers or {})
+
 
 class TabClient(Client):
     """Brauzer tab'ini taqlid qiladi: `X-Avto-Tab` sarlavhasini yuboradi.
@@ -4549,19 +4577,57 @@ class TestProfileBAND24(_MixinAdmin, Base):
         self.db.upd("UPDATE users SET birth_date=NULL WHERE login=?", (INSTR_LOGIN_1,))
         self.db.upd("UPDATE users SET phone=NULL WHERE login=?", (INSTR_LOGIN_1,))
 
-    def test_P10_profile_modal_has_five_fields(self):
+    def test_P10_profile_modal_has_personal_fields_only(self):
+        """MODUL 4: 'Profilni tahrirlash'da FAQAT shaxsiy ma'lumotlar.
+
+        LOGIN va PAROL bu modaldan OLIB TASHLANDI — ular endi alohida
+        "Parol va login o'zgartirish" oqimiga ko'chirilgan (joriy parol
+        talab qilinadi). Bu test aynan shu talabni tekshiradi.
+        """
         txt = (ROOT / "web" / "js" / "shared.js").read_text(encoding="utf-8", errors="ignore")
         i = txt.find("function editProfileModal")
         self.assertGreater(i, 0, "editProfileModal topilmadi")
         chunk = txt[i:i + 4000]
         end = chunk.find("\n  }")
         body = chunk[:end if end > 0 else len(chunk)]
-        for key in ("student.birth_date", "common.phone", "common.login",
+        # shaxsiy ma'lumotlar — SAQLANADI
+        for key in ("student.birth_date", "common.phone",
                     "student.group", "student.category"):
             self.assertIn(key, body, f"profil modalidan {key} yo'q")
-        # parol maydonlari BO'LMASIN
+        # MODUL 4: login maydoni bu modaldan O'CHIRILGAN
+        self.assertNotIn("common.login", body,
+                         "login 'Profilni tahrirlash' modalidan olib tashlanishi shart")
+        self.assertNotIn("login: String(", body,
+                         "login profildan yuborilmasligi shart")
+        # parol maydonlari BO'LMASIN (hech qachon)
         self.assertNotIn('"password"', body, "profil modalida parol maydoni bor")
         self.assertIn("profile.password_not_here", body, "parol ogohlantirishi yo'q")
+
+        # alohida oqim mavjudligi: joriy parol + yangi login/parol/takrorlash
+        j = txt.find("function openChangeCredentials")
+        self.assertGreater(j, 0, "openChangeCredentials topilmadi")
+        cred = txt[j:j + 3000]
+        for key in ("profile.current_password", "profile.new_login",
+                    "profile.new_password", "profile.confirm_new_password"):
+            self.assertIn(key, cred, f"parol/login modalida {key} yo'q")
+        # real-vaqt kuch ro'yxati: PW_RULES (frontend ham bosh harf/raqamni
+        # tekshiradi) va uning i18n kalitlari HAQIQATAN mavjud
+        self.assertIn("PW_RULES", cred, "parol talablari real-vaqtda hisoblanmayapti")
+        self.assertIn('"auth.pw_rule_"', txt, "parol talablari i18n'ga bog'lanmagan")
+        i18n = (ROOT / "web" / "js" / "i18n.js").read_text(encoding="utf-8")
+        for key in ("auth.pw_rule_len", "auth.pw_rule_upper", "auth.pw_rule_lower",
+                    "auth.pw_rule_digit", "auth.pw_rule_special",
+                    "auth.pw_match_ok", "auth.pw_match_bad"):
+            self.assertIn('"%s"' % key, i18n, f"i18n da {key} yo'q")
+        # eski "easiy" parol modali credentials oqimida ishlatilmasin
+        self.assertNotIn("openChangePassword(true)", cred,
+                         "eski parol modali credentials oqimida ishlatilmasin")
+        # majburiy-parol oqimi ham XUDDI SHU xavfsiz modalni ochadi
+        appjs = (ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("Shared.openChangeCredentials()", appjs,
+                      "majburiy-parol oqimi alohida modaldan o'tishi kerak")
+        self.assertNotIn("openChangePassword(", appjs,
+                         "eski openChangePassword hali ishlatilmoqda")
 
     def test_P11_no_hardcoded_numbers_in_profile_view(self):
         txt = (ROOT / "web" / "js" / "views-student.js").read_text(encoding="utf-8",
@@ -5401,6 +5467,732 @@ class TestMigrationBAND24(unittest.TestCase):
             return c.execute(sql).fetchone()[0]
         finally:
             c.close()
+
+
+# ============================================================================
+# 9) MODUL 1-5 — hisobot eksporti, talaba hisoblagichi, backup o'chirish,
+#    parol+login o'zgartirish, so'rovlarni ochish va muddat (auto-hide)
+# ============================================================================
+def _csv_mime_ok(mime):
+    return (mime or "").split(";")[0].strip() == "text/csv"
+
+
+# ---------------------------------------------------------------------------
+# MODUL 1 — CSV / XLSX / PDF eksporti HAQIQIY fayl yaratadi va ochiladi
+# ---------------------------------------------------------------------------
+class TestModul1Export(_MixinAdmin, Base):
+    """MODUL 1: `openpyxl` va `reportlab` o'rnatilgan; uchala format HAQIQIY
+    fayl beradi (CSV — UTF-8 BOM, XLSX — zip/OOXML, PDF — %PDF + ichki
+    shrift) va o'zbek sheva belgilari (oʻ, gʻ, sh, ch) buzilmaydi."""
+
+    UZ = [{"Ism": "Alisher oʻgʻli", "Familiya": "Shukurov", "Guruh": "Ch-1",
+           "Telefon": "+998 90 123 45 67"}]
+
+    def test_M1_01_libraries_available_on_server_python(self):
+        """Kutubxonalar server ishlatadigan Python'da REAL mavjud."""
+        import openpyxl          # noqa: F401
+        import reportlab         # noqa: F401
+        from openpyxl import Workbook  # noqa: F401
+        from reportlab.platypus import SimpleDocTemplate  # noqa: F401
+        import sys
+        self.assertIn("openpyxl", sys.modules)
+        req = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        self.assertIn("openpyxl", req)
+        self.assertIn("reportlab", req)
+        dock = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("requirements.txt", dock)
+
+    def test_M1_02_csv_real_file_utf8_bom_and_uzbek_letters(self):
+        from app.export import export_table
+        res = export_table(self.UZ, "csv")
+        self.assertTrue(res["filename"].endswith(".csv"), res["filename"])
+        self.assertTrue(_csv_mime_ok(res["mime"]), res["mime"])
+        data = res["data"]
+        # UTF-8 BOM — Excel'da o'zbek harflari buzilmaydi
+        self.assertTrue(data.startswith(b"\xef\xbb\xbf"), "CSV BOM yo'q")
+        text = data.decode("utf-8-sig")
+        self.assertIn("Alisher oʻgʻli", text)
+        self.assertIn("Shukurov", text)
+        self.assertIn("Ch-1", text)
+
+    def test_M1_03_xlsx_opens_with_openpyxl(self):
+        """Fayl haqiqiy Excel fayli: `openpyxl` ochib, o'zbek matnni o'qiy oladi."""
+        import io
+        import openpyxl
+        from app.export import export_table
+        res = export_table(self.UZ, "xlsx", "Talabalar")
+        self.assertTrue(res["filename"].endswith(".xlsx"), res["filename"])
+        self.assertTrue(res["data"].startswith(b"PK"), "XLSX zip bo'lishi kerak")
+        wb = openpyxl.load_workbook(io.BytesIO(res["data"]))
+        ws = wb.active
+        grid = [[c.value for c in row] for row in ws.iter_rows()]
+        flat = [str(v) for row in grid for v in row if v is not None]
+        self.assertIn("Alisher oʻgʻli", flat, flat)
+        self.assertIn("Ism", flat, flat)
+        self.assertIn("Talabalar", [n for n in wb.sheetnames])
+
+    def test_M1_04_pdf_real_pdf_with_embedded_font(self):
+        """Fayl haqiqiy PDF: `%PDF` sarlavha + `%%EOF` + ICHKI shrift
+        (`/FontFile2`) — o'zbek sheva belgilarini chizish uchun shrift
+        PDF ichiga joylashgan bo'lishi SHART."""
+        from app.export import export_table, _ensure_font
+        res = export_table(self.UZ, "pdf", "Talabalar")
+        self.assertEqual(res["mime"], "application/pdf")
+        data = res["data"]
+        self.assertTrue(data.startswith(b"%PDF-"), "PDF sarlavhasi yo'q")
+        self.assertIn(b"%%EOF", data[-2048:], "PDF yakuni (EOF) yo'q")
+        self.assertIn(b"/FontFile2", data,
+                      "PDF ichida shrift YOK — o'zbek harflari kvadratch bo'ladi")
+        # tanlangan shrift haqiqatan oʻ/ǔ/gʻ belgilarini qo'llaydi
+        font = _ensure_font()
+        self.assertTrue(font.get("name"), "o'zbekcha shrift topilmadi")
+
+    def test_M1_05_admin_export_endpoint_three_formats(self):
+        """`GET /api/admin/export` uchala formatda HAQIQIY fayl qaytaradi
+        (server base64 ni ochib, `Content-Disposition` bilan yuboradi)."""
+        import io
+        import openpyxl
+        cases = [("csv", b"\xef\xbb\xbf", ".csv"),
+                 ("xlsx", b"PK", ".xlsx"),
+                 ("pdf", b"%PDF-", ".pdf")]
+        for fmt, magic, ext in cases:
+            st, data, hdrs = self.admin.get_file(
+                "/api/admin/export?format=%s&report=users" % fmt)
+            self.assertEqual(st, 200, fmt)
+            disp = hdrs.get("Content-Disposition", "")
+            self.assertIn("attachment", disp, (fmt, disp))
+            self.assertIn(ext, disp, (fmt, disp))
+            self.assertTrue(data.startswith(magic), (fmt, data[:8]))
+            self.assertGreater(len(data), 100, fmt)
+        # XLSX va PDF haqiqatan OCHILADI
+        st, data, _ = self.admin.get_file("/api/admin/export?format=xlsx&report=users")
+        wb = openpyxl.load_workbook(io.BytesIO(data))
+        self.assertTrue(wb.sheetnames)
+        self.assertGreater(wb.active.max_row, 1)
+
+    def test_M1_06_reports_generate_three_formats(self):
+        """`POST /api/reports/generate` — uchala format, haqiqiy fayl."""
+        for fmt in ("csv", "xlsx", "pdf"):
+            st, data, hdrs = self.admin.post_file("/api/reports/generate", {
+                "format": fmt, "report": "users", "roles": ["student", "instructor"],
+                "include_credentials": False, "lang": "uz"})
+            self.assertEqual(st, 200, (fmt, st, data[:120]))
+            self.assertIn("attachment", hdrs.get("Content-Disposition", ""), fmt)
+            self.assertGreater(len(data), 200, fmt)
+        # noqiron format rad etiladi
+        st, r = self.admin.post("/api/reports/generate", {"format": "doc", "report": "users"})
+        self.assertEqual(st, 400)
+        self.assertEqual(r["error"], "export.bad_format")
+
+
+# ---------------------------------------------------------------------------
+# MODUL 2 — "Jami: N ta talaba" hisoblagichi
+# ---------------------------------------------------------------------------
+class TestModul2StudentCounter(_MixinAdmin, Base):
+    """MODUL 2: `total` — talabalar SONI (filterlashda filtrlangan soni).
+
+    Avvalgi xato: `total` o'zgaruvchisi progress tsiklida qayta yozilib,
+    hisoblagich oxirgi talabaning DARS sonini ko'rsatardi."""
+
+    def _mk3(self):
+        """3 ta talaba + har biriga TURLI soni dars (1, 2, 3)."""
+        made = []
+        for i in range(1, 4):
+            r = self._mkuser("student", "Cnt", "T%d" % i, group_name="CNT")
+            made.append(r)
+        db = self.db
+        for n, r in enumerate(made, start=1):
+            sid = db.q1("SELECT id FROM students WHERE user_id=?",
+                        (r["user"]["id"],))["id"]
+            for k in range(n):
+                date = "2026-0%d-0%d" % (k + 1, n)
+                ts = date + " 09:00:00"
+                lsid = db.ex(
+                    """INSERT INTO lesson_sessions(instructor_id, date, start_time, end_time,
+                           status, capacity_snapshot, car_name_snapshot,
+                           created_at, updated_at)
+                       VALUES(1,?,?,?,'completed',4,'CNT-TEST',?,?)""",
+                    (date, "10:00", "11:00", ts, ts))
+                db.ex("INSERT INTO session_students(session_id, student_id, "
+                      "student_status, joined_at) VALUES(?,?,'active',?)",
+                      (lsid, sid, ts))
+        return made
+
+    def _sids(self, made):
+        return [self.db.q1("SELECT id FROM students WHERE user_id=?",
+                           (r["user"]["id"],))["id"] for r in made]
+
+    def tearDown(self):
+        try:
+            self.db.upd("DELETE FROM session_students WHERE session_id IN "
+                        "(SELECT id FROM lesson_sessions WHERE car_name_snapshot='CNT-TEST')")
+            self.db.upd("DELETE FROM lesson_sessions WHERE car_name_snapshot='CNT-TEST'")
+        except Exception:
+            pass
+        for r in getattr(self, "_made", []):
+            self._cleanup_user(r["user"]["id"])
+        super().tearDown()
+
+    def test_M2_01_total_is_student_count_not_last_lesson_count(self):
+        self._made = self._mk3()
+        st, r = self.admin.get("/api/admin/users?role=student")
+        self.assertEqual(st, 200, r)
+        n_students = self.db.q1(
+            "SELECT COUNT(*) c FROM users WHERE deleted_at IS NULL AND role='student'")["c"]
+        n_users = self.db.q1(
+            "SELECT COUNT(*) c FROM users WHERE deleted_at IS NULL")["c"]
+        self.assertEqual(r["total_all"], n_users, "umumiy foydalanuvchi soni")
+        # ASOSIY TEKSHIRUV: `total` — filtrga mos TALABALAR SONI.
+        self.assertEqual(r["total"], n_students, "counter talabalar soni bo'lishi kerak")
+        # eski xato: oxirgi talabaning DARS soni (1/2/3) ko'rsatilardi
+        self.assertGreater(r["total"], 3,
+                           "counter dars sonini ko'rsatmoqda (eski xato)")
+
+    def test_M2_02_total_follows_filter(self):
+        self._made = self._mk3()
+        st, all_ = self.admin.get("/api/admin/users?role=student")
+        st, one = self.admin.get("/api/admin/users?role=student&q=Cnt+T1")
+        self.assertEqual(st, 200, one)
+        self.assertTrue(one["filtered"], "qidiruv filtrlangan deb belgilanmadi")
+        self.assertEqual(one["total"], len(one["users"]))
+        self.assertLess(one["total"], all_["total"])
+        st, none = self.admin.get("/api/admin/users?role=student&q=ZZZyoq")
+        self.assertEqual(none["total"], 0)
+        self.assertEqual(none["total_all"], all_["total_all"],
+                         "umumiy soni filtrdan o'tmasligi kerak")
+        # har bir filtr o'z sonini beradi
+        st, r = self.admin.get("/api/admin/users?role=student&q=Cnt")
+        self.assertEqual(r["total"], 3)
+
+    def test_M2_03_by_role_split_consistent(self):
+        self._made = self._mk3()
+        st, r = self.admin.get("/api/admin/users")
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["total_all"],
+                         r["by_role"].get("student", 0) + r["by_role"].get("instructor", 0)
+                         + r["by_role"].get("admin", 0))
+        self.assertEqual(r["total"], r["total_all"])
+
+
+# ---------------------------------------------------------------------------
+# MODUL 3 — zaxira nusxani o'chirish
+# ---------------------------------------------------------------------------
+class TestModul3BackupDelete(_MixinAdmin, Base):
+    """MODUL 3: `DELETE /api/admin/backup?name=...` — fayl serverdan BUTUNLAY
+    o'chiriladi, audit jurnaliga yoziladi, noto'g'ri nom rad etiladi."""
+
+    def test_M3_01_create_list_delete_roundtrip(self):
+        import os
+        from app.api import BACKUP_DIR
+        self.assertTrue(BACKUP_DIR, "BACKUP_DIR sozlangan bo'lishi shart")
+        st, r = self.admin.post("/api/admin/backup")
+        self.assertEqual(st, 200, r)
+        name = r["file"]
+        path = os.path.join(BACKUP_DIR, name)
+        self.assertTrue(os.path.isfile(path), "nusxa fayli yaratilmadi")
+
+        st, l = self.admin.get("/api/admin/backup")
+        self.assertIn(name, [b["name"] for b in l["backups"]])
+
+        st, d = self.admin.delete("/api/admin/backup?name=" + name)
+        self.assertEqual(st, 200, d)
+        self.assertFalse(os.path.exists(path), "fayl serverdan o'chirilmadi")
+
+        st, l = self.admin.get("/api/admin/backup")
+        self.assertNotIn(name, [b["name"] for b in l["backups"]])
+
+    def test_M3_02_audit_entry_written(self):
+        st, r = self.admin.post("/api/admin/backup")
+        name = r["file"]
+        st, d = self.admin.delete("/api/admin/backup?name=" + name)
+        self.assertEqual(st, 200, d)
+        row = self.db.q1("SELECT * FROM audit_log WHERE action_type='backup_deleted' "
+                          "ORDER BY id DESC LIMIT 1")
+        self.assertIsNotNone(row, "audit jurnaliga backup_deleted yozilmadi")
+        self.assertIn(name, (row.get("description") or ""),
+                      "auditda fayl nomi ko'rsatilmadi")
+
+    def test_M3_03_path_traversal_and_missing_rejected(self):
+        for bad in ("../secrets.db", "..%2Fsecrets.db", "../../app/db.py"):
+            st, r = self.admin.delete("/api/admin/backup?name=" + bad)
+            self.assertIn(st, (400, 404), (bad, st, r))
+            self.assertEqual(r.get("error"), "backup.bad", (bad, r))
+        st, r = self.admin.delete("/api/admin/backup?name=yoq_bu_fayl.db")
+        self.assertEqual(st, 404, r)
+        self.assertEqual(r.get("error"), "backup.not_found", r)
+
+    def test_M3_04_non_admin_forbidden(self):
+        r0 = self._mkuser("student", "Bak", "Test")
+        try:
+            c, st, rr = self._login(r0["credentials"]["login"],
+                                    r0["credentials"]["password"], "student")
+            self.assertEqual(st, 200, rr)
+            st, r = c.delete("/api/admin/backup?name=x.db")
+            self.assertIn(st, (401, 403), (st, r))
+        finally:
+            self._cleanup_user(r0["user"]["id"])
+
+    def test_M3_05_ui_has_delete_button_and_confirm_text(self):
+        js = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8")
+        i = js.find("async function backup()")
+        self.assertGreater(i, 0)
+        body = js[i:i + 6000]
+        self.assertIn("backup.delete", body, "o'chirish tugmasi yo'q")
+        self.assertIn("confirmDialog", body, "tasdiqlash oynasi yo'q")
+        self.assertIn("API.del(", body, "DELETE so'rovi yuborilmayapti")
+        i18n = (ROOT / "web" / "js" / "i18n.js").read_text(encoding="utf-8")
+        self.assertIn("Bu zahira nusxani o'chirmoqchisiz? Bu amalni qaytarib bo'lmaydi.",
+                      i18n, "tasdiqlash matni i18n'da yo'q")
+
+
+# ---------------------------------------------------------------------------
+# MODUL 4 — parol va login o'zgartirish + kuchli parol siyosati
+# ---------------------------------------------------------------------------
+class TestModul4Credentials(_MixinAdmin, Base):
+    """MODUL 4: bitta xavfsiz oqim (joriy parol + yangi login va/yoki parol),
+    kuchli parol siyosati BUTUN platformada, audit va sessiya bekor qilish."""
+
+    def setUp(self):
+        super().setUp()
+        r = self._mkuser("student", "Kuch", "Test", group_name="KUCH")
+        self.uid = r["user"]["id"]
+        self.login = r["credentials"]["login"]
+        self.password = r["credentials"]["password"]
+        self.c, st, rr = self._login(self.login, self.password, "student")
+        self.assertEqual(st, 200, rr)
+
+    def tearDown(self):
+        self._cleanup_user(self.uid)
+        super().tearDown()
+
+    # ---- kuchli parol siyosati --------------------------------------------
+    def test_M4_01_generated_passwords_are_strong(self):
+        """Avtomatik generatsiya (yangi foydalanuvchi / CSV import) ham
+        xuddi shu talablarga mos kelishi SHART."""
+        from app.auth import password_strength_errors, generate_password
+        for _ in range(40):
+            pw = generate_password()
+            self.assertEqual(password_strength_errors(pw), [], pw)
+        for _ in range(4):
+            r = self._mkuser("student", "Kuch", "Auto%d" % _)
+            try:
+                pw = r["credentials"]["password"]
+                self.assertEqual(password_strength_errors(pw), [], pw)
+            finally:
+                self._cleanup_user(r["user"]["id"])
+
+    def test_M4_02_weak_passwords_rejected_with_reasons(self):
+        bad = {
+            "Ab1!def":      ["auth.password_short"],                 # 7 belgi
+            "abcdefgh1":    ["auth.password_short", "auth.password_need_upper"],
+            "ABCDEFGH1":    ["auth.password_short", "auth.password_need_lower"],
+            "Abcdefghij":   ["auth.password_need_digit"],
+        }
+        for pw, errs in bad.items():
+            st, r = self.c.post("/api/auth/change-password", {
+                "old_password": self.password, "new_password": pw,
+                "confirm_password": pw})
+            self.assertEqual(st, 400, (pw, r))
+            self.assertEqual(r["error"], "auth.password_weak", (pw, r))
+            got = (r.get("params") or {}).get("errors") or []
+            self.assertEqual(sorted(got), sorted(errs), (pw, r))
+
+    def test_M4_03_strong_password_accepted_and_old_stops_working(self):
+        new = "KuchliParolM4a!"
+        st, r = self.c.post("/api/auth/change-password", {
+            "old_password": self.password, "new_password": new,
+            "confirm_password": new})
+        self.assertEqual(st, 200, r)
+        self.assertTrue(r.get("password_changed"))
+        self.assertEqual(r.get("login_changed"), False)
+        row = self.db.q1("SELECT must_change_password FROM users WHERE id=?", (self.uid,))
+        self.assertEqual(row["must_change_password"], 0)
+        # eski parol bilan KIRIB BO'LMAYDI
+        _c, st2, _r = self._login(self.login, self.password, "student")
+        self.assertNotEqual(st2, 200)
+        # yangi parol bilan kirish ishlaydi
+        c2, st3, r3 = self._login(self.login, new, "student")
+        self.assertEqual(st3, 200, r3)
+
+    def test_M4_04_confirm_mismatch_and_nothing_to_change(self):
+        st, r = self.c.post("/api/auth/change-password", {
+            "old_password": self.password, "new_password": "KuchliParolM4b!",
+            "confirm_password": "BoshqaParolM41!"})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "auth.password_mismatch", r)
+        st, r = self.c.post("/api/auth/change-password", {"old_password": self.password})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "auth.nothing_to_change", r)
+
+    def test_M4_05_wrong_old_password_rejected(self):
+        """Joriy parol HAR DOIM talab qilinadi — `must_change_password=1`
+        (vaqtinchalik parol berilgan) holatida ham chetlab o'tish yo'q."""
+        row = self.db.q1("SELECT must_change_password FROM users WHERE id=?", (self.uid,))
+        self.assertEqual(row["must_change_password"], 1,
+                         "test sharoiti: admin vaqtinchalik parol bergan")
+        st, r = self.c.post("/api/auth/change-password", {
+            "old_password": "Noto'g'riParol1", "new_password": "KuchliParolM4c!",
+            "confirm_password": "KuchliParolM4c!"})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "auth.wrong_old_password", r)
+        # parol ham o'zgarmagan bo'lishi kerak
+        self.assertNotEqual(
+            self.db.q1("SELECT password_hash FROM users WHERE id=?",
+                       (self.uid,))["password_hash"], "")
+        self.assertEqual(self.db.q1("SELECT login FROM users WHERE id=?",
+                                    (self.uid,))["login"], self.login)
+
+    # ---- login --------------------------------------------------------------
+    def test_M4_06_login_change_validates_and_revokes_other_sessions(self):
+        # ikkinchi qurilmada kirish
+        c2, st2, r2 = self._login(self.login, self.password, "student")
+        self.assertEqual(st2, 200, r2)
+        new_login = "usrL_kuchLogin00001"
+        st, r = self.c.post("/api/auth/change-password", {
+            "old_password": self.password, "new_login": new_login})
+        self.assertEqual(st, 200, r)
+        self.assertTrue(r.get("login_changed"))
+        self.assertEqual(r.get("login"), new_login)
+        self.assertEqual(self.db.q1("SELECT login FROM users WHERE id=?",
+                                    (self.uid,))["login"], new_login)
+        # joriy sessiya ISHLASHI (uzoq emas) kerak
+        self.assertEqual(self.c.get("/api/auth/me")[0], 200)
+        # boshqa sessiya bekor qilindi
+        self.assertEqual(c2.get("/api/auth/me")[0], 401)
+        # eski login bilan kiring imkoni yo'q
+        c3, st3, _ = self._login(self.login, self.password, "student")
+        self.assertNotEqual(st3, 200)
+        c4, st4, _ = self._login(new_login, self.password, "student")
+        self.assertEqual(st4, 200)
+
+    def test_M4_07_login_format_and_unique_enforced(self):
+        for bad in ("admin", "usrL_short", "usrX_aaaaaaaaaaaaaaaa", "usrL_ab!cd1234x"):
+            st, r = self.c.post("/api/auth/change-password", {
+                "old_password": self.password, "new_login": bad})
+            self.assertEqual(st, 400, (bad, r))
+            self.assertEqual(r["error"], "profile.login_format", (bad, r))
+        other = self._mkuser("student", "Kuch", "Boshqa")
+        try:
+            st, r = self.c.post("/api/auth/change-password", {
+                "old_password": self.password,
+                "new_login": other["credentials"]["login"]})
+            self.assertEqual(st, 400, r)
+            self.assertEqual(r["error"], "profile.login_taken", r)
+        finally:
+            self._cleanup_user(other["user"]["id"])
+
+    def test_M4_08_audit_records_only_the_fact(self):
+        new = "AuditParolM4d9!"
+        st, r = self.c.post("/api/auth/change-password", {
+            "old_password": self.password, "new_password": new,
+            "confirm_password": new,
+            "new_login": "usrL_auditLogin0001"})
+        self.assertEqual(st, 200, r)
+        acts = [x["action_type"] for x in self.db.q(
+            "SELECT action_type FROM audit_log WHERE target_id=? AND user_id=? "
+            "ORDER BY id DESC LIMIT 2", (self.uid, self.uid))]
+        self.assertIn("password_changed", acts)
+        self.assertIn("login_changed", acts)
+        # auditda parolning O'ZI saqlanmasin
+        blob = " ".join(json.dumps(x, ensure_ascii=False) for x in self.db.q(
+            "SELECT * FROM audit_log WHERE target_id=? AND action_type IN "
+            "('password_changed','login_changed')", (self.uid,)))
+        self.assertNotIn(new, blob, "audit jurnalida PAROL saqlanyapti")
+        self.assertNotIn("AuditParol", blob)
+
+    # ---- admin: parolni tiklash -------------------------------------------
+    def test_M4_09_admin_reset_custom_password_must_be_strong(self):
+        st, r = self.admin.post("/api/admin/users/%d/reset-password" % self.uid,
+                                {"new_password": "kuchsiz"})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "auth.password_weak", r)
+        self.assertIn("auth.password_short",
+                      (r.get("params") or {}).get("errors") or [])
+        strong = "TiklashParolM4e7#"
+        st, r = self.admin.post("/api/admin/users/%d/reset-password" % self.uid,
+                                {"new_password": strong})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["password"], strong)
+        c2, st2, _ = self._login(self.login, strong, "student")
+        self.assertEqual(st2, 200, "tiklangan parol bilan kirish kerak")
+
+    def test_M4_10_admin_reset_auto_is_strong_and_revokes_sessions(self):
+        st, r = self.admin.post("/api/admin/users/%d/reset-password" % self.uid, {})
+        self.assertEqual(st, 200, r)
+        from app.auth import password_strength_errors
+        self.assertEqual(password_strength_errors(r["password"]), [])
+        self.assertEqual(self.c.get("/api/auth/me")[0], 401,
+                         "parol tiklangach barcha sessiyalar bekor bo'lishi shart")
+        c2, st2, _ = self._login(self.login, r["password"], "student")
+        self.assertEqual(st2, 200)
+
+    def test_M4_11_ui_login_removed_from_profile_modal(self):
+        js = (ROOT / "web" / "js" / "shared.js").read_text(encoding="utf-8")
+        i = js.find("function editProfileModal")
+        body = js[i:i + 3000]
+        self.assertNotIn("common.login", body)
+        self.assertIn("function openChangeCredentials", js)
+        self.assertIn("profile.change_credentials", js,
+                      "profil kartasida alohida tugma yo'q")
+        app = (ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn("change_credentials", app,
+                         "majburiy-parol oqimi ham alohida modallga o'tishi kerak")
+
+
+# ---------------------------------------------------------------------------
+# MODUL 5 — so'rovni ochish (5A) va muddati (5B)
+# ---------------------------------------------------------------------------
+class TestModul5Requests(_MixinAdmin, Base):
+    """MODUL 5.
+
+    5A — ESKI so'rov ham har doim ochiladi (ro'yxatdan qidirib topish emas,
+         `GET .../requests/{id}` orqali).
+    5B — Muddat so'rov YARATILGAN vaqtdan EMAS, so'ralgan MASHG'ULOT SANASI
+         bo'yicha: sana kelajakda bo'lsa — qancha vaqt o'tsa ham faol;
+         sana o'tgan + `pending` bo'lsa — 1 kundan keyin "Eskirgan"ga o'tadi.
+    """
+
+    MSG = "M5-TEST"
+
+    def setUp(self):
+        super().setUp()
+        r = self._mkuser("student", "Mud", "Test", group_name="MUD")
+        self.uid = r["user"]["id"]
+        self.login = r["credentials"]["login"]
+        self.password = r["credentials"]["password"]
+        self.sid = self.db.q1("SELECT id FROM students WHERE user_id=?",
+                               (self.uid,))["id"]
+        self.c, st, rr = self._login(self.login, self.password, "student")
+        self.assertEqual(st, 200, rr)
+
+    def tearDown(self):
+        for row in self.db.q("SELECT id, session_id FROM practice_requests WHERE message=?",
+                             (self.MSG,)):
+            if row["session_id"]:
+                self.db.upd("DELETE FROM session_students WHERE session_id=?",
+                            (row["session_id"],))
+                self.db.upd("DELETE FROM lesson_sessions WHERE id=?", (row["session_id"],))
+            self.db.upd("DELETE FROM hidden_requests WHERE request_id=?", (row["id"],))
+            self.db.upd("DELETE FROM practice_requests WHERE id=?", (row["id"],))
+        self._cleanup_user(self.uid)
+        super().tearDown()
+
+    def _mkreq(self, date_iso, status="pending"):
+        rid = self.db.ex(
+            "INSERT INTO practice_requests(student_id, preferred_date, preferred_start_time,"
+            " preferred_end_time, message, status, created_at) VALUES(?,?,?,?,?,?,?)",
+            (self.sid, date_iso, "09:00", "10:00", self.MSG, status,
+             "2020-01-01 00:00:00"))
+        return rid
+
+    @staticmethod
+    def _shift(days):
+        from datetime import timedelta
+        return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+    # ---- 5B ---------------------------------------------------------------
+    def test_M5_01_future_request_stays_active_no_matter_how_late(self):
+        """Kelajakdagi so'rov 2 HAFTA keyingi bo'lsa ham FAOL qoladi
+        (so'rov yaratilganiga emas, mashg'ulot sanasiga qaraladi)."""
+        self._mkreq(self._shift(14))
+        st, r = self.admin.get("/api/admin/requests?filter=active")
+        self.assertEqual(st, 200, r)
+        ids = [x["id"] for x in r["requests"]]
+        self.assertIn(max(ids), ids)
+        mine = [x for x in r["requests"] if x["message"] == self.MSG]
+        self.assertEqual(len(mine), 1, "kelajakdagi so'rov faol bo'limda bo'lishi kerak")
+        self.assertFalse(mine[0]["is_expired"])
+
+    def test_M5_02_today_pending_request_is_active(self):
+        self._mkreq(self._shift(0))
+        st, r = self.admin.get("/api/admin/requests?filter=active")
+        mine = [x for x in r["requests"] if x["message"] == self.MSG]
+        self.assertEqual(len(mine), 1, "bugungi sana hali muddat kelmagan")
+        self.assertFalse(mine[0]["is_expired"])
+
+    def test_M5_03_past_pending_request_expires(self):
+        """Sana o'tgan + hali `pending` -> 'Eskirgan' bo'limiga o'tadi."""
+        self._mkreq(self._shift(-1))   # kechagi sana
+        st, r = self.admin.get("/api/admin/requests?filter=active")
+        self.assertEqual([x for x in r["requests"] if x["message"] == self.MSG], [],
+                         "o'tgan-kun so'rovi faol ro'yxatda qolmasligi kerak")
+        st, r = self.admin.get("/api/admin/requests?filter=expired")
+        mine = [x for x in r["requests"] if x["message"] == self.MSG]
+        self.assertEqual(len(mine), 1, "o'tgan-kun so'rovi 'Eskirgan'da bo'lishi kerak")
+        self.assertTrue(mine[0]["is_expired"])
+        self.assertEqual(mine[0]["_bucket"], "expired")
+
+    def test_M5_04_old_pending_request_expires_after_one_day(self):
+        """5 KUN OLDINGI sana, `pending` -> allaqach 'Eskirgan' (1 kun o'tgan)."""
+        self._mkreq(self._shift(-5))
+        st, r = self.admin.get("/api/admin/requests?filter=expired")
+        self.assertEqual(len([x for x in r["requests"] if x["message"] == self.MSG]), 1)
+
+    def test_M5_05_processed_requests_go_to_history_never_expired(self):
+        """Tasdiqlangan/rad etilgan so'rov ESKIRMAYDI — u 'Tarix'da."""
+        self._mkreq(self._shift(-5), status="approved")
+        self._mkreq(self._shift(-5), status="rejected")
+        st, r = self.admin.get("/api/admin/requests?filter=expired")
+        self.assertEqual([x for x in r["requests"] if x["message"] == self.MSG], [],
+                         "tasdiqlangan/rad etilgan so'rov 'Eskirgan'ga tushmasligi kerak")
+        st, r = self.admin.get("/api/admin/requests?filter=history")
+        self.assertEqual(len([x for x in r["requests"] if x["message"] == self.MSG]), 2)
+
+    def test_M5_06_counts_and_default_filter(self):
+        self._mkreq(self._shift(3))
+        self._mkreq(self._shift(-2))
+        self._mkreq(self._shift(-4), status="rejected")
+        st, r = self.admin.get("/api/admin/requests")   # filtrsiz = active
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["filter"], "active")
+        c = r["counts"]
+        self.assertGreaterEqual(c["active"], 1)
+        self.assertGreaterEqual(c["expired"], 1)
+        self.assertGreaterEqual(c["history"], 1)
+        # hisoblagichlar ro'yxatdagi BARCHA so'rovlarni qamrab oladi
+        all_db = self.db.q1("SELECT COUNT(*) c FROM practice_requests r "
+                            "JOIN students s ON s.id=r.student_id "
+                            "JOIN users u ON u.id=s.user_id")["c"]
+        self.assertEqual(c["active"] + c["expired"] + c["history"], all_db)
+        # va hech bir so'rov ikki bo'limda ham bo'lmaydi
+        ids = []
+        for mode in ("active", "expired", "history"):
+            st, rr = self.admin.get("/api/admin/requests?filter=%s" % mode)
+            ids += [x["id"] for x in rr["requests"]]
+        self.assertEqual(len(ids), len(set(ids)), "so'rovlar bo'linib ketgan")
+
+    def test_M5_07_student_side_filters(self):
+        self._mkreq(self._shift(5))
+        self._mkreq(self._shift(-2))
+        st, r = self.c.get("/api/student/requests")
+        self.assertEqual(st, 200, r)
+        self.assertEqual(len(r["requests"]), 1, "faqat kelajakdagi so'rov faol")
+        st, r = self.c.get("/api/student/requests?filter=expired")
+        self.assertEqual(len(r["requests"]), 1)
+        self.assertTrue(r["requests"][0]["is_expired"])
+
+    def test_M5_08_scheduled_job_marks_expired_at_only_for_past_pending(self):
+        """Fon vazifa (`expire_stale_requests`) `expired_at` ni to'ldiradi —
+        lekin FAQAT o'tgan-kun `pending` so'rovlar uchun."""
+        from app.api import expire_stale_requests
+        far = self._mkreq(self._shift(2))
+        bugun = self._mkreq(self._shift(0))
+        kecha = self._mkreq(self._shift(-1))
+        tasdiq = self._mkreq(self._shift(-3), status="approved")
+        n = expire_stale_requests(self.db)
+        self.assertGreaterEqual(n, 1)
+        row = lambda i: self.db.q1("SELECT expired_at FROM practice_requests WHERE id=?", (i,))
+        self.assertEqual(row(far)["expired_at"], "", "kelajakdagi so'rov eskirMAYdi")
+        self.assertEqual(row(bugun)["expired_at"], "", "bugungi so'rov eskirMAYdi")
+        self.assertTrue(row(kecha)["expired_at"], "o'tgan-kun so'rovi belgilanmadi")
+        self.assertEqual(row(tasdiq)["expired_at"], "", "tasdiqlangan so'rov eskirMAYdi")
+        # idempotent
+        self.assertEqual(expire_stale_requests(self.db), 0)
+
+    # ---- 5A ---------------------------------------------------------------
+    def test_M5_09_old_request_opens_via_detail_endpoint(self):
+        """ESKI so'rov (o'tgan, faol ro'yxatda YO'Q) ham ochilishi kerak."""
+        rid = self._mkreq(self._shift(-9))
+        st, lst = self.admin.get("/api/admin/requests?filter=active")
+        self.assertEqual([x for x in lst["requests"] if x["id"] == rid], [])
+        st, r = self.admin.get("/api/admin/requests/%d" % rid)
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["request"]["id"], rid)
+        self.assertEqual(r["request"]["message"], self.MSG)
+        self.assertTrue(r["request"]["is_expired"])
+        self.assertTrue(r["request"]["first_name"], "talaba ma'lumoti kelishi kerak")
+
+    def test_M5_10_student_opens_own_old_request(self):
+        rid = self._mkreq(self._shift(-9))
+        st, r = self.c.get("/api/student/requests/%d" % rid)
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["request"]["id"], rid)
+        # boshqa talabaning so'rovi — KO'RILMAYDI
+        other = self._mkuser("student", "Bosh", "Talaba")
+        try:
+            osid = self.db.q1("SELECT id FROM students WHERE user_id=?",
+                              (other["user"]["id"],))["id"]
+            self.db.upd("UPDATE practice_requests SET student_id=? WHERE id=?", (osid, rid))
+            st, r = self.c.get("/api/student/requests/%d" % rid)
+            self.assertEqual(st, 404, r)
+        finally:
+            self.db.upd("UPDATE practice_requests SET student_id=? WHERE id=?", (self.sid, rid))
+            self._cleanup_user(other["user"]["id"])
+
+    def test_M5_11_detail_endpoint_rejects_bad_ids_and_missing(self):
+        for bad in ("abc", "0", "-5"):
+            st, r = self.admin.get("/api/admin/requests/%s" % bad)
+            self.assertEqual(st, 404, (bad, st, r))
+            self.assertEqual(r["error"], "request.not_found", (bad, r))
+        st, r = self.admin.get("/api/admin/requests/99999999")
+        self.assertEqual(st, 404, r)
+
+    def test_M5_12_no_limit_lost_requests(self):
+        """Eski `LIMIT 300` sababli so'rovlar yo'qolmasligi kerak."""
+        self._mkreq(self._shift(2))
+        st, r = self.admin.get("/api/admin/requests?filter=active")
+        self.assertNotIn(" LIMIT", (ROOT / "app" / "api.py").read_text(encoding="utf-8")
+                         .split("def admin_requests")[1].split("def ")[0])
+        self.assertTrue(any(x["message"] == self.MSG for x in r["requests"]))
+
+    def test_M5_13_backend_and_frontend_rules_agree(self):
+        """`preferred_date` + `pending` — frontend va backend bir xil qoida."""
+        from app.api import request_is_expired, request_bucket
+        td = self._shift(0)
+        self.assertFalse(request_is_expired({"status": "pending", "preferred_date": td}))
+        self.assertFalse(request_is_expired({"status": "pending", "preferred_date": self._shift(9)}))
+        self.assertTrue(request_is_expired({"status": "pending", "preferred_date": self._shift(-1)}))
+        self.assertFalse(request_is_expired({"status": "approved", "preferred_date": self._shift(-9)}))
+        self.assertEqual(request_bucket({"status": "pending", "preferred_date": td}), "active")
+        self.assertEqual(request_bucket({"status": "pending", "preferred_date": self._shift(-1)}), "expired")
+        self.assertEqual(request_bucket({"status": "rejected", "preferred_date": self._shift(-1)}), "history")
+        # so'rov YARATILGAN sanasi hisobga OLINMAYDI
+        row = {"status": "pending", "preferred_date": self._shift(3), "created_at": "2019-01-01 00:00:00"}
+        self.assertFalse(request_is_expired(row), "created_at bo'yicha eskirsa xato bo'lardi")
+
+    def test_M5_14_migration_adds_column_to_old_db(self):
+        """Eski bazada `expired_at` yo'q — `migrate()` qo'shadi, ma'lumot saqlanadi."""
+        import sqlite3
+        from app.db import init_db
+        d = tempfile.mkdtemp(prefix="avto-m5-")
+        path = str(Path(d) / "old.db")
+        init_db(path)
+        # "ESKI" jadval: `expired_at` ustuni yo'q (platforma avvalgi versiyasi)
+        c = sqlite3.connect(path)
+        c.execute("ALTER TABLE practice_requests RENAME TO practice_requests_new")
+        c.execute("""CREATE TABLE practice_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL REFERENCES students(id),
+    preferred_date TEXT DEFAULT '',
+    preferred_start_time TEXT DEFAULT '',
+    preferred_end_time TEXT DEFAULT '',
+    message TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','approved','rejected','cancelled','rescheduled')),
+    admin_note TEXT DEFAULT '',
+    session_id INTEGER,
+    created_at TEXT NOT NULL,
+    processed_at TEXT DEFAULT ''
+)""")
+        c.execute("INSERT INTO students(user_id, group_name, license_category,"
+                  " study_status, enrolled_at, status)"
+                  " VALUES(1,'OLD','B','active','2020-01-01','active')")
+        c.execute("INSERT INTO practice_requests(student_id, preferred_date, message,"
+                  " status, created_at)"
+                  " VALUES(1,'2020-01-01','eski','pending','2020-01-01 00:00:00')")
+        c.execute("DROP TABLE practice_requests_new")
+        c.commit()
+        cols = [r[1] for r in c.execute("PRAGMA table_info(practice_requests)")]
+        self.assertNotIn("expired_at", cols)
+        c.close()
+        init_db(path)                      # migrate ishlaydi
+        c = sqlite3.connect(path)
+        cols = [r[1] for r in c.execute("PRAGMA table_info(practice_requests)")]
+        self.assertIn("expired_at", cols)
+        n, = c.execute("SELECT COUNT(*) FROM practice_requests WHERE message='eski'").fetchone()
+        self.assertEqual(n, 1, "eski ma'lumot YO'QOLMASIN")
+        c.close()
+        shutil.rmtree(d, ignore_errors=True)
 
 
 if __name__ == "__main__":

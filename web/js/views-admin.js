@@ -1473,31 +1473,72 @@ window.AdminViews = (function () {
   }
 
   /* ============================ SO'ROVLAR ============================ */
+  /* MODUL 5B: uchta bo'lim — Faol / Eskirgan / Tarix.
+     * `Faol`    — mashg'ulot sanasi kelajakda (yoki bugun) va hali tasdiqlanmagan;
+     * `Eskirgan`— mashg'ulot sanasi o'tib, 1 kun o'tgan, hali tasdiqlanmagan;
+     * `Tarix`   — tasdiqlangan / rad etilgan / bekor qilingan. */
+  function requestTabs(active, counts, onPick) {
+    const tabs = [
+      ["active", t("req.filter_active")],
+      ["expired", t("req.filter_expired")],
+      ["history", t("req.filter_history")],
+    ];
+    return el("div", { class: "row gap-sm wrap mb" }, tabs.map(([k, label]) =>
+      el("button", {
+        class: "btn btn-sm " + (k === active ? "btn-primary" : "btn-light"),
+        icon: k === "active" ? "inbox" : (k === "expired" ? "clock" : "list"),
+        text: "" + label + " (" + ((counts && counts[k]) || 0) + ")",
+        onclick: () => onPick(k),
+      })
+    ));
+  }
+
   async function requests() {
-    const res = await API.get("admin/requests");
-    const wrap = el("div", {}, [el("h3", { class: "mb", text: "📨 " + t("nav.requests") })]);
-    if (!res.requests.length) { wrap.append(emptyState("📨", t("req.title"))); return wrap; }
-    const list = el("div", { class: "grid-2" });
-    res.requests.forEach((r) => {
-      list.append(el("div", { class: "card" }, [
-        el("div", { class: "row between mb" }, [
-          el("div", { class: "user-cell" }, [avatar(r, 34), el("div", {}, [
-            el("strong", { text: `${r.first_name} ${r.last_name}` }),
-            el("div", { class: "muted sm", text: r.group_name || "" }),
-          ])]),
-          badge(r.status, statusText(r.status)),
-        ]),
-        el("div", { class: "muted sm" }, [
-          el("div", { icon: "calendar", text: "" + t("req.preferred") + ": " + (r.preferred_date ? fmtDate(r.preferred_date) : "—") + " " + (r.preferred_start_time ? r.preferred_start_time + "–" + r.preferred_end_time : "") }),
-          el("div", { icon: "message", text: "" + (r.message || "—") }),
-        ]),
-        r.status === "pending" ? el("div", { class: "row mt" }, [
-          el("button", { class: "btn btn-primary btn-sm f1", icon: "check_circle", text: "" + t("req.approve"), onclick: () => approveModal(r) }),
-          el("button", { class: "btn btn-danger btn-sm f1", icon: "checkup", text: "" + t("req.reject"), onclick: () => rejectModal(r) }),
-        ]) : null,
-      ]));
-    });
-    wrap.append(list);
+    const wrap = el("div", {});
+    const head = el("h3", { class: "mb", text: "📨 " + t("nav.requests") });
+    const tabsHost = el("div", {});
+    const listHost = el("div", {});
+    wrap.append(head, el("p", { class: "field-hint mb", text: t("req.auto_hidden") }), tabsHost, listHost);
+    let mode = "active";
+
+    async function load(m) {
+      mode = m;
+      listHost.innerHTML = ""; listHost.append(spinner());
+      const res = await API.get("admin/requests?filter=" + encodeURIComponent(m));
+      const counts = res.counts || {};
+      tabsHost.innerHTML = "";
+      tabsHost.append(requestTabs(mode, counts, load));
+      listHost.innerHTML = "";
+      const items = res.requests || [];
+      if (!items.length) { listHost.append(emptyState("📨", t("req.title"))); return; }
+      const list = el("div", { class: "grid-2" });
+      items.forEach((r) => {
+        list.append(el("div", { class: "card" }, [
+          el("div", { class: "row between mb" }, [
+            el("div", { class: "user-cell" }, [avatar(r, 34), el("div", {}, [
+              el("strong", { text: `${r.first_name} ${r.last_name}` }),
+              el("div", { class: "muted sm", text: r.group_name || "" }),
+            ])]),
+            el("div", { class: "row gap-sm" }, [
+              r.is_expired ? badge("late", t("req.expired")) : null,
+              badge(r.status, statusText(r.status)),
+            ]),
+          ]),
+          el("div", { class: "muted sm" }, [
+            el("div", { icon: "calendar", text: "" + t("req.preferred") + ": " + (r.preferred_date ? fmtDate(r.preferred_date) : "—") + " " + (r.preferred_start_time ? r.preferred_start_time + "–" + r.preferred_end_time : "") }),
+            el("div", { icon: "message", text: "" + (r.message || "—") }),
+          ]),
+          r.is_expired ? el("div", { class: "field-hint", text: t("req.expired_hint") }) : null,
+          r.status === "pending" ? el("div", { class: "row mt" }, [
+            el("button", { class: "btn btn-primary btn-sm f1", icon: "check_circle", text: "" + t("req.approve"), onclick: () => approveModal(r) }),
+            el("button", { class: "btn btn-danger btn-sm f1", icon: "checkup", text: "" + t("req.reject"), onclick: () => rejectModal(r) }),
+          ]) : null,
+        ]));
+      });
+      listHost.append(list);
+    }
+
+    await load(mode);
     return wrap;
   }
 
@@ -1862,7 +1903,8 @@ window.AdminViews = (function () {
   /* MODUL 1: jadval ko'rinishida (Vaqt / Kim / Nima qildi / Kimga),
      filtrar: sana oralig'i, foydalanuvchi, amal turi, qidiruv maydoni. */
   const ACT_COLORS = {
-    backup_created: "green", backup_restored: "red",
+    backup_created: "green", backup_restored: "red", backup_deleted: "late",
+    login_changed: "blue",
     login: "blue", logout: "gray",
     user_created: "green", user_updated: "blue", user_deleted: "red",
     password_changed: "orange", password_reset: "orange",
@@ -2025,9 +2067,14 @@ window.AdminViews = (function () {
                   else toast(t("backup.download_failed"), "error");
                 } catch (e) { errToast(e); }
               } }),
-            el("button", { class: "btn btn-danger btn-sm", icon: "refresh", text: "" + t("backup.restore"),
+            el("button", { class: "btn btn-light btn-sm", icon: "refresh", text: "" + t("backup.restore"),
               onclick: () => restoreConfirm(b.name, async () => {
                 try { await API.post("admin/backup", { action: "restore", filename: b.name }); toast(t("backup.restored")); }
+                catch (e) { errToast(e); }
+              }) }),
+            el("button", { class: "btn btn-danger btn-sm", icon: "trash", text: "" + t("backup.delete"),
+              onclick: () => UI.confirmDialog(t("backup.delete_confirm"), async () => {
+                try { await API.del("admin/backup?name=" + encodeURIComponent(b.name)); toast(t("backup.deleted")); await loadList(); }
                 catch (e) { errToast(e); }
               }) }),
           ])]),

@@ -106,7 +106,14 @@ def generate_password() -> str:
     for i in range(len(body) - 1, 0, -1):
         j = secrets.randbelow(i + 1)
         body[i], body[j] = body[j], body[i]
-    return PASSWORD_PREFIX + "".join(body)
+    pw = PASSWORD_PREFIX + "".join(body)
+    # MODUL 4: avtomatik generatsiya ham xuddi shu kuch talablariga MJBURIY
+    # mos kelishi kerak (butun platforma bo'ylab yagona siyosat). Bu — kod
+    # darajasidagi kafolat: `password_strength_errors` kuchini oshirilsa,
+    # generator ham buzilmay qoladi (defensiv tekshiruv).
+    if password_strength_errors(pw):
+        return generate_password()
+    return pw
 
 
 def credential_digest(value: str) -> str:
@@ -153,10 +160,20 @@ def is_valid_login(value: str) -> bool:
 
 
 def password_strength_errors(password: str) -> list:
-    """Foydalanuvchi tomonidan belgilangan parol uchun minimal talablar."""
+    """Foydalanuvchi tomonidan belgilangan parol uchun minimal talablar.
+
+    BUTUN PLATFORMA BO'YLAB BIR XIL (MODUL 4):
+      * kamida 10 ta belgi,
+      * kamida bitta kichik harf (a-z),
+      * kamida bitta katta harf (A-Z),
+      * kamida bitta raqam (0-9).
+    Maxsus belgi (!@#$%^&*) TAVSIYA etiladi, lekin majburiy EMAS — shuning
+    uchun bu yerda tekshirilmaydi (aks holda avtomatik generatsiya ham,
+    eski integratsiyalar ham buzilardi).
+    """
     p = str(password or "")
     out = []
-    if len(p) < 8:
+    if len(p) < 10:
         out.append("auth.password_short")
     if not re.search(r"[a-z]", p):
         out.append("auth.password_need_lower")

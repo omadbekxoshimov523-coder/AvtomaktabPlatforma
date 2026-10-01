@@ -112,6 +112,30 @@ textarea.input { resize: vertical; min-height: 70px; }
 .field-hint { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
+/* ---- MODUL 4: parol talablari (real-vaqt checklist) ---- */
+.pw-rules {
+  margin: -4px 0 12px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: rgba(127, 127, 127, .05);
+}
+.pw-rules-title { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+.pw-rules-list { display: flex; flex-direction: column; gap: 4px; }
+.pw-rule { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.pw-rule-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  font-size: 11px; font-weight: 800; line-height: 1;
+  background: rgba(127, 127, 127, .16); color: var(--muted);
+}
+.pw-rule.ok { color: #2f855a; }
+.pw-rule.ok .pw-rule-mark { background: rgba(47, 133, 90, .16); color: #2f855a; }
+.pw-rule.bad { color: #c53030; }
+.pw-rule.bad .pw-rule-mark { background: rgba(197, 48, 48, .14); color: #c53030; }
+.pw-match { display: block; font-size: 12.5px; font-weight: 600; margin: -6px 0 12px; }
+.pw-match.ok { color: #2f855a; }
+.pw-match.bad { color: #c53030; }
+.pw-match.hidden, .pw-rules.hidden { display: none; }
+
 /* ---- MODUL 4: xarita (Yandex Maps JS API) ---- */
 .map-picker { margin: 4px 0 2px; }
 /* Ikki holat bir xil balandlikda: xarita yoki xato/xabar bloki */
