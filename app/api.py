@@ -139,6 +139,30 @@ DEFAULT_PLATFORM_SETTINGS = {
 }
 
 
+# ===========================================================================
+# XARITA VAQTINCHA O'CHIRILGAN — API kalit va Geosuggest to'liq sozlangandan
+# so'ng, qayta yoqish uchun.
+#
+# NIMA QILINDI:
+#   "Olib ketish joyi" -> "Uchrashuv joyi" ga o'zgartirildi va undan
+#   XARITA butunlay olib tashlandi. Endi bu — FAQAT oddiy erkin matn maydoni
+#   (autocomplete yo'q, koordinata yo'q, xarita yo'q).
+#
+# NIMA O'ZGARTIRILMADI (MUHIM — kelajak uchun saqlanadi):
+#   * `session_students.pickup_lat` / `pickup_lng` USTUNLARI BAZADA O'CHIRILMADI.
+#     Ular hozircha NULL (bo'sh) turadi. Xarita qaytganda kerak bo'ladi.
+#   * Jadval strukturasi (`app/db.py`) tegilmadi — migration yozilmadi.
+#   * Koordinata validatsiyasi (`parse_coord`) o'z holicha turibdi.
+#
+# QAYTA QO'YISH QANDAY:
+#   1) Bu bayroqni `False` qiling.
+#   2) `web/js/shared.js` -> `openPickupEdit()` ichidagi `MAP_DISABLED`
+#      blokini oching (xarita + autocomplete kodi saqlangan).
+#   3) `.env` ga `YANDEX_MAPS_API_KEY` va `YANDEX_GEOCODER_API_KEY` qo'ying.
+# ===========================================================================
+MAP_DISABLED = True
+
+
 def _platform_setting(db, key: str, default=None):
     """system_settings'da saqlangan platforma sozlamasini qaytaradi (default bilan)."""
     row = db.q1("SELECT value FROM system_settings WHERE key=?", (key,))
@@ -300,7 +324,7 @@ def lesson_reminder(db, lesson_id: int, user_id: int, date: str, start_time: str
                     end_time: str, meta: dict = None) -> int:
     """Bitta qabulchiga 2-soat eslatmasini yuboradi. 1 = yuborildi, 0 = yo'q.
 
-    Matn talabdagidek: sana, vaqt, instruktor, olib ketish joyi.
+    Matn talabdagidek: sana, vaqt, instruktor, uchrashuv joyi.
     """
     from .notify import SRC_LESSON_REMINDER, notify as _notify
     info = db.q1(
@@ -995,6 +1019,18 @@ class Api:
         )
         out = [user_public(r) for r in rows]
 
+        # MODUL 2: "Jami: N ta talaba" — hisoblagich BIR XIL shartlar bilan
+        # (rol + holat + qidiruv) hisoblanadi, shuning uchun filtr qo'yilganda
+        # son ham filtrlangan natijaga mos yangilanadi.
+        # `LIMIT 500` dan O'TMAYDI: bu umumiy son (jami nechta mos kator bor).
+        total_all = self.db.q1(
+            "SELECT COUNT(*) c FROM users WHERE deleted_at IS NULL")["c"]
+        total = self.db.q1(
+            "SELECT COUNT(*) c FROM users WHERE " + " AND ".join(where), params)["c"]
+        # `by_role` — barcha toifalarning umumiy sonlari (bo'sh filtr bilan).
+        by_role = {r["role"]: r["c"] for r in self.db.q(
+            "SELECT role, COUNT(*) c FROM users WHERE deleted_at IS NULL GROUP BY role")}
+
         # MODUL 6: rolda bo'linish uchun qo'shimcha ma'lumotlar BULK so'rov bilan
         # olinadi (har bir qatorga alohida SQL yubormaslik uchun — N+1 oldi olindi).
         st_by_uid = {s["user_id"]: s for s in self.db.q("SELECT * FROM students")}
@@ -1073,7 +1109,13 @@ class Api:
                 if i_ and i_["assigned_car_id"]:
                     c = self.db.q1("SELECT id, brand, model, plate_number, practice_capacity, status FROM cars WHERE id=?", (i_["assigned_car_id"],))
                     u["car"] = c
-        return OK, {"ok": True, "users": out}
+        # MODUL 2/6: `total` — jami (hisoblagich uchun), `by_role` — toifalar
+        # kesimidagi umumiy sonlar, `filtered` — filtr qo'llanganmi.
+        filtered = bool(query.get("role") or query.get("status") or query.get("q"))
+        return OK, {"ok": True, "users": out, "total": int(total),
+                    "shown": len(out), "by_role": by_role,
+                    "total_all": int(total_all), "filtered": filtered,
+                    "limited": int(total) > len(out)}
 
     def admin_user_create(self, body):
         self._require("admin")
@@ -1154,6 +1196,132 @@ class Api:
                 return e.status, err(e.code)
         audit(self.db, self.user["id"], "bulk created", "users", None, {"count": count})
         return OK, {"ok": True, "created": created, "count": len(created)}
+
+    # ====================================================================
+    # MODUL 6 — OMMAVIY (BULK) AMALLAR: o'chirish va tahrirlash
+    #
+    # HIMOYALAR:
+    #   * RBAC: faqat `admin`.
+    #   * IDOR/INJEKSIYA: `user_id` ro'yxati — har bir ID `int()` orqali
+    #     tekshiriladi va `?` placeholder bilan so'raladi (SQLi yo'q).
+    #   * `MAX_BULK = 200` — bitta so'rovda juda ko'p yozilishdan saqlaydi
+    #     (DoS/tez timeout). `bulk.too_many` bilan aniq rad etiladi.
+    #   * O'ZINI O'CHIRISHGA BO'LMAYDI: ro'yxatda o'z `id`si bo'lsa
+    #     (`self_protected`) — admin o'zini o'chira olmaydi. Bu muhim:
+    #     aks holda tizimda admin qolmay qolishi mumkin.
+    #   * O'chirish `deleted_at` bilan YUMISH (soft delete) — foydalanuvchi
+    #     ma'lumotlari (mashg'ulotlar, tarix) o'chmaydi va tiklanadi.
+    # ====================================================================
+    MAX_BULK = 200
+
+    def _bulk_ids(self, body):
+        """`ids` ro'yxatini xavfsiz int listiga aylantiradi (SQLi himoyasi)."""
+        raw = body.get("ids")
+        if not isinstance(raw, (list, tuple)) or not raw:
+            return None, BAD, err("bulk.none")
+        if len(raw) > self.MAX_BULK:
+            return None, BAD, err("bulk.too_many", {"n": self.MAX_BULK})
+        ids = []
+        for x in raw:
+            try:
+                n = int(x)
+            except (TypeError, ValueError):
+                return None, BAD, err("bulk.bad_id")
+            if n > 0:
+                ids.append(n)
+        if not ids:
+            return None, BAD, err("bulk.none")
+        return ids, OK, None
+
+    def admin_users_bulk_update(self, body):
+        """`POST /api/admin/users/bulk-update` — MODUL 6.
+
+        Tanlangan foydalanuvchilarning UMUMIY maydonlarini bir vaqtda
+        o'zgartiradi (masalan: barcha tanlangan talabalarning guruhini
+        bir xil qilib belgilash, yoki hammasini "Faol" qilish).
+
+        QOIDALAR:
+          * BO'SH maydonlar UMUMAN o'zgartirilmaydi ("o'zgartirilmaydi"
+            semantikasi) — `None` yoki bo'sh string `skip` qilinadi.
+          * Har bir maydon turi tekshiriladi (uzunlik, ruxsatli ro'yxat).
+          * `total_lessons_target` faqat talabalar uchun.
+        """
+        self._require("admin")
+        ids, st, e = self._bulk_ids(body)
+        if st != OK:
+            return st, e
+        fields = {}
+        # --- umumiy maydonlar (users jadvali) ---
+        if body.get("status") in ("active", "blocked"):
+            fields["status"] = body["status"]
+        if body.get("phone"):
+            fields["phone"] = str(body["phone"]).strip()[:40]
+        if body.get("notes"):
+            fields["notes"] = str(body["notes"]).strip()[:500]
+        # --- talaba maydonlari (students jadvali) ---
+        s_fields = {}
+        if body.get("group_name"):
+            s_fields["group_name"] = str(body["group_name"]).strip()[:60]
+        if body.get("license_category"):
+            s_fields["license_category"] = str(body["license_category"]).strip()[:8]
+        if body.get("study_status") in ("active", "paused", "graduated", "dropped"):
+            s_fields["study_status"] = body["study_status"]
+        if body.get("total_lessons_target") not in (None, "", 0, "0"):
+            try:
+                tv = int(body["total_lessons_target"])
+            except (TypeError, ValueError):
+                return BAD, err("user.bad_total_lessons")
+            if tv < 1 or tv > 999:
+                return BAD, err("user.bad_total_lessons")
+            s_fields["total_lessons_target"] = tv
+        if not fields and not s_fields:
+            return BAD, err("bulk.nothing_to_change")
+
+        updated = 0
+        # `status` o'zgarishi users jadvalida
+        if fields:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            vals = list(fields.values())
+            vals += [now(), *ids]
+            ph = ",".join("?" * len(ids))
+            updated += self.db.upd(
+                "UPDATE users SET " + sets + ", updated_at=? WHERE id IN (" + ph + ")",
+                tuple(vals))
+        # `group_name`/`category`/`study_status` o'zgarishi students jadvalida.
+        # `users.id` -> `students.user_id` bog'lanishini ishlatamiz (user_id).
+        if s_fields:
+            sets = ", ".join(f"{k}=?" for k in s_fields)
+            vals = list(s_fields.values())
+            vals += [*ids]
+            ph = ",".join("?" * len(ids))
+            updated += self.db.upd(
+                "UPDATE students SET " + sets + " WHERE user_id IN (" + ph + ")",
+                tuple(vals))
+        audit(self.db, self.user["id"], "bulk updated", "users", None,
+              {"count": updated, "ids": ids[:50]})
+        return OK, {"ok": True, "updated": updated}
+
+    def admin_users_bulk_delete(self, body):
+        """`POST /api/admin/users/bulk-delete` — MODUL 6.
+
+        Tanlangan foydalanuvchilarni O'CHIRADI (soft delete `deleted_at`).
+        HIMOYA: o'zini o'chirishga BO'LMAYDI (`self_protected`).
+        """
+        self._require("admin")
+        ids, st, e = self._bulk_ids(body)
+        if st != OK:
+            return st, e
+        # O'ZINI HIMOYA QILISH: admin o'zini o'chira olmaydi.
+        if self.user["id"] in ids:
+            return BAD, err("bulk.self_protected")
+        ph = ",".join("?" * len(ids))
+        n = self.db.upd(
+            "UPDATE users SET deleted_at=?, status='archived', updated_at=? "
+            "WHERE deleted_at IS NULL AND id IN (" + ph + ") AND id!=?",
+            (now(), now(), *ids, self.user["id"]))
+        audit(self.db, self.user["id"], "bulk deleted", "users", None,
+              {"count": n, "ids": ids[:50]})
+        return OK, {"ok": True, "deleted": n}
 
     def admin_users_update(self, body, uid):
         self._require("admin")
@@ -1753,9 +1921,24 @@ class Api:
             return NOTFOUND, err("session.student_not_found")
         upd = {}
         if "pickup_address" in body: upd["pickup_address"] = str(body["pickup_address"]).strip()
-        if "pickup_lat" in body: upd["pickup_lat"] = float(body["pickup_lat"]) if body["pickup_lat"] else None
-        if "pickup_lng" in body: upd["pickup_lng"] = float(body["pickup_lng"]) if body["pickup_lng"] else None
         if "notes" in body: upd["notes"] = str(body["notes"]).strip()
+        # Koordinatalar: xarita vaqtincha o'chirilgan, lekin ustunlar saqlangan.
+        # Kelganda xarita qaytadi — shuning uchun validatsiya SAQLANADI va
+        # `parse_coord` orqali bajariladi (avvalgi `float(...)` "abc" kabi
+        # noto'g'ri qiymatda ValueError -> 500 xatosini berardi).
+        has_lat = "pickup_lat" in body
+        has_lng = "pickup_lng" in body
+        if has_lat or has_lng:
+            try:
+                lat = parse_coord(body.get("pickup_lat"), "lat")
+                lng = parse_coord(body.get("pickup_lng"), "lng")
+            except ValueError as e:
+                kind = e.args[0] if e.args else "lat"
+                return BAD, err("coord.bad_" + kind)
+            if (lat is None) != (lng is None):
+                return BAD, err("coord.pair_incomplete")
+            upd["pickup_lat"] = lat
+            upd["pickup_lng"] = lng
         if upd:
             self.db.upd("UPDATE session_students SET " + ", ".join(f"{k}=?" for k in upd) + " WHERE id=?", (*upd.values(), int(ssid)))
         return OK, {"ok": True}
@@ -2102,6 +2285,101 @@ class Api:
             "b64": __import__("base64").b64encode(res["data"]).decode("ascii")}}
 
     # ---- import
+    # ====================================================================
+    # VAZIFA 1 — HISOBOT YARATISH: POST /api/reports/generate
+    #
+    # Parametrlar:
+    #   roles                — ["student","instructor","admin"] (ixtiyoriy;
+    #                          bo'sh = uchala rol)
+    #   format               — "csv" | "xlsx" | "pdf"
+    #   include_credentials  — true/false
+    #   report               — "users" (foydalanuvchi ro'yxati) yoki
+    #                          "sessions"/"attendance" (avvalgi mashg'ulot
+    #                          hisobotlari)
+    #
+    # XAVFSIZLIK:
+    #   * RBAC: faqat `admin` (`_require("admin")`).
+    #   * `include_credentials=True` — FAQAT login/parol hisoboti qaytariladi.
+    #     Bu maxfiy hujjat: har bir fayl yuklanish AUDIT jurnaliga yoziladi
+    #     (kim, qachon, nechta yozuv, QANDAY format).
+    #   * Har bir yuklanish `audit()` bilan qayd etiladi.
+    #   * Kutubxona/shrift yo'q bo'lsa — 503 + aniq kod (bo'sh/buzilgan
+    #     fayl QAYTARILMAYDI).
+    # ====================================================================
+    REPORT_ROLES = ("student", "instructor", "admin")
+
+    def reports_generate(self, body):
+        self._require("admin")
+        from .export import ExportUnavailable, export_table
+        from .reports import user_report
+
+        # --- format ---
+        fmt = str(body.get("format") or "csv").lower().strip()
+        if fmt not in ("csv", "xlsx", "pdf"):
+            return BAD, err("export.bad_format")
+        # --- ro'yxalar ---
+        report = str(body.get("report") or "users").lower().strip()
+        include_cred = bool(body.get("include_credentials"))
+        raw_roles = body.get("roles")
+        if isinstance(raw_roles, str):
+            raw_roles = [x for x in raw_roles.replace(",", " ").split() if x]
+        if raw_roles is None:
+            raw_roles = []
+        if not isinstance(raw_roles, (list, tuple)):
+            return BAD, err("export.bad_roles")
+        roles = []
+        for r in raw_roles:
+            r = str(r).strip().lower()
+            if r not in self.REPORT_ROLES:
+                return BAD, err("export.bad_role", {"role": str(r)[:24]})
+            if r not in roles:
+                roles.append(r)
+        if not roles:
+            return BAD, err("rep.no_types")
+        # --- til ---
+        lang = str(body.get("lang") or "uz").lower().strip()
+        if lang not in ("uz", "ru", "en"):
+            lang = "uz"
+
+        # --- qatorlar ---
+        if report == "users":
+            rows, sheet = user_report(self.db, roles, include_cred)
+        else:
+            from .reports import export_report_rows
+            q = {"report": report, "period": body.get("period") or "monthly"}
+            if body.get("from"):
+                q["from"] = str(body["from"])
+            if body.get("to"):
+                q["to"] = str(body["to"])
+            rows, sheet = export_report_rows(self.db, q)
+        if not rows:
+            return BAD, err("rep.no_rows")
+
+        # --- fayl ---
+        fname = ("login_parollar" if include_cred else "hisobot") + "." + fmt
+        try:
+            res = export_table(rows, fmt, sheet, lang=lang, filename=fname)
+        except ExportUnavailable as e:
+            return 503, err(e.code, {"fmt": fmt})
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            return 500, err("export.failed")
+
+        # --- AUDIT (maxfiy hisobotlar alohida belgilanadi) ---
+        audit(self.db, self.user["id"],
+              "report generated" + (" (CREDENTIALS)" if include_cred else ""),
+              "reports", None,
+              {"format": fmt, "report": report, "roles": roles,
+               "rows": len(rows), "include_credentials": include_cred,
+               "lang": lang})
+
+        return OK, {"ok": True, "rows": len(rows), "format": fmt,
+                    "include_credentials": include_cred,
+                    "download": {"filename": res["filename"],
+                                 "mime": res["mime"],
+                                 "b64": __import__("base64").b64encode(res["data"]).decode("ascii")}}
+
     def admin_import_students(self, body):
         self._require("admin")
         csv_text = body.get("csv", "")
@@ -2662,11 +2940,18 @@ class Api:
         return OK, {"ok": True, "session": row}
 
     def student_update_pickup(self, body, sid):
-        """`POST /api/student/sessions/{id}/pickup` — olib ketish joyini o'zgartirish.
+        """`POST /api/student/sessions/{id}/pickup` — UCHRASHUV JOYINI o'zgartirish.
 
-        BAND 1: koordinatalar FAQAT shu endpoint orqali (backend/DB) keladi —
-        UI'da kenglik/uzunlik inputlari YO'Q. Manzil Yandex autocomplete yoki
-        xaritada nuqta bosish orqali keladi.
+        VAQTINCHA REJIM (MAP_DISABLED=True, `app/api.py` yuqorida):
+          UI'da faqat BIR TA oddiy matn maydoni bor — "Uchrashuv joyi".
+          Xarita, autocomplete va koordinata kiritish yo'q.
+          So'rov yuborilganda `lat`/`lng` kelmasa -> bazada NULL qoladi
+          (ustunlar O'CHIRILMAGAN, kelajakda xarita uchun joy bor).
+          Kelganda `lat`/`lng` yuborilsa ham ular saqlanadi — eski mijozlar
+          (yoki kelajakdagi xarita rejimi) buzilmaydi.
+
+        QAYTA XARITA YOQILGANDA (MAP_DISABLED=False): quyidagi mantiq to'liq
+        ishlaydi — koordinata FAQAT shu endpoint orqali keladi.
 
         IDOR HIMOYASI: `WHERE session_id=? AND student_id=?` — `/student/123`
         o'rniga `/student/124` yozilsa, boshqa talabaning mashg'uloti
@@ -2704,9 +2989,11 @@ class Api:
         address = str(body.get("address", "")).strip()
         if len(address) > 300:
             return BAD, err("map.address_too_long")
-        # BAND 1: UI'da faqat MANZIL maydoni bor. So'rovda manzil ham, koordinata
-        # ham YO'Q bo'lsa — bu ma'nosiz so'rov (jim qolmasligi uchun rad etiladi).
-        # Noto'g'ri kiritilgan "Olib ketish joyi" saqlanib qolmasligi kerak.
+        # VAQTINCHA REJIM (xarita o'chirilgan): faqat MATN talab qilinadi.
+        # Koordinata kelmasa `pickup_lat/lng` NULL bo'lib qoladi (ustunlar
+        # bazada saqlanib qolgan). Kelajakda xarita qaytganda ham xuddi shu
+        # qoida ishlaydi — `address` bo'sh va koordinata ham bo'sh bo'lsa,
+        # ma'nosiz so'rov rad etiladi (jim qolmasligi uchun).
         if not address and not has_lat and not has_lng:
             return BAD, err("map.address_required")
         params = [address]
@@ -2867,6 +3154,10 @@ class Api:
                 if seg[2] == "disable": return self.me_2fa_disable(body)
         if seg[0] == "admin":
             return self._admin(method, seg[1:], query, body)
+        # VAZIFA 1 — hisobot yaratish (fayl yuklab olish).
+        # Alohida prefiks: "reports" admin ichida emas, ochiqroq manzil.
+        if seg[0] == "reports" and method == "POST" and len(seg) == 2 and seg[1] == "generate":
+            return self.reports_generate(body)
         if seg[0] == "instructor":
             return self._instructor(method, seg[1:], query, body)
         if seg[0] == "student":
@@ -2883,6 +3174,11 @@ class Api:
                 if method == "GET": return self.admin_users(query)
                 if method == "POST": return self.admin_user_create(body)
             if seg[1] == "bulk" and method == "POST": return self.admin_users_bulk(body)
+            # MODUL 6: ommaviy tahrirlash va ommaviy o'chirish
+            if len(seg) == 2 and seg[1] == "bulk-update" and method == "POST":
+                return self.admin_users_bulk_update(body)
+            if len(seg) == 2 and seg[1] == "bulk-delete" and method == "POST":
+                return self.admin_users_bulk_delete(body)
             # BAND 3: jami mashg'ulotlar soni (bitta talaba | barcha talabalar)
             if len(seg) == 2 and seg[1] == "total-lessons" and method == "POST":
                 return self.admin_user_total_lessons(body)

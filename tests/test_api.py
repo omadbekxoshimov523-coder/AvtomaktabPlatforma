@@ -3792,21 +3792,62 @@ class TestMapBAND24(_MixinAdmin, Base):
         self.assertEqual(st2, 403, r2)
 
     # ------------------------------------------------------------- frontend
-    def test_M14_no_lat_lng_inputs_in_pickup_modal(self):
-        """BAND 1: "Kenglik"/"Uzunlik" inputlari UI'dan BUTUNLAY olib tashlangan."""
+    def test_M14_pickup_modal_is_plain_text_no_map(self):
+        """XARITA VAQTINCHA O'CHIRILGAN.
+
+        Faol funksiya `openPickupEdit` — FAQAT bitta matn maydoni:
+          * "Kenglik"/"Uzunlik" inputlari yo'q (avvalgidek),
+          * xarita (`MapView.mount`) CHAQLANMAYDI,
+          * autocomplete (`attachAutocomplete`) ulanmagan,
+          * placeholder/to'g'ri label `meeting.*` dan keladi.
+        Xarita kodi `openPickupEditMap` da SAQLANGAN (o'chirilmagan).
+        """
         p = ROOT / "web" / "js" / "shared.js"
         txt = p.read_text(encoding="utf-8", errors="ignore")
-        i = txt.find("function openPickupEdit")
+        i = txt.find("function openPickupEdit(s, m)")
         self.assertGreater(i, 0, "openPickupEdit topilmadi")
-        # funksiya tugagandan keyingi 60 qator ichida lat/lng maydonlari BO'LMASIN
-        chunk = txt[i:i + 6000]
+        chunk = txt[i:i + 4000]
         end = chunk.find("\n  }")
         body = chunk[:end if end > 0 else len(chunk)]
         self.assertNotIn("map.lat", body, "Kenglik maydoni hali ham bor")
         self.assertNotIn("map.lng", body, "Uzunlik maydoni hali ham bor")
-        # autocomplete ulangan bo'lishi SHART
-        self.assertIn("attachAutocomplete", body, "autocomplete ulanmagan")
-        self.assertIn("reverseGeocode", body, "nuqtadan manzil yo'q")
+        self.assertNotIn("MapView.mount", body, "xarita endi render qilinmasligi kerak")
+        self.assertNotIn("attachAutocomplete", body, "autocomplete endi ulanmasligi kerak")
+        self.assertNotIn("reverseGeocode", body, "reverse geocode kerak emas")
+        self.assertNotIn("map-picker", body, "xarita konteyneri kerak emas")
+        # oddiy matn rejimi faol
+        self.assertIn("meeting.place_ph", body, "matn placeholder'i ishlatilmayapti")
+        self.assertIn("meeting.place", body, "kalit ishlatilmayapti")
+        # `lat`/`lng` yuborilmaydi (bazada NULL qoladi)
+        self.assertIn("{ address: text }", body, "so'rovda lat/lng yuborilmoqda")
+        self.assertNotIn("lat: r.lat", body, "koordinata yuborilmoqda")
+
+    def test_M14b_map_code_preserved_for_future(self):
+        """Xarita kodi O'CHIRILMAGAN — kelajakda qayta yoqish uchun saqlangan."""
+        p = ROOT / "web" / "js" / "shared.js"
+        txt = p.read_text(encoding="utf-8", errors="ignore")
+        self.assertIn("function openPickupEditMap", txt,
+                      "xarita rejimi kodi yo'qoldirilgan")
+        i = txt.find("function openPickupEditMap")
+        chunk = txt[i:i + 6000]
+        for fn in ("MapView.mount", "attachAutocomplete", "reverseGeocode"):
+            self.assertIn(fn, chunk, f"saqlangan xarita kodida {fn} yo'q")
+        # `map.js` butunligicha saqlangan
+        mt = (ROOT / "web" / "js" / "map.js").read_text(encoding="utf-8", errors="ignore")
+        for fn in ("suggest", "geocode", "reverseGeocode", "attachAutocomplete"):
+            self.assertIn("function " + fn, mt, f"map.js da {fn} yo'q")
+        # backend bayrogi ham bor (qayta yoqish uchun bitta qator)
+        at = (ROOT / "app" / "api.py").read_text(encoding="utf-8", errors="ignore")
+        self.assertIn("MAP_DISABLED", at, "backend da MAP_DISABLED bayrog'i yo'q")
+
+    def test_M14c_map_disabled_flag_and_labels(self):
+        """Bayroq `true` + "Uchrashuv joyi" label'lari mavjud."""
+        sh = (ROOT / "web" / "js" / "shared.js").read_text(encoding="utf-8", errors="ignore")
+        self.assertIn("const MAP_DISABLED = true;", sh,
+                      "xarita vaqtincha o'chirilgan deb belgilanmagan")
+        i18n = (ROOT / "web" / "js" / "i18n.js").read_text(encoding="utf-8", errors="ignore")
+        self.assertIn('"meeting.place": { uz: "Uchrashuv joyi"', i18n)
+        self.assertIn("Masalan: Beshariq, Mustaqillik maydoni yonida", i18n)
 
     def test_M15_map_module_exposes_autocomplete_api(self):
         txt = (ROOT / "web" / "js" / "map.js").read_text(encoding="utf-8", errors="ignore")
@@ -4828,6 +4869,443 @@ class TestTotalLessonsAdminBAND24(_MixinAdmin, Base):
         self.assertIn("Jami amaliy mashg'ulotlar sonini o'zgartirish", i18n)
         self.assertIn("Bitta talaba", i18n)
         self.assertIn("Barcha talabalar", i18n)
+
+
+# ============================================================================
+# 9) ADMIN PANEL MODULLARI 1-7 — Baza bo'limi hisoblagich, tugmalar,
+#    eskirgan so'rovlar, ommaviy amallar, lokalizatsiya
+# ============================================================================
+
+
+class TestAdminModulesBAND25(_MixinAdmin, Base):
+    """MODUL 1/2/3/6 — Baza bo'limi va ommaviy amallar.
+
+    MODUL 1: admin "Dashboard" -> "Bosh sahifa".
+    MODUL 2: har bir toifa uchun "Jami: N ta <rol>" (filtrga mos).
+    MODUL 3: "Bulk yaratish" -> "Tezkor yaratish"; "Import CSV" Baza
+             bo'limidan olib tashlandi, o'rniga "Hisobot" tugmasi.
+    MODUL 6: checkbox + "Hammasini tanlash" + ommaviy tahrirlash/o'chirish.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.uids = []
+        # har bir rol uchun bittadan foydalanuvchi (MODUL 2 uchun)
+        self.su = self._mkuser("student", "Mod2", "Student")["user"]["id"]
+        self.iu = self._mkuser("instructor", "Mod2", "Instructor")["user"]["id"]
+        self.au = self._mkuser("instructor", "Mod2", "Tmp2")["user"]["id"]
+        # "Tezkor yaratish" bilan yaratilgan yana 2 ta talaba (MODUL 6).
+        # Javob `created` — CREDENTIAL ro'yxati ({login, password}), `id` YO'Q.
+        st, r = self.admin.post("/api/admin/users/bulk", {"count": 2})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["count"], 2, r)
+        # login orqali `user.id` ni topamiz (test tozalash uchun)
+        for cr in r["created"]:
+            row = self.db.q1("SELECT id FROM users WHERE login=?", (cr["login"],))
+            self.assertIsNotNone(row, "bulk yaratilgan foydalanuvchi topilmadi")
+            self.uids.append(row["id"])
+
+    def tearDown(self):
+        for uid in list(self.uids) + [self.su, self.iu, self.au]:
+            self._cleanup_user(uid)
+        super().tearDown()
+
+    # ---------------------------------------------------------- MODUL 1
+    def test_MOD1_admin_nav_uses_bosh_sahifa(self):
+        """Admin sidebar "Bosh sahifa" — Talaba/Instruktor kabi."""
+        app = (ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8", errors="ignore")
+        # admin roli `nav.home` kalitidan foydalanadi
+        i = app.find("admin: [")
+        j = app.find("]", i)
+        chunk = app[i:j]
+        self.assertIn('"nav.home"', chunk, "admin sidebar 'Bosh sahifa' emas")
+        self.assertNotIn('"nav.dashboard"', chunk, "admin hali ham 'nav.dashboard' ishlatadi")
+        i18n = (ROOT / "web" / "js" / "i18n.js").read_text(encoding="utf-8", errors="ignore")
+        self.assertIn('"nav.home": { uz: "Bosh sahifa"', i18n)
+
+    # ---------------------------------------------------------- MODUL 2
+    def test_MOD2_total_matches_filter(self):
+        """`total` — filtr bilan BIR XIL shartlarda hisoblanadi."""
+        st, r = self.admin.get("/api/admin/users?role=student")
+        self.assertEqual(st, 200, r)
+        self.assertIn("total", r, "backend `total` maydoni yo'q (MODUL 2)")
+        self.assertIn("by_role", r, "`by_role` maydoni yo'q")
+        # `role=student` ham filtr -> `filtered` true (bo'sh bo'lishi SHART emas)
+        self.assertTrue(r["filtered"], "rol filtri `filtered` true bo'lishi kerak")
+        # faqat `q` (qidiruv) bilan filtr o'zgarganini tekshiramiz
+        st, r2 = self.admin.get("/api/admin/users?role=student&q=Mod2")
+        self.assertEqual(st, 200, r2)
+        self.assertTrue(r2["filtered"], "qidiruv filtri qo'yilganda `filtered` true bo'lishi kerak")
+        self.assertLessEqual(r2["total"], r["total"],
+                             "qidiruv natijasi umumiy sondan KATTAROQ bo'lmasligi kerak")
+        # `total` qidiruv natijasi bilan mos keladi
+        st, allq = self.admin.get("/api/admin/users?role=student&q=Modu")
+        self.assertEqual(allq["total"], allq["shown"])
+
+    def test_MOD2_by_role_counts(self):
+        """`by_role` — uch toifa soni (o'chirilmagan foydalanuvchilar)."""
+        st, r = self.admin.get("/api/admin/users")
+        self.assertEqual(st, 200, r)
+        for role in ("student", "instructor", "admin"):
+            self.assertIn(role, r["by_role"], f"{role} soni yo'q")
+        self.assertGreaterEqual(r["by_role"]["student"], 1)
+        self.assertGreaterEqual(r["by_role"]["instructor"], 1)
+
+    # ---------------------------------------------------------- MODUL 3
+    def test_MOD3_import_csv_removed_from_base_section(self):
+        """Baza bo'limida "Import CSV" tugmasi OLIB TASHLANGAN."""
+        txt = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        # `base()` funksiyasida importModal chaqirilmaydi
+        i = txt.find("async function base()")
+        j = txt.find("function bulkModal()", i)
+        base_chunk = txt[i:j]
+        self.assertNotIn("importModal()", base_chunk,
+                         "'Import CSV' hali ham Baza bo'limida chaqirilmoqda")
+        # "Hisobot" tugmasi bor (Hisobotlar bo'limiga o'tadi)
+        self.assertIn("base.go_reports", base_chunk, "'Hisobot' tugmasi yo'q")
+        self.assertIn("goReportsFor", base_chunk)
+
+    def test_MOD3_bulk_renamed_to_tezkor_yaratish(self):
+        """"Bulk yaratish" -> "Tezkor yaratish" (i18n + sarlavha)."""
+        i18n = (ROOT / "web" / "js" / "i18n.js").read_text(encoding="utf-8", errors="ignore")
+        self.assertIn('"student.bulk": { uz: "Tezkor yaratish"', i18n)
+        txt = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        # modal sarlavhasida "Bulk" so'zi QOLMAMALIGI kerak
+        i = txt.find("function bulkModal()")
+        j = txt.find("function importModal()", i)
+        self.assertNotIn('— Bulk', txt[i:j], "modal sarlavhasida 'Bulk' qolgan")
+
+    def test_MOD3_import_moved_to_reports_not_deleted(self):
+        """Import funksiyasi O'CHIRILMADI — Hisobotlar bo'limidan ochiladi."""
+        txt = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        self.assertIn("function importModal", txt, "importModal o'chirilgan")
+        self.assertIn("importModal,", txt, "importModal eksportga qo'shilmagan")
+
+    # ---------------------------------------------------------- MODUL 6
+    def test_MOD6_bulk_update_common_fields(self):
+        """Ommaviy tahrirlash: umumiy maydonlar barchasiga qo'llaniladi."""
+        st, r = self.admin.post("/api/admin/users/bulk-update",
+                                {"ids": [self.su], "group_name": "G-99", "license_category": "C"})
+        self.assertEqual(st, 200, r)
+        self.assertGreaterEqual(r["updated"], 1, r)
+        row = self.db.q1("SELECT group_name, license_category FROM students WHERE user_id=?",
+                         (self.su,))
+        self.assertEqual(row["group_name"], "G-99")
+        self.assertEqual(row["license_category"], "C")
+
+    def test_MOD6_bulk_update_status_all(self):
+        """Ommaviy holat o'zgartirish."""
+        st, r = self.admin.post("/api/admin/users/bulk-update",
+                                {"ids": [self.su, self.iu], "status": "blocked"})
+        self.assertEqual(st, 200, r)
+        for uid in (self.su, self.iu):
+            row = self.db.q1("SELECT status FROM users WHERE id=?", (uid,))
+            self.assertEqual(row["status"], "blocked")
+
+    def test_MOD6_bulk_update_empty_fields_not_applied(self):
+        """BO'SH maydonlar o'zgartirilMAYDI."""
+        before = self.db.q1("SELECT group_name FROM students WHERE user_id=?", (self.su,))
+        st, r = self.admin.post("/api/admin/users/bulk-update",
+                                {"ids": [self.su], "group_name": "", "status": "active"})
+        self.assertEqual(st, 200, r)
+        after = self.db.q1("SELECT group_name FROM students WHERE user_id=?", (self.su,))
+        self.assertEqual(after["group_name"], before["group_name"],
+                         "bo'sh maydon o'zgarib ketdi")
+
+    def test_MOD6_bulk_update_nothing_to_change_rejected(self):
+        st, r = self.admin.post("/api/admin/users/bulk-update", {"ids": [self.su]})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "bulk.nothing_to_change")
+
+    def test_MOD6_bulk_update_empty_ids_rejected(self):
+        st, r = self.admin.post("/api/admin/users/bulk-update", {"ids": [], "status": "active"})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "bulk.none")
+
+    def test_MOD6_bulk_update_too_many_rejected(self):
+        st, r = self.admin.post("/api/admin/users/bulk-update",
+                                {"ids": list(range(1, 500)), "status": "active"})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "bulk.too_many")
+
+    def test_MOD6_bulk_update_bad_id_is_sql_injection_safe(self):
+        """Noto'g'ri ID (SQLi) — 400, jim qolmaydi, hech narsa o'zgarmaydi."""
+        st, r = self.admin.post("/api/admin/users/bulk-update",
+                                {"ids": ["1 OR 1=1"], "status": "blocked"})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "bulk.bad_id")
+
+    def test_MOD6_bulk_delete_soft(self):
+        """Ommaviy o'chirish — soft delete (`deleted_at`), ma'lumot saqlanadi."""
+        st, r = self.admin.post("/api/admin/users/bulk-delete", {"ids": [self.su]})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["deleted"], 1, r)
+        row = self.db.q1("SELECT deleted_at, status FROM users WHERE id=?", (self.su,))
+        self.assertIsNotNone(row["deleted_at"], "soft delete ishlamadi")
+        self.assertEqual(row["status"], "archived")
+        # student qatori saqlanib qoladi
+        s = self.db.q1("SELECT * FROM students WHERE user_id=?", (self.su,))
+        self.assertIsNotNone(s, "student ma'lumoti o'chib ketdi")
+        # ro'yxatda ko'rinmaydi
+        st, r2 = self.admin.get("/api/admin/users?role=student")
+        self.assertNotIn(self.su, [u["id"] for u in r2["users"]])
+
+    def test_MOD6_bulk_delete_self_protected(self):
+        """Admin O'ZINI o'chira olMAYDI (tizimda admin qolishi uchun)."""
+        me = self.admin.get("/api/auth/me")[1]["user"]["id"]
+        st, r = self.admin.post("/api/admin/users/bulk-delete", {"ids": [me]})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "bulk.self_protected")
+        row = self.db.q1("SELECT deleted_at FROM users WHERE id=?", (me,))
+        self.assertIsNone(row["deleted_at"], "admin o'zini o'chirildi!")
+
+    def test_MOD6_bulk_delete_mixed_with_self_rejected_entirely(self):
+        """Aralash ro'yxatda admin bo'lsa — butun so'rov RAD ETILADI.
+
+        XAVFSIZLIK: qisman o'chirish ("ba'zilari o'chirildi, ba'zilari
+        qoldi") chalkash natija beradi. Shuning uchun admin o'z ro'yxatida
+        bo'lsa — HECH NIMA o'chirilmaydi va aniq xato qaytariladi.
+        Bu "jim qoldirmaslik" tamoyili: admin biladi ki, hech kim
+        o'chirilmagan.
+        """
+        me = self.admin.get("/api/auth/me")[1]["user"]["id"]
+        st, r = self.admin.post("/api/admin/users/bulk-delete", {"ids": [me, self.iu]})
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "bulk.self_protected")
+        # muhim: instructor HAM o'chirilmagan (atomik rad etish)
+        self.assertIsNone(self.db.q1("SELECT deleted_at FROM users WHERE id=?", (me,))["deleted_at"],
+                          "admin o'zini o'chirildi!")
+        self.assertIsNone(self.db.q1("SELECT deleted_at FROM users WHERE id=?", (self.iu,))["deleted_at"],
+                          "qisman o'chirish bo'ldi — atomik emas!")
+
+    # ------------------------------------------------- RBAC / xavfsizlik
+    def test_MOD6_bulk_requires_admin(self):
+        """Instruktor/talaba ommaviy ammalarni BAJAROLMAYDI."""
+        r = self._mkuser("instructor", "Norole", "T")
+        pwd = r["credentials"]["password"]
+        c = Client()
+        s2, _ = c.post("/api/auth/login",
+                       {"login": r["user"]["login"], "password": pwd, "role": "instructor"})
+        self.assertEqual(s2, 200)
+        s3, rr = c.post("/api/admin/users/bulk-delete", {"ids": [self.su]})
+        self.assertEqual(s3, 403, rr)
+        s4, rr = c.post("/api/admin/users/bulk-update", {"ids": [self.su], "status": "blocked"})
+        self.assertEqual(s4, 403, rr)
+        self._cleanup_user(r["user"]["id"])
+
+    # ----------------------------------------------------- frontend statik
+    def test_MOD2_frontend_count_bar(self):
+        """Frontend'da hisoblagich + tanlov holati mavjud (VAZIFA 2 arxitekturasi).
+
+        Eski `bulkSelectAll`/`bulkCheckbox` funksiyalari olib tashlandi —
+        ularning o'rniga `createSelection` (immutabil tanlov) va
+        `createBulkStore` (yagona holat manbai) ishlaydi.
+        """
+        txt = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        self.assertIn("function countBar", txt)
+        self.assertIn("function createSelection", txt)
+        self.assertIn("function createBulkStore", txt)
+        # uchala jadvalda hisoblagich chaqiriladi
+        self.assertGreaterEqual(txt.count("countBar(res"), 3,
+                                "uchala toifada hisoblagich yo'q")
+        # eski yondashuv QAYTMADI (aralash arxitektura bo'lmasligi uchun)
+        self.assertNotIn("function bulkSelectAll", txt)
+        self.assertNotIn("function bulkCheckbox", txt)
+        i18n = (ROOT / "web" / "js" / "i18n.js").read_text(encoding="utf-8", errors="ignore")
+        self.assertIn('"base.count"', i18n)
+        self.assertIn("Jami: {n} ta {what}", i18n)
+
+    def test_MOD6_frontend_checkbox_and_bulk_bar(self):
+        txt = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        self.assertIn("function bulkEditModal", txt)
+        # store orqali yaratiladigan uchala element — obyekt metodi shaklida
+        for sig in ("headerNode() {", "rowNode(u) {", "actionsNode() {", "attach(next, serverTotal) {"):
+            self.assertIn(sig, txt, "%s metodi yo'q" % sig)
+        # va 3 ta jadvalda hammasi chaqiriladi
+        for call in ("bulk.headerNode()", "bulk.actionsNode()", "bulk.attach(list, res.total)"):
+            self.assertEqual(txt.count(call), 3,
+                             "uchala jadvalda %s chaqirilishi kerak (topildi: %d)"
+                             % (call, txt.count(call)))
+        self.assertEqual(txt.count("bulk.rowNode(u)"), 3,
+                         "uchala jadvalda bulk.rowNode(u) kerak")
+        # O'LIK kod butunlay olib tashlandi (ikki nusxali `bulkActionsBar`
+        # aynan "N ta tanlandi" chiqmasligining manbai edi)
+        self.assertNotIn("function bulkActionsBar", txt)
+        self.assertNotIn("function bulkSelectAll", txt)
+        self.assertNotIn("function bulkCheckbox", txt)
+        self.assertGreaterEqual(txt.count('class: "bulk-td"'), 3,
+                                "uchala jadvalda qator checkbox yo'q")
+        self.assertGreaterEqual(txt.count('class: "bulk-th"'), 3,
+                                "uchala jadvalda 'Hammasini tanlash' yo'q")
+
+    # ================= VAZIFA 2 — ommaviy tanlash + oltin checkbox =============
+    def _css(self):
+        return (ROOT / "web" / "css" / "styles.css").read_text(encoding="utf-8", errors="ignore")
+
+    def test_V2_selection_is_immutable(self):
+        """VAZIFA 2/A: holat YANGI massiv/obyekt bilan yangilanadi.
+
+        Muammo A ning asosi shuki `push`/`add` mutatsiyasi render qayta
+        ishga tushmasligi. `createSelection` har o'zgarishda YANGI `ids`
+        massivi yaratadi — eski havola buzilmaydi.
+        """
+        txt = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        i = txt.find("function createSelection")
+        j = txt.find("function createBulkStore", i)
+        self.assertNotEqual(i, -1, "createSelection topilmadi")
+        self.assertNotEqual(j, -1, "createBulkStore topilmadi")
+        chunk = txt[i:j]
+        # --- hech qanday to'g'ridan-to'g'ri mutatsiya yo'q (MUAMMO A ning asosi) ---
+        for bad in ("ids.push(", "ids.splice(", "ids.pop(", "ids.shift(",
+                    "ids.sort(", "ids.reverse(", "ids[0] =", "ids.length ="):
+            self.assertNotIn(bad, chunk, "%s — to'g'ridan-to'g'ri mutatsiya" % bad)
+        # --- YANGI massiv yaratiladi (concat / filter orqali) ---
+        self.assertIn("ids = a;", chunk, "yangi massiv tayinlanmayapti")
+        self.assertIn("ids.concat([id])", chunk, "add() yangi massiv yaratmayapti")
+        self.assertIn("ids.filter(", chunk, "remove()/only()/except() filter ishlatmayapti")
+        # --- Set bilan takrorlilar oldi ---
+        self.assertIn("new Set(next)", chunk, "takrorlanadigan ID'lar filtrlanmayapti")
+        # --- o'zgarish aniqlanadi (keraksiz re-render yo'q) ---
+        self.assertIn("a.length === ids.length && a.every", chunk, "o'zgarish aniqlanmagan")
+        # --- bildirishnoma: obuna + xatoni yashirmaslik ---
+        self.assertIn("subscribe(fn)", chunk)
+        self.assertIn("subs.slice().forEach", chunk, "bildirishnoma nusxasi ishlatilmayapti")
+        self.assertIn("notify();", chunk)
+        self.assertNotIn("catch (e) {}", chunk, "obuna xatosi yashirilmoqda")
+        self.assertIn("console.error", chunk, "obuna xatosi konsolga chiqarilmayapti")
+
+    def test_V2_bulk_store_single_source(self):
+        """VAZIFA 2/A+B: hisoblagich va checkbox bitta store dan oziqlanadi."""
+        txt = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        i = txt.find("function createBulkStore")
+        j = txt.find("function countBar", i)
+        self.assertNotEqual(i, -1)
+        self.assertNotEqual(j, -1)
+        chunk = txt[i:j]                      # butun store (ikkala o'lik funksiya YO'Q)
+        # --- hisoblagich har render'da QAYTA o'qiladi (MUAMMO A ning tuzatilishi) ---
+        self.assertIn("actionsNode() {", chunk)
+        act = chunk[chunk.index("actionsNode() {"):]
+        self.assertIn("subs.push((st) => {", act, "panel obuna qilinmagan")
+        self.assertIn("const n = st.size;", act,
+                      "son panel YARATILGANDA emas, har render'da o'qilishi kerak")
+        self.assertNotIn("const n = state.size;", chunk[:chunk.index("actionsNode() {")],
+                         "son yana bir marta tashqarida o'qilmoqda")
+        # --- qator checkbox'i store'dan o'qiydi, to'g'ridan-to'g'ri EMAS ---
+        self.assertIn("cb.checked = state.has(u.id);", chunk)
+        self.assertIn("state.toggle(u.id);", chunk)
+        # --- "hammasini tanlash" haqiqiy TOGGLE (MUAMMO B) ---
+        self.assertIn("function toggleAll", chunk)
+        self.assertIn("list.every((u) => state.has(u.id))", chunk,
+                      "tanlash holati to'g'ri aniqlanmayapti")
+        self.assertIn("if (all) { state.except(list); return; }", chunk,
+                      "qayta bosish -> bekor qilish yo'q")
+        self.assertIn("state.allOf(list);", chunk)
+        # ro'yxat ID'lari ro'yxatdan keladi (tasodifiy sonlar EMAS)
+        self.assertIn("allOf(list) { return this.set((list || []).map((u) => u.id))", txt)
+        # --- server chegarasida tasdiqlash ---
+        self.assertIn("total > list.length", chunk, "server chegarasi tekshirilmayapti")
+        self.assertIn("bulk.confirm_all", chunk)
+        # --- qisman tanlanganda header indeterminate ---
+        self.assertIn("head.indeterminate = inList > 0 && !all;", chunk,
+                      "indeterminate noto'g'ri hisoblanmoqda")
+        self.assertIn("head.checked = all;", chunk)
+        # --- filtr o'zgarganda ko'rinmaydigan tanlov tozalanadi ---
+        self.assertIn("state.only(list);", chunk, "attach da tanlov tozalanmayapti")
+        # --- qator vizual belgisi ---
+        self.assertIn('tr.classList.toggle("bulk-row-sel", on)', chunk)
+        # --- xatolar YASHIRILMAYDI ---
+        self.assertNotIn("catch (e) {}", chunk)
+        self.assertIn("console.error", chunk, "xato yashirilmoqda")
+
+    def test_V2_all_three_tables_use_store(self):
+        """Uchala jadval (talaba/instruktor/admin) bir xil store dan foydalanadi."""
+        import re as _re
+        txt = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        # aniq rol bilan 3 ta jadval + 1 ta ta'rif (izoh satrlaridan kelib chiqmaydi)
+        self.assertEqual(len(_re.findall(r'createBulkStore\("', txt)), 3,
+                         "3 ta jadval store yaratishi kerak (topildi: %d)"
+                         % len(_re.findall(r'createBulkStore\("', txt)))
+        self.assertEqual(txt.count("function createBulkStore"), 1, "store ta'rifi bir necha marta")
+        for role in ("student", "instructor", "admin"):
+            self.assertIn('const bulk = createBulkStore("%s", load);' % role, txt,
+                          "%s jadvali store'ga ulanmagan" % role)
+        # toggleAll va panel — store ichida, tashqarida emas
+        self.assertNotIn('onclick: toggleAll', txt)
+        # har bir jadval uch xil komponent to'liq ulangan
+        for fn in ("bulk.headerNode()", "bulk.rowNode(u)", "bulk.attach(list, res.total)"):
+            self.assertEqual(txt.count(fn), 3, "%s — 3 ta jadvalda kerak (topildi: %d)"
+                             % (fn, txt.count(fn)))
+
+    def test_V2_gold_checkbox_css(self):
+        """VAZIFA 2/C: barcha checkbox'lar oltin-sariq gradient aksentga."""
+        css = self._css()
+        # 1) gradient token bitta manba
+        self.assertIn("--gold-1: #F5A623", css)
+        self.assertIn("--gold-2: #FF8C42", css)
+        self.assertIn("--gold-grad: linear-gradient(135deg, var(--gold-1), var(--gold-2))", css)
+        # 2) checkbox to'liq qayta dizayn qilingan
+        self.assertIn('input[type="checkbox"] {', css)
+        self.assertIn("appearance: none", css, "standart brauzer checkbox'i almashtirilmagan")
+        # bo'sh holat: shaffof fon + kulrang border
+        cb_block = css[css.find('input[type="checkbox"] {'):css.find("input[type=\"checkbox\"]:disabled")]
+        self.assertIn("background: transparent", cb_block, "bo'sh checkbox shaffof emas")
+        self.assertIn("border: 1.8px solid var(--border-strong)", cb_block,
+                      "bo'sh checkbox borderi kulrang emas")
+        # belgilangan: gradient + oq "✓"
+        self.assertIn("input[type=\"checkbox\"]:checked,\ninput[type=\"checkbox\"]:indeterminate {",
+                      css)
+        chk = css[css.find('input[type="checkbox"]:checked,'):]
+        chk = chk[:chk.find("input[type=\"checkbox\"]:disabled")]
+        self.assertIn("background: var(--gold-grad)", chk, "belgilangan checkbox oltin emas")
+        self.assertIn("::after", chk, '"✓" belgisi yo\'q')
+        self.assertIn("border: solid #fff", chk, '"✓" rangi oq emas')
+        # 3) qisman holat — chiziqcha
+        self.assertIn('input[type="checkbox"]:indeterminate::after', css)
+        # 4) eski ko'k `accent-color` QOLMADI (izohlardagi eslatma hisobga olinmaydi)
+        import re as _re
+        live = _re.sub(r"/\*.*?\*/", "", css, flags=_re.S)
+        self.assertNotIn("accent-color: var(--primary)", live,
+                         "eski ko'k aksent hali ham bor")
+        # 5) toggle-switch BIR XIL manbadan
+        self.assertIn(".toggle.on", css)
+        tog = css[css.find(".toggle.on"):css.find(".toggle.on") + 400]
+        self.assertIn("var(--gold-grad)", tog, "toggle-switch boshqa rangda")
+        # 6) o'chirilgan `--primary` o'zgaruvchisi bo'lmasligi kerak
+        import re as _re
+        self.assertEqual(_re.findall(r"--primary\s*:", css), [],
+                         "bo'sh --primary hali ham aniqlangan")
+
+    def test_V2_checkbox_gold_used_everywhere(self):
+        """Checkbox uslubi GLOBAL — alohida klass emas (bitta qoida hammasiga)."""
+        css = self._css()
+        # global `input[type="checkbox"]` qoidasi bitta bor
+        self.assertEqual(css.count('input[type="checkbox"] {'), 1,
+                         "global checkbox qoidasi bir necha marta yozilgan")
+        # ommaviy ammal paneli ham oltin
+        self.assertIn(".bulk-bar {", css)
+        self.assertIn(".bulk-row-sel", css)
+        self.assertIn("var(--gold-soft)", css)
+
+    def test_MOD7_no_hardcoded_backup_in_uz(self):
+        """MODUL 7: UZ tarjimalarida inglizcha "Backup" QOLMADI."""
+        i18n = (ROOT / "web" / "js" / "i18n.js").read_text(encoding="utf-8", errors="ignore")
+        import re as _re
+        # `uz:` qiymatlarida "Backup" so'zi bo'lmasin
+        bad = _re.findall(r'"[\w.]+":\s*\{\s*uz:\s*"[^"]*\bBackup\b[^"]*"', i18n)
+        self.assertEqual(bad, [], f"UZ da 'Backup' qolgan: {bad}")
+        self.assertIn('"nav.backup": { uz: "Zaxira nusxa"', i18n)
+        self.assertIn('"backup.title": { uz: "Zaxira nusxa"', i18n)
+
+    def test_MOD7_admin_new_strings_use_i18n(self):
+        """MODUL 3/6 yangi tugma matnlari i18n orqali keladi."""
+        txt = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        i = txt.find("function createBulkStore")
+        j = txt.find("function bulkEditModal", i)
+        self.assertNotEqual(i, -1, "createBulkStore topilmadi")
+        self.assertNotEqual(j, -1, "bulkEditModal topilmadi")
+        chunk = txt[i:j]
+        for k in ("bulk.delete", "bulk.edit", "bulk.none", "bulk.deselect_all", "bulk.count"):
+            self.assertIn(k, chunk, f"{k} ishlatilmayapti (hardcoded bo'lib qolgan)")
 
 
 # ============================================================================

@@ -14,6 +14,10 @@
   /* --- LOGIN aksenti — issiq oltin gradient (#F5A623 → #FF8C42) --- */
   --gold-1: #F5A623;
   --gold-2: #FF8C42;
+  /* Bitta rang manbasi: checkbox (belgilangan holati) VA toggle-switch
+     ("on" holati) shu gradientdan olinadi — shuning uchun bir-biriga
+     o'xshaydi. VAZIFA 2 shartiga muvofiq. */
+  --gold-grad: linear-gradient(135deg, var(--gold-1), var(--gold-2));
   --gold: #E08B1C;
   --gold-ink: #241A08;      /* yorqin oltin ustidagi to'q matn */
   --gold-soft: #FBF0DC;
@@ -189,7 +193,7 @@ textarea.input { resize: vertical; min-height: 70px; }
 }
 .btn:active { transform: scale(.98); }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
-.btn-primary { background: linear-gradient(135deg, var(--gold-1), var(--gold-2)); color: var(--gold-ink);
+.btn-primary { background: var(--gold-grad); color: var(--gold-ink);
   box-shadow: 0 4px 14px rgba(245, 166, 35, .30); }
 .btn-primary:hover { filter: brightness(1.05); transform: translateY(-1px); }
 .btn-cyan { background: var(--cyan); color: #06303a; }
@@ -788,6 +792,141 @@ textarea.input { resize: vertical; min-height: 70px; }
 .cell-strong { font-weight: 700; color: var(--ink); font-size: 14px; }
 .sm { font-size: 12.5px; }
 
+/* ====================================================================
+   MODUL 2 — "Jami: N ta talaba" hisoblagichi (jadval ustida)
+   Aniq ko'rinishi uchun karta ko'rinishida, kichik o'lchamda.
+   ==================================================================== */
+.count-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 14px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--border); }
+.count-bar-n { font-weight: 800; font-size: 14px; color: var(--ink); }
+.count-bar-f { padding-left: 10px; border-left: 1px solid var(--border); }
+
+/* ====================================================================
+   MODUL 6 — OMMAVIY (BULK) AMALLAR: checkbox + panel
+   ==================================================================== */
+/* checkbox kolonkasi tor */
+.tbl th.bulk-th, .tbl td.bulk-td { width: 38px; min-width: 38px; padding-left: 12px; padding-right: 6px; }
+.bulk-cb-wrap { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+
+/* ====================================================================
+   VAZIFA 2 — OLTIN-SARIQ CHECKBOX (butun platforma bo'ylab)
+
+   Rang manbai BIR XIL: toggle-switch ham shu gradientni ishlatadi
+   (`--gold-1` → `--gold-2`), shuning uchun checkbox va toggle bir-biriga
+   o'xshaydi. Avvalgi `accent-color: var(--primary)` (ko'k) edi.
+
+   Bo'sh holat  : shaffof fon + kulrang border
+   Belgilangan : oltin-sariq gradient + oq "✓"
+
+   `appearance: none` — standart brauzer checkbox'i butunlay
+   almashtiriladi (shuning uchun `accent-color` ishlamaydi).
+   ==================================================================== */
+input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  width: 18px; height: 18px; margin: 0; flex: 0 0 auto;
+  border: 1.8px solid var(--border-strong); border-radius: 5px;
+  background: transparent; cursor: pointer; position: relative;
+  transition: background .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+input[type="checkbox"]:hover:not(:disabled) { border-color: var(--gold-1); }
+input[type="checkbox"]:focus-visible { outline: none; border-color: var(--gold-1);
+  box-shadow: 0 0 0 3px rgba(245, 166, 35, .28); }
+
+/* --- belgilangan --- */
+input[type="checkbox"]:checked,
+input[type="checkbox"]:indeterminate {
+  background: var(--gold-grad);          /* toggle-switch bilan BIR xil manba */
+  border-color: var(--gold-1);
+}
+/* oq "✓" */
+input[type="checkbox"]:checked::after {
+  content: ""; position: absolute; left: 5px; top: 1px;
+  width: 5px; height: 10px; border: solid #fff; border-width: 0 2.2px 2.2px 0;
+  transform: rotate(43deg);
+}
+/* qisman belgilangan — chiziqcha */
+input[type="checkbox"]:indeterminate::after {
+  content: ""; position: absolute; left: 3px; top: 50%;
+  width: 10px; height: 2.2px; margin-top: -1.1px;
+  background: #fff; border-radius: 2px;
+}
+input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
+
+.bulk-cb { width: 17px; height: 17px; }
+.bulk-cb-head .bulk-cb { width: 18px; height: 18px; }
+
+/* tanlangan foydalanuvchilar paneli */
+.bulk-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 14px; border-radius: 10px;
+  background: var(--gold-soft); border: 1px solid var(--gold-line); }
+.bulk-bar.hidden { display: none; }
+.bulk-bar-n { font-weight: 800; font-size: 13.5px; color: var(--gold-ink); }
+
+/* tanlangan qator yumshoq ajratiladi (oltin tus) */
+.tbl tbody tr.bulk-row-sel td { background: var(--gold-soft); }
+.tbl tbody tr.bulk-row-sel:hover td { background: #F7E7C6; }
+.tbl tbody tr.bulk-row-sel td:first-child { box-shadow: inset 3px 0 0 var(--gold-1); }
+
+/* ====================================================================
+   VAZIFA 1 — HISOBOTLAR: eksport paneli
+   ==================================================================== */
+/* --- toifa checkbox'lari (Talabalar / Instruktorlar / Adminlar) --- */
+.rep-types { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px; margin: 10px 0 4px; }
+.rep-type { display: flex; align-items: center; gap: 10px; cursor: pointer;
+  padding: 12px 14px; border-radius: 10px; font-weight: 700; font-size: 13.5px;
+  color: var(--text-primary); background: var(--surface);
+  border: 1.5px solid var(--border); transition: border-color .14s, background .14s; }
+.rep-type:hover { border-color: var(--gold-line); background: var(--gold-soft); }
+/* tanlangan toifa — oltin chegara + yumshoq fon (checkbox o'zi ham oltin) */
+.rep-type:has(input:checked) { border-color: var(--gold-1); background: var(--gold-soft);
+  box-shadow: inset 0 0 0 1px var(--gold-1); }
+.rep-type .rep-type-ico { display: inline-flex; color: var(--gold); }
+.rep-type .rep-type-ico svg { width: 17px; height: 17px; }
+
+/* --- format tanlovi (CSV / XLSX / PDF) --- */
+.rep-fmts { gap: 8px; }
+.rep-fmt { min-width: 86px; justify-content: center; letter-spacing: .04em; }
+
+/* --- ustunlar ro'yxati (rejimga qarab o'zgaradi) --- */
+.rep-cols { margin-top: 8px; font-size: 12px; line-height: 1.5; }
+.rep-cols[data-mode="creds"] { color: #8a5a00; }
+
+/* ====================================================================
+   MODUL 5 — HISOBOTLAR: format tanlash, toggle, ogohlantirish
+   ==================================================================== */
+.rep-fmt-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.rep-fmt-btn { border: 1.5px solid var(--border-strong); background: #fff; color: var(--text-secondary);
+  font: inherit; font-size: 13px; font-weight: 700; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
+.rep-fmt-btn:hover { border-color: var(--gold-1); color: var(--gold); }
+.rep-fmt-btn.on { background: var(--gold-grad); border-color: var(--gold-1); color: var(--gold-ink); }
+
+/* login/parol ogohlantirishi — QIZIL, diqqatga loyiq.
+   Ogohlantirish matni parollar OCHIQ MATN ko'rinishida bo'lishini aytadi,
+   shuning uchun u "dezert guli" emas, balki haqiqiy xavf (danger) rangida
+   bo'lishi SHART. `var(--danger)` tokeni orqali — mavzu o'zgarganda ham
+   avtomatik moslashadi. */
+.cred-warn { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0;
+  padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.5;
+  background: rgba(229, 72, 77, .09); border: 1px solid rgba(229, 72, 77, .50);
+  color: #a1252a; }
+.cred-warn svg, .cred-warn .ico { flex: 0 0 auto; width: 17px; height: 17px;
+  margin-top: 1px; color: var(--danger); }
+.cred-warn .cred-warn-t { min-width: 0; }
+[data-theme="dark"] .cred-warn { background: rgba(229, 72, 77, .16);
+  border-color: rgba(229, 72, 77, .55); color: #f2878b; }
+
+/* login/parol hisoboti — tor, monospace, ekran sarihi */
+.cred-list { display: grid; gap: 6px; max-height: 320px; overflow: auto;
+  padding: 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.cred-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center;
+  padding: 6px 8px; border-radius: 6px; background: #fff; border: 1px solid var(--border); }
+.cred-row .cred-name { font-weight: 700; color: var(--ink); }
+.cred-row .cred-group { color: var(--text-secondary); font-size: 11.5px; }
+.cred-row .cred-lp { color: var(--gold); font-weight: 700; white-space: nowrap; }
+
 /* ---- jadval / kalendar ko'rinishi ---- */
 .cal-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
   gap: 10px; margin-bottom: 16px; }
@@ -1019,7 +1158,7 @@ a:focus-visible, button:focus-visible { outline-offset: 2px; }
 .toggle .knob { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%;
   background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .28);
   transition: transform .18s cubic-bezier(.2, .7, .3, 1); }
-.toggle.on { background: linear-gradient(135deg, var(--gold-1), var(--gold-2)); border-color: var(--gold-1); }
+.toggle.on { background: var(--gold-grad); border-color: var(--gold-1); }
 .toggle.on .knob { transform: translateX(20px); }
 .toggle:disabled { opacity: .55; cursor: not-allowed; }
 [data-theme="dark"] .toggle { background: #3C4350; border-color: var(--border-strong); }

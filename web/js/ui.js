@@ -338,11 +338,10 @@ const UI = (function () {
     ]);
   }
 
-  /* MODUL 4: xarita havolasi — Yandex Maps (avval OpenStreetMap edi).
-     `MapView` `map.js` da yuklanadi va bu funksiya faqat runtime'da
-     chaqiriladi, shuning uchun yuklanish tartibi muhim emas.
-     Kalit yo'q bo'lsa ham havola ishlaydi: u oddiy Yandex URL manziliga
-     olib boradi (maxfiy kalit talab qilmaydi). */
+  /* XARITA VAQTINCHA O'CHIRILGAN — API kalit va Geosuggest to'liq sozlangandan
+     so'ng qayta yoqiladi. "Uchrashuv joyi" endi FAQAT matn sifatida
+     ko'rsatiladi, shuning uchun `mapLink` chaqirilmaydi. Funksiya va `map.js`
+     O'CHIRILMAGAN — kelajakda xaritani qaytarish uchun saqlangan. */
   function mapLink(lat, lng, label, zoom) {
     const M = (typeof MapView !== "undefined") ? MapView : null;
     if (!M || !M.isNum(lat) || !M.isNum(lng)) {

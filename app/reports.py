@@ -3,6 +3,116 @@ from datetime import datetime, timedelta
 
 from .db import now, today
 
+# ---------------------------------------------------------------------------
+# VAZIFA 1 — FOYDALANUVCHI RO'YXATI HISOBOTI (ikki rejim)
+#
+# `include_credentials=True`  -> FAQAT: Ism, Familiya, Guruh, Login, Parol.
+#                                 Boshqa HECH QANDAY ma'lumot (statistika,
+#                                 jadval, telefon, holat) QO'SHILMAYDI.
+#                                 Bu maxfiy hujjat — alohida, qisqa tarqatish
+#                                 uchun mo'ljallangan.
+# `include_credentials=False` -> TO'LIQ ma'lumot (ism, rol, guruh, telefon,
+#                                 holat, progress, mashg'ulotlar soni, ...),
+#                                 LEKIN login/parol ustunlari UMUMAN YO'Q.
+#
+# Ikkala rejim HECH QACHON aralashmaydi — qat'iy ravishda alohida funksiyalar.
+# ---------------------------------------------------------------------------
+CRED_COLUMNS = ["Ism", "Familiya", "Guruh", "Kirish", "Parol"]
+FULL_COLUMNS = ["Ism", "Familiya", "Rol", "Guruh", "Toifa", "Telefon", "Holat",
+                "Tug'ilgan_sana", "Qabul_sanasi", "Otilgan_darslar",
+                "Jami_belgilangan", "Qolgan", "Progress", "Oxirgi_kirish", "Izoh"]
+
+DEFAULT_GROUP_TARGET = 30
+
+
+def _user_rows(db, roles, include_credentials: bool):
+    """Tanlangan rollar uchun foydalanuvchi qatorlari.
+
+    `roles` — ["student", ...] ro'yxati. Bo'sh bo'lsa — uchala rol.
+    Ikkala rejim uchun umumiy ma'lumot o'qiladi, lekin ustunlar QAT'IY
+    ajratiladi: `include_credentials` True bo'lsa — FAQAT CRED_COLUMNS.
+    """
+    roles = [r for r in (roles or []) if r in ("student", "instructor", "admin")]
+    if not roles:
+        roles = ["student", "instructor", "admin"]
+    ph = ",".join("?" * len(roles))
+    where = ("u.deleted_at IS NULL AND u.role IN (%s)" % ph)
+    params = list(roles)
+
+    users = db.q(
+        """SELECT u.id, u.first_name, u.last_name, u.role, u.phone, u.status,
+                  u.birth_date, u.last_login_at, u.login, u.password_hash,
+                  u.must_change_password, u.created_at,
+                  st.id AS sid, st.group_name, st.license_category, st.enrolled_at,
+                  st.notes AS s_notes, st.total_lessons_target, st.study_status
+           FROM users u
+           LEFT JOIN students st ON st.user_id=u.id
+           WHERE %s
+           ORDER BY u.role, u.last_name, u.first_name""" % where, params)
+
+    # Bajarilgan mashg'ulotlar soni — BARCHA uchun bir so'rovda (N+1 yo'q)
+    done_map = {}
+    for p in db.q(
+        """SELECT ss.student_id AS sid, COUNT(*) AS n
+           FROM session_students ss
+           JOIN lesson_sessions ls ON ls.id=ss.session_id
+           WHERE ss.student_status='active' AND ls.status='completed'
+           GROUP BY ss.student_id"""
+    ):
+        done_map[p["sid"]] = p["n"] or 0
+
+    rows = []
+    for u in users:
+        if include_credentials:
+            # ---- REJIM A: FAQAT ism/familiya/guruh/kirish/parol ----
+            # XOM PAROL tiklanmaydi: platforma parollarni scrypt bilan
+            # hash qiladi (`password_hash`), xom qiymat hech qayerda
+            # saqlanmaydi. Shu sababli "Parol" ustunida faqat
+            # `YANGI_KERAK` belgisi chiqadi — admin "Parolni tiklash"
+            # orqali YENGI parol yaratishi mumkin (eski parol o'chadi).
+            # Boshqacha qilsak, HECH QANDAY yolg'on ma'lumot ko'rsatilardi.
+            rows.append({
+                "Ism": u["first_name"] or "",
+                "Familiya": u["last_name"] or "",
+                "Guruh": u["group_name"] or "",
+                "Kirish": u["login"] or "",
+                "Parol": "YANGI_KERAK",
+            })
+            continue
+
+        # ---- REJIM B: TO'LIQ ma'lumot, login/parol YO'Q ----
+        done = done_map.get(u["sid"] or 0, 0)
+        target = int(u["total_lessons_target"] or 0) or DEFAULT_GROUP_TARGET
+        remaining = max(0, target - done)
+        rows.append({
+            "Ism": u["first_name"] or "",
+            "Familiya": u["last_name"] or "",
+            "Rol": u["role"] or "",
+            "Guruh": u["group_name"] or "",
+            "Toifa": u["license_category"] or "",
+            "Telefon": u["phone"] or "",
+            "Holat": u["status"] or "",
+            "Tug'ilgan_sana": u["birth_date"] or "",
+            "Qabul_sanasi": u["enrolled_at"] or "",
+            "Otilgan_darslar": done,
+            "Jami_belgilangan": target,
+            "Qolgan": remaining,
+            "Progress": (round(done * 100 / target) if target else 0),
+            "Oxirgi_kirish": u["last_login_at"] or "",
+            "Izoh": (u["s_notes"] or "")[:300],
+        })
+    return rows
+
+
+def user_report(db, roles, include_credentials: bool) -> tuple:
+    """(qatorlar, sarlavha) — foydalanuvchi ro'yxati hisoboti."""
+    rows = _user_rows(db, roles, include_credentials)
+    if include_credentials:
+        return rows, "Login va parollar"
+    parts = {"student": "Talabalar", "instructor": "Instruktorlar", "admin": "Adminlar"}
+    names = [parts.get(r, r) for r in (roles or [])]
+    return rows, ("Foydalanuvchilar - " + ", ".join(names) if names else "Foydalanuvchilar")
+
 
 def _range(query) -> tuple:
     period = query.get("period", "daily")

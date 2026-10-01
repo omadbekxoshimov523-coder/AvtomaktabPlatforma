@@ -4,7 +4,7 @@
 window.AdminViews = (function () {
   const { t, fmtDate, fmtDateTime, errorText, monthShort } = I18N;
   const UI = window.UI;
-  const { el, toast, errToast, badge, statusText, avatar, carPhoto, field, input, select, modal, emptyState, spinner, confirmDialog, callLink, mapLink, timeline, checklist, notifMini } = UI;
+  const { el, toast, errToast, badge, statusText, avatar, carPhoto, field, input, select, modal, emptyState, spinner, confirmDialog, callLink, mapLink, timeline, checklist, notifMini, toggleRow } = UI;
 
   /* Rol nomini tarjima qilish (BAND 22: profil kartochkasida ishlatiladi). */
   function roleName(role) {
@@ -168,8 +168,11 @@ window.AdminViews = (function () {
           onclick: () => Shared.openUserForm("instructor") }),
         el("button", { class: "btn btn-light", text: "⚡ " + t("student.bulk"),
           onclick: () => bulkModal() }),
-        el("button", { class: "btn btn-light", icon: "download", text: "" + t("student.import"),
-          onclick: () => importModal() }),
+        /* MODUL 3: "Import CSV" BUTUNLAY OLIB TASHLANDI — endi faqat
+           "Hisobotlar" bo'limida (Hisobotlar > Import tab). */
+        el("button", { class: "btn btn-light", icon: "chart",
+          title: t("base.go_reports_hint"), text: "" + t("base.go_reports"),
+          onclick: () => goReportsFor("") }),
       ]),
     ]);
     const tblHost = el("div", { id: "users-table", });
@@ -248,7 +251,7 @@ window.AdminViews = (function () {
 
   function bulkModal() {
     const countI = select({ "10": "10", "50": "50", "100": "100", "500": "500", "1000": "1000" }, "10");
-    const m = modal("⚡ " + t("nav.students") + " — Bulk", [
+    const m = modal("⚡ " + t("student.bulk"), [
       field(t("student.bulk") + " — " + t("common.count"), countI),
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
@@ -305,6 +308,294 @@ window.AdminViews = (function () {
           } }),
       ]),
     ]);
+  }
+
+  /* =====================================================================
+     MODUL 6 — OMMAVIY (BULK) AMALLAR uchun umumiy yordamchilar.
+
+     ---------------------------------------------------------------------
+     VAZIFA 2 — tuzatilgan uchta xato:
+     ---------------------------------------------------------------------
+     1) "N ta tanlandi" HISOBLAGICH CHIQMAYDI.
+        Sabab: eski kodda `const n = sel.size` — bu panel YARATILGANDA bir
+        marta o'qlanardi. Keyin `Set` o'zgarsa ham mahalliy `n` eski
+        qiymatda (0) qolardi. Endi har render'da `state.size` QAYTA O'QILADI.
+
+     2) "HAMMASINI TANLASH" HECH KIMNI BELGILAMAYDI.
+        Sabab: `sel` ga ID qo'shilardi, lekin QATOR checkbox'larining
+        `checked` holati yangilanmasdi — tanlangan qatorlar ko'rinmay qolardi.
+        Endi `paint()` barcha qator checkbox'ini, qator fonini va sarlavha
+        checkbox'ini (`checked` + `indeterminate`) BIR VAQTDA yangilaydi.
+
+     3) STATE TO'G'RI YANGILANMASDI.
+        Sabab: `Set` to'g'ridan-to'g'ri mutatsiya qilinardi (`.add()`) —
+        yangi obyekt yaratilmasdi, shuning uchun render ishonchli emasdi.
+        Endi `ids` — IMMUTABIl massiv: har o'zgarishda `concat`/`filter`
+        bilan YANGI massiv yaratiladi va obyekt bo'yicha obunalar xabardor
+        qilinadi (`.subscribe`).
+
+     Tuzilma: `createSelection()` — immutabil tanlov holati.
+              `createBulkStore()` — jadval + panel + sarlavha checkbox'ini
+              BIR obyektda birlashtiradi (yagona manba: `state`).
+     ===================================================================== */
+
+  /* ---------------------------------------------------------------------
+     1) Tanlov holati — immutabil `ids` + obyekt bo'yicha obuna.
+        `ids` hech qachon to'g'ridan-to'g'ri o'zgartirilmaydi: har bir
+        o'zgarish `concat`/`filter` bilan YANGI massiv yaratadi.
+     --------------------------------------------------------------------- */
+  function createSelection() {
+    let ids = [];
+    const subs = [];
+    function notify() {
+      subs.slice().forEach((f) => {
+        try { f(ids); }
+        catch (e) {
+          /* Bitta obuna xatosi qolganlarini to'xtatmasin — lekin YASHIRILMAYdi:
+             konsolga chiqariladi (jim qoldirish xatolarni topib bo'lmaydi). */
+          if (typeof console !== "undefined" && console.error) console.error("[bulk] obuna xatosi:", e);
+        }
+      });
+    }
+    return {
+      /* YANGI massiv qaytariladi (mutation yo'q) */
+      get ids() { return ids; },
+      get size() { return ids.length; },
+      has(id) { return ids.indexOf(id) !== -1; },
+      subscribe(fn) { subs.push(fn); return fn; },
+      /* YANGI obyekt yaratib yangilash + bildirishnoma */
+      set(next) {
+        const a = Array.from(new Set(next));
+        if (a.length === ids.length && a.every((x, k) => x === ids[k])) return false;
+        ids = a;
+        notify();
+        return true;
+      },
+      add(id) { return this.set(ids.concat([id])); },
+      remove(id) { return this.set(ids.filter((x) => x !== id)); },
+      toggle(id) { return this.has(id) ? this.remove(id) : this.add(id); },
+      clear() { return this.set([]); },
+      /* joriy ro'yxatning BARCHASI */
+      allOf(list) { return this.set((list || []).map((u) => u.id)); },
+      /* berilgan ro'yxatdagilarni tanlovdan OLIB TASHLAYDI
+         ("hammasini tanlash"ni bekor qilish uchun) */
+      except(list) { return this.set(ids.filter((x) => !(list || []).some((u) => u.id === x))); },
+      /* faqat berilgan ro'yxatdagilarni SAQLAB QOLADI, qolganini chiqaradi
+         (filtr o'zgarganda ishlatiladi — aks holda panel yolg'on son ko'rsatadi) */
+      only(list) {
+        const inList = (list || []).map((u) => u.id);
+        return this.set(ids.filter((x) => inList.indexOf(x) !== -1));
+      },
+    };
+  }
+
+  /* ---------------------------------------------------------------------
+     2) Omma-viy ammalar "do'koni" — jadval, panel va sarlavha checkbox'ini
+        bitta obyektda birlashtiradi.
+
+        `roleKey` — student|instructor|admin (modal ogohlantirishi uchun)
+        `onReload` — ro'yxatni qayta yuklash
+        --------------------------------------------------------------------- */
+  function createBulkStore(roleKey, onReload) {
+    const state = createSelection();
+    const rowCbs = new Map();   /* id -> checkbox element (registry) */
+    const subs = [];            /* qayta chizishni xohlaydigan komponentlar */
+    let list = [];              /* joriy filtrlangan ro'yxat */
+    let total = 0;              /* server javobidagi umumiy son */
+    let head = null;            /* sarlavhadagi "Hammasini tanlash" checkbox */
+
+    /* --- birinchi manba: tanlanganlar o'zgarganda BUTUN DOM yangilanadi --- */
+    function paint() {
+      let inList = 0;
+      list.forEach((u) => {
+        const on = state.has(u.id);
+        if (on) inList++;
+        const cb = rowCbs.get(u.id);
+        if (cb) {
+          cb.checked = on;
+          const tr = cb.closest ? cb.closest("tr") : null;
+          if (tr) tr.classList.toggle("bulk-row-sel", on);
+        }
+      });
+      if (head) {
+        /* hammasi tanlangan / hech biri / qisman (chiziqcha) */
+        const all = list.length > 0 && inList === list.length;
+        head.checked = all;
+        head.indeterminate = inList > 0 && !all;
+        head.setAttribute("aria-checked", all ? "true" : "false");
+      }
+      subs.slice().forEach((f) => {
+        try { f(state); }
+        catch (e) { if (typeof console !== "undefined" && console.error) console.error("[bulk] panel xatosi:", e); }
+      });
+    }
+    state.subscribe(paint);
+
+    /* --- sarlavhadagi "Hammasini tanlash" --- */
+    function toggleAll() {
+      const all = list.length > 0 && list.every((u) => state.has(u.id));
+      /* TOGGLE: hammasi tanlangan bo'lsa -> hammasi bekor; aks holda -> hammasi tanla.
+         `head.checked` ga emas shu holatga qaraymiz — u har doim `paint()`
+         dan keyin to'g'ri qiymatga ega. */
+      if (all) { state.except(list); return; }
+      if (total > list.length) {
+        /* Server chegarasidan uzun ro'yxat — foydalanuvchi onayini olamiz. */
+        confirmDialog(t("bulk.confirm_all", { n: total }), () => { state.allOf(list); },
+          { danger: false, title: t("bulk.select_all") });
+        return;
+      }
+      state.allOf(list);
+    }
+
+    const api = {
+      state: state,
+      /* Jadval qayta qurilganda ro'yxatni ulaydi (render dan oldin) */
+      attach(next, serverTotal) {
+        list = next || [];
+        total = typeof serverTotal === "number" ? serverTotal : list.length;
+        /* Endi ko'rinmaydigan qatorlar tanlangan bo'lsa — chiqariladi
+           (aks holda panel yalg'on son ko'rsatadi).
+           `only` ishlatiladi, `except` EMAS: `except` — ko'rsatilganlarni
+           olib tashlaydi (teskari ma'no) va butun tanlovni bo'shatib yuborardi. */
+        state.only(list);
+        paint();
+        return api;
+      },
+      /* Sarlavha checkbox'i */
+      headerNode() {
+        head = el("input", { type: "checkbox", class: "bulk-cb bulk-cb-head", "aria-label": t("bulk.select_all") });
+        head.addEventListener("change", toggleAll);
+        return el("label", { class: "bulk-cb-wrap bulk-cb-head", title: t("bulk.select_all") }, [head]);
+      },
+      /* Bir qator checkbox'i (registry'ga yoziladi) */
+      rowNode(u) {
+        const cb = el("input", { type: "checkbox", class: "bulk-cb", "aria-label": t("bulk.pick") });
+        cb.checked = state.has(u.id);
+        cb.addEventListener("change", () => {
+          /* immutabil o'zgarish -> paint() -> panel + qator + sarlavha */
+          state.toggle(u.id);
+          cb.checked = state.has(u.id);   /* yagona manbadan qayta o'rnatish */
+        });
+        rowCbs.set(u.id, cb);
+        return el("label", { class: "bulk-cb-wrap" }, [cb]);
+      },
+      /* Ammalar paneli — "N ta tanlandi" + o'chirish/tahrirlash/bekor */
+      actionsNode() {
+        const bar = el("div", { class: "bulk-bar" });
+        subs.push((st) => {
+          const n = st.size;      /* <<< HAR RENDER'DA QAYTA O'QILADI */
+          bar.innerHTML = "";
+          if (n === 0) {
+            bar.classList.remove("hidden");
+            bar.append(el("span", { class: "muted sm", text: t("bulk.none") }));
+            return;
+          }
+          bar.classList.remove("hidden");
+          bar.append(el("strong", { class: "bulk-bar-n", text: t("bulk.count", { n: n }) }));
+          /* --- ommaviy o'chirish (tasdiqlash bilan) --- */
+          bar.append(el("button", {
+            class: "btn btn-danger btn-sm", icon: "trash", text: "" + t("bulk.delete"),
+            onclick: () => confirmDialog(t("bulk.confirm_delete", { n: n }), async () => {
+              try {
+                const r = await API.post("admin/users/bulk-delete", { ids: st.ids });
+                state.clear();
+                toast(t("bulk.deleted", { n: (r && r.deleted != null) ? r.deleted : n }));
+                onReload();
+              } catch (e) { errToast(e); }
+            }, { danger: true }),
+          }));
+          /* --- ommaviy tahrirlash (umumiy maydonlar) --- */
+          bar.append(el("button", {
+            class: "btn btn-cyan btn-sm", icon: "edit", text: "" + t("bulk.edit"),
+            onclick: () => bulkEditModal(st.ids, list, onReload, roleKey),
+          }));
+          /* --- hammasini bekor qilish --- */
+          bar.append(el("button", {
+            class: "btn btn-light btn-sm", text: "" + t("bulk.deselect_all"),
+            onclick: () => { state.clear(); },
+          }));
+        });
+        paint();
+        return bar;
+      },
+      /* Faqat o'qish uchun: hozirgi ro'yxat */
+      get list() { return list; },
+    };
+    return api;
+  }
+
+  /* MODUL 2 — "Jami: N ta <rol>" hisoblagichi.
+     `res` = backend javobi ({total, shown, filtered, limited}).
+     `roleKey` = "student"|"instructor"|"admin" (birlik so'zi uchun). */
+  function countBar(res, roleKey, unitKey) {
+    const n = (res && typeof res.total === "number") ? res.total
+      : ((res && res.users && res.users.length) || 0);
+    const what = t(unitKey);
+    const bar = el("div", { class: "count-bar" }, [
+      el("span", { class: "count-bar-n", text: t("base.count", { n: n, what: what }) }),
+    ]);
+    if (res && res.filtered) {
+      bar.append(el("span", { class: "count-bar-f muted sm", text: t("base.count_filtered", { n: n }) }));
+    }
+    return bar;
+  }
+
+  /* MODUL 6 — ommaviy tahrirlash modali (umumiy maydonlar). */
+  function bulkEditModal(ids, list, onDone, roleOf) {
+    /* Rol aniqlanadi: tanlanganlar bitta rolda bo'lishi SHART (chunki
+       turli rolli aralashsa maydonlar mos kelmaydi). */
+    const roles = {};
+    ids.forEach((id) => { const u = list.find((x) => x.id === id); if (u) roles[u.role] = 1; });
+    const roleKeys = Object.keys(roles);
+    if (roleKeys.length !== 1) {
+      return errToast({ code: "bulk.mixed_roles" });
+    }
+    const role = roleKeys[0];
+    const f = {
+      status: select({
+        "": t("common.all"),
+        active: t("student.status.active"),
+        blocked: t("stat.blocked"),
+      }),
+      group_name: input({ placeholder: t("bulk.edit_group") }),
+      license_category: input({ placeholder: t("bulk.edit_category") }),
+      notes: input({ placeholder: t("bulk.edit_notes") }),
+    };
+    const hint = el("p", { class: "field-hint", text: t("bulk.edit_hint") });
+    const m = modal(t("bulk.edit_title") + " — " + t("bulk.count", { n: ids.length }), [
+      el("p", { class: "muted sm", text: t("bulk.pick") + ": " + t("rep.type." + (role === "student" ? "students" : role === "instructor" ? "instructors" : "admins")) }),
+      field(t("bulk.edit_status"), f.status),
+      /* Guruh va toifa faqat talaba/instruktor uchun mantiqli. */
+      role === "student" ? field(t("bulk.edit_group"), f.group_name) : null,
+      role === "student" ? field(t("bulk.edit_category"), f.license_category) : null,
+      role !== "admin" ? field(t("bulk.edit_notes"), f.notes) : null,
+      hint,
+      el("div", { class: "row end mt" }, [
+        el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
+        el("button", { class: "btn btn-primary", text: "" + t("common.save"),
+          onclick: async () => {
+            const payload = { ids: ids };
+            if (f.status.value) payload.status = f.status.value;
+            if (f.group_name.value) payload.group_name = f.group_name.value;
+            if (f.license_category.value) payload.license_category = f.license_category.value;
+            if (f.notes.value) payload.notes = f.notes.value;
+            if (Object.keys(payload).length === 1) { m.close(); return; }
+            try {
+              const r = await API.post("admin/users/bulk-update", payload);
+              toast(t("bulk.done", { n: r.updated != null ? r.updated : ids.length }));
+              m.close(); onDone();
+            } catch (e) { errToast(e); }
+          } }),
+      ]),
+    ]);
+  }
+
+  /* =====================================================================
+     MODUL 3 — "Hisobot" tugmasi: Baza bo'limidan Hisobotlar bo'limiga
+     o'tadi va ochiq toifa (tab) oldindan tanlangan holda ochiladi.
+     ===================================================================== */
+  function goReportsFor(role) {
+    App.go("reports", { tab: role === "student" ? "students" : role === "instructor" ? "instructors" : "admins" });
   }
 
   /* ============================ TALABALAR ============================ */
@@ -570,7 +861,17 @@ window.AdminViews = (function () {
       class: "btn btn-primary", icon: "plus", text: "" + t("student.add"),
       onclick: () => Shared.openUserForm("student"),
     });
-    host.append(el("div", { class: "row between mb" }, [searchI, addB]));
+    /* MODUL 3: "Import CSV" Baza bo'limidan OLIB TASHLANGAN, o'rniga
+       "Hisobot" — Hisobotlar bo'limiga o'tadi (toifa tanlangan holda). */
+    const repB = el("button", {
+      class: "btn btn-light", icon: "chart", title: t("base.go_reports_hint"),
+      text: "" + t("base.go_reports"),
+      onclick: () => goReportsFor("student"),
+    });
+    /* MODUL 6: tanlangan foydalanuvchilar (Set) + panel. */
+    /* VAZIFA 2: yangi store — immutabil state + avtomatik DOM yangilanishi */
+    const bulk = createBulkStore("student", load);
+    const bulkBar = bulk.actionsNode();
 
     async function load() {
       host.innerHTML = "";
@@ -578,10 +879,16 @@ window.AdminViews = (function () {
       const res = await API.get("admin/users?role=student&q=" + encodeURIComponent(searchI.value));
       const list = res.users.filter((u) => !u.deleted_at);
       host.innerHTML = "";
-      host.append(el("div", { class: "row between mb" }, [searchI, addB]));
+      /* MODUL 2: "Jami: N ta talaba" — filtrga mos yangilanadi. */
+      host.append(countBar(res, "student", "base.unit.student"));
+      host.append(el("div", { class: "row between mb" }, [searchI, el("div", { class: "row gap-sm" }, [repB, addB])]));
+      host.append(bulkBar);
       if (!list.length) { host.append(emptyState("👨‍🎓", t("users.empty_student"))); return; }
+      /* MODUL 6: panelga joriy ro'yxatni beramiz (modal topish uchun). */
+      bulk.attach(list, res.total);
 
       const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
+        el("th", { class: "bulk-th" }, [bulk.headerNode()]),
         el("th", { text: t("common.name") }),
         el("th", { text: t("student.group") }),
         el("th", { text: t("student.category") }),
@@ -596,7 +903,9 @@ window.AdminViews = (function () {
            `remaining` = qolgan — hammasi DB'dan. */
         const pr = u.progress || { done: 0, total: 0, target: 0, remaining: 0, pct: 0, mode: "group" };
         const names = (u.instructors || []).map((x) => x.name);
-        return el("tr", {}, [
+        return el("tr", { "data-uid": String(u.id) }, [
+          /* MODUL 6: qator checkbox */
+          el("td", { class: "bulk-td" }, [bulk.rowNode(u)]),
           el("td", {}, [el("div", { class: "user-cell row-click", onclick: () => openUserProfile(u.id, load) }, [avatar(u, 34), el("div", {}, [
             el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
             el("div", { class: "muted", text: u.login })])])]),
@@ -639,7 +948,14 @@ window.AdminViews = (function () {
       class: "btn btn-primary", icon: "plus", text: "" + t("instructor.add"),
       onclick: () => Shared.openUserForm("instructor"),
     });
-    host.append(el("div", { class: "row between mb" }, [searchI, addB]));
+    const repB = el("button", {
+      class: "btn btn-light", icon: "chart", title: t("base.go_reports_hint"),
+      text: "" + t("base.go_reports"),
+      onclick: () => goReportsFor("instructor"),
+    });
+    /* VAZIFA 2: yangi store — immutabil state + avtomatik DOM yangilanishi */
+    const bulk = createBulkStore("instructor", load);
+    const bulkBar = bulk.actionsNode();
 
     async function load() {
       host.innerHTML = "";
@@ -647,10 +963,14 @@ window.AdminViews = (function () {
       const res = await API.get("admin/users?role=instructor&q=" + encodeURIComponent(searchI.value));
       const list = res.users.filter((u) => !u.deleted_at);
       host.innerHTML = "";
-      host.append(el("div", { class: "row between mb" }, [searchI, addB]));
+      host.append(countBar(res, "instructor", "base.unit.instructor"));
+      host.append(el("div", { class: "row between mb" }, [searchI, el("div", { class: "row gap-sm" }, [repB, addB])]));
+      host.append(bulkBar);
       if (!list.length) { host.append(emptyState("🚗", t("users.empty_instructor"))); return; }
+      bulk.attach(list, res.total);
 
       const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
+        el("th", { class: "bulk-th" }, [bulk.headerNode()]),
         el("th", { text: t("common.name") }),
         el("th", { text: t("users.students_count") }),
         el("th", { text: t("users.car") }),
@@ -661,7 +981,8 @@ window.AdminViews = (function () {
       ])]), el("tbody", {}, list.map((u) => {
         const car = u.car || null;
         const inst = u.instructor || {};
-        return el("tr", {}, [
+        return el("tr", { "data-uid": String(u.id) }, [
+          el("td", { class: "bulk-td" }, [bulk.rowNode(u)]),
           el("td", {}, [el("div", { class: "user-cell" }, [avatar(u, 34), el("div", {}, [
             el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
             el("div", { class: "muted", text: u.login })])])]),
@@ -693,11 +1014,21 @@ window.AdminViews = (function () {
   /* ------------------------------ ADMINLAR ------------------------------ */
   function adminsTable(host) {
     const searchI = userSearchBox(t("users.search_admin"));
+    const repB = el("button", {
+      class: "btn btn-light", icon: "chart", title: t("base.go_reports_hint"),
+      text: "" + t("base.go_reports"),
+      onclick: () => goReportsFor("admin"),
+    });
+    /* VAZIFA 2: yangi store — immutabil state + avtomatik DOM yangilanishi */
+    const bulk = createBulkStore("admin", load);
+    const bulkBar = bulk.actionsNode();
     const bar = el("div", { class: "row between mb" }, [
       searchI,
-      el("span", { class: "muted sm", text: t("users.admins_hint") }),
+      el("div", { class: "row gap-sm" }, [
+        repB,
+        el("span", { class: "muted sm", text: t("users.admins_hint") }),
+      ]),
     ]);
-    host.append(bar);
 
     async function load() {
       host.innerHTML = "";
@@ -705,16 +1036,21 @@ window.AdminViews = (function () {
       const res = await API.get("admin/users?role=admin&q=" + encodeURIComponent(searchI.value));
       const list = res.users.filter((u) => !u.deleted_at);
       host.innerHTML = "";
+      host.append(countBar(res, "admin", "base.unit.admin"));
       host.append(bar);
+      host.append(bulkBar);
       if (!list.length) { host.append(emptyState("🛡️", t("users.empty_admin"))); return; }
+      bulk.attach(list, res.total);
 
       const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
+        el("th", { class: "bulk-th" }, [bulk.headerNode()]),
         el("th", { text: t("common.name") }),
         el("th", { text: t("users.perms") }),
         el("th", { text: t("users.last_login") }),
         el("th", { text: t("common.phone") }),
         el("th", { text: t("common.status") }),
-      ])]), el("tbody", {}, list.map((u) => el("tr", {}, [
+      ])]), el("tbody", {}, list.map((u) => el("tr", { "data-uid": String(u.id) }, [
+        el("td", { class: "bulk-td" }, [bulk.rowNode(u)]),
         el("td", {}, [el("div", { class: "user-cell" }, [avatar(u, 34), el("div", {}, [
           el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
           el("div", { class: "muted", text: u.login })])])]),
@@ -1220,17 +1556,92 @@ window.AdminViews = (function () {
     ]);
   }
 
-  /* ============================ HISOBOTLAR ============================ */
-  async function reports() {
-    const wrap = el("div", {}, []);
+  /* =====================================================================
+     HISOBOTLAR (VAZIFA 1)
+
+     Uchta tab:
+       1) rep.tab.data   — statistik ko'rsatkichlar (avvalgi funksiya)
+       2) rep.tab.creds  — foydalanuvchi ro'yxati eksporti
+       3) rep.tab.import — CSV import
+
+     Eksport paneli: toifa checkbox'lari (alohida yoki birgalikda),
+     format (CSV/XLSX/PDF) va "login/parol" toggle-switch.
+
+     XAVFSIZLIK: toggle YOQILGAN bo'lsa, backend FAQAT
+     (Ism, Familiya, Guruh, Login, Parol) ustunlarini qaytaradi —
+     statistika/jadval umuman qo'shilmaydi. Toggle O'CHIRILGAN bo'lsa,
+     to'liq ma'lumot chiqadi, lekin login/parol ustunlari BO'LMAYDI.
+     Ikki rejim hech qachon aralashmaydi (backend'da qat'iy ajratilgan).
+     ===================================================================== */
+  const REP_ROLES = [
+    { key: "student", label: "rep.type.students", icon: "users" },
+    { key: "instructor", label: "rep.type.instructors", icon: "instructor" },
+    { key: "admin", label: "rep.type.admins", icon: "shield" },
+  ];
+  const REP_FORMATS = [
+    { key: "csv", label: "rep.fmt.csv" },
+    { key: "xlsx", label: "rep.fmt.xlsx" },
+    { key: "pdf", label: "rep.fmt.pdf" },
+  ];
+
+  async function reports(params) {
+    const wrap = el("div", {});
+    const tabs = el("div", { class: "tabs mb" });
+    const host = el("div", {});
+    let tab = (params && params.tab === "creds") ? "creds"
+            : (params && params.tab === "import") ? "import" : "data";
+    /* Baza sahifasidan "Hisobot" tugmasi bilan kelganda toifa avtomatik
+       tanlanadi (goReportsFor) — shunda foydalanuvchi hech narsa bosmaydi. */
+    const preset = (params && (params.tab === "students" || params.tab === "instructors" || params.tab === "admins"))
+      ? [{ students: "student", instructors: "instructor", admins: "admin" }[params.tab]] : [];
+
+    const TABS = [
+      { key: "data", label: "rep.tab.data" },
+      { key: "creds", label: "rep.tab.creds" },
+      { key: "import", label: "rep.tab.import" },
+    ];
+    function renderTabs() {
+      tabs.innerHTML = "";
+      TABS.forEach((tb) => {
+        tabs.append(el("button", {
+          class: "tab" + (tb.key === tab ? " active" : ""),
+          text: "" + t(tb.label),
+          onclick: () => { tab = tb.key; renderTabs(); renderHost(); },
+        }));
+      });
+    }
+    function renderHost() {
+      host.innerHTML = "";
+      if (tab === "data") host.append(statsPanel());
+      else if (tab === "creds") host.append(exportPanel(preset));
+      else host.append(importPanel());
+    }
+    wrap.append(tabs, host);
+    renderTabs();
+    renderHost();
+    return wrap;
+  }
+
+  /* ---------------- 1) statistik ko'rsatkichlar paneli ---------------- */
+  /* Bir statistik karta (ikonka + qiymat + yorliq). */
+  function stat(ic, l, v) {
+    return el("div", { class: "stat-card" }, [
+      el("div", { class: "stat-icon", icon: ic }),
+      el("div", {}, [el("div", { class: "stat-value", text: String(v) }),
+        el("div", { class: "stat-label", text: l })]),
+    ]);
+  }
+
+  function statsPanel() {
+    const p = el("div", {});
     const periodSel = select({ daily: t("report.period.daily"), weekly: t("report.period.weekly"), monthly: t("report.period.monthly") }, "daily");
     const fromI = input({ type: "date" });
     const toI = input({ type: "date" });
     const host = el("div", {});
     const exportBar = el("div", { class: "row mb" });
-    wrap.append(el("div", { class: "row mb wrap" }, [periodSel, field("", fromI), field("", toI),
+    p.append(el("div", { class: "row mb wrap" }, [periodSel, field("", fromI), field("", toI),
       el("button", { class: "btn btn-primary", icon: "chart", text: "" + t("report.title"), onclick: load })]));
-    wrap.append(exportBar, host);
+    p.append(exportBar, host);
 
     async function load() {
       host.innerHTML = ""; host.append(spinner());
@@ -1247,45 +1658,203 @@ window.AdminViews = (function () {
         stat("alert_circle", t("report.absent"), m.absent), stat("users", t("stat.students"), m.students),
       ]);
       const ins = el("div", { class: "card" }, [
-        el("h3", { icon: "instructor", text: "" + t("report.per_instructor") }),
-        el("div", { class: "mt" }),
+        el("h3", { icon: "instructor", text: "" + t("report.per_instructor") }), el("div", { class: "mt" }),
       ]);
-      res.per_instructor.forEach(([name, v]) => ins.append(el("div", { class: "kv" }, [
-        el("span", { class: "k", text: name }), el("span", { class: "v", text: `${v.sessions} ${t("report.sessions").toLowerCase()} · ${v.completed} ✅` })])));
+      res.per_instructor.forEach(([name, v]) => ins.append(
+        el("div", { class: "kv" }, [el("span", { class: "k", text: name }), el("span", { class: "v", text: `${v.sessions} ${t("report.sessions").toLowerCase()} · ${v.completed} ✅` })])));
       const carR = el("div", { class: "card" }, [
         el("h3", { icon: "car", text: "" + t("report.per_car") }), el("div", { class: "mt" }),
       ]);
       res.per_car.forEach(([k, v]) => carR.append(el("div", { class: "kv" }, [el("span", { class: "k", text: k }), el("span", { class: "v", text: `${v.sessions}` })])));
       host.append(grid, el("div", { class: "grid-2 mt" }, [ins, carR]));
 
-      // eksport tugmalari
+      /* --- mashg'ulotlar hisoboti eksporti (eski funksiya saqlangan) --- */
       exportBar.innerHTML = "";
       exportBar.append(el("span", { class: "field-label", text: t("report.export") + ":" }));
-      ["csv", "xlsx", "pdf"].forEach((fmt) => {
-        exportBar.append(el("button", { class: "btn btn-light btn-sm", text: fmt.toUpperCase(),
-          onclick: async () => {
+      REP_FORMATS.forEach(({ key: fmt }) => {
+        exportBar.append(el("button", { class: "btn btn-light btn-sm", text: t("rep.fmt." + fmt),
+          onclick: async (ev) => {
+            const b = ev.currentTarget;
+            b.disabled = true;
             try {
-              // Backend download kaliti bilan to'g'ridan-to'g'ri fayl yuboradi (server.py _dispatch_response)
-              // -> API klienti Blob qaytaradi (kontent-tip fayl turi, JSON emas)
               const q2 = new URLSearchParams({ report: "sessions", format: fmt, period: periodSel.value });
               if (fromI.value) q2.set("from", fromI.value);
               if (toI.value) q2.set("to", toI.value);
               const blob = await API.get("admin/export?" + q2.toString());
               if (!(blob instanceof Blob)) throw new Error("err.server_error");
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              const name = "hisobot." + (fmt === "pdf" ? "html" : fmt);
-              a.download = name;
-              document.body.appendChild(a); a.click();
-              setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 400);
+              saveBlob(blob, "mashgulotlar." + fmt);
+              toast(t("rep.exported"));
             } catch (e) { errToast(e); }
+            finally { b.disabled = false; }
           } }));
       });
     }
-    function stat(ic, l, v) { return el("div", { class: "stat-card" }, [el("div", { class: "stat-icon", icon: ic }), el("div", {}, [el("div", { class: "stat-value", text: String(v) }), el("div", { class: "stat-label", text: l })])]); }
     load();
-    return wrap;
+    return p;
+  }
+
+  /* ---------------- 2) foydalanuvchi ro'yxati eksporti ---------------- */
+  function exportPanel(preset) {
+    const p = el("div", { class: "card" });
+    /* --- holat: yangi obyekt, har o'zgarishda YANGI qiymat --- */
+    const state = { roles: new Set(preset || []), format: "csv", creds: false, loading: false };
+
+    const typeBox = el("div", { class: "rep-types" });
+    const fmtBox = el("div", { class: "row wrap mb rep-fmts" });
+    const dlBtn = el("button", { class: "btn btn-primary", icon: "download", text: "" + t("common.download") });
+    const hintBox = el("div", {});
+    const colBox = el("div", { class: "rep-cols muted" });
+
+    /* --- toifa checkbox'lari --- */
+    REP_ROLES.forEach((r) => {
+      const cb = el("input", { type: "checkbox", class: "rep-cb", id: "reptype-" + r.key });
+      cb.checked = state.roles.has(r.key);
+      cb.addEventListener("change", () => {
+        /* .add/.delete mutatsiya — render qayta ishga tushishi uchun
+           quyidagi `sync()` chaqiriladi. */
+        if (cb.checked) state.roles.add(r.key); else state.roles.delete(r.key);
+        sync();
+      });
+      typeBox.append(el("label", { class: "rep-type", for: "reptype-" + r.key }, [
+        cb, el("span", { class: "rep-type-ico", icon: r.icon }), el("span", { text: "" + t(r.label) }),
+      ]));
+    });
+
+    /* --- format tugmalari --- */
+    REP_FORMATS.forEach(({ key, label }) => {
+      const b = el("button", {
+        class: "btn btn-light btn-sm rep-fmt", text: "" + t(label),
+        dataset: { fmt: key },
+        onclick: () => { state.format = key; sync(); },
+      });
+      fmtBox.append(b);
+    });
+
+    /* --- login/parol toggle-switch ---
+       Faqat `toggleRow` ichidagi switch ishlatiladi (u ham `toggleSwitch`dan
+       quriladi). Alohida `toggleSwitch` nusxasi yaratilmaydi — aks holda
+       ikkita boshqaruvchi bo'lardi va ulardan biri hech qachon ko'rinmasdi. */
+    p.append(
+      el("h3", { class: "mb", icon: "chart", text: "" + t("rep.pick_types") }),
+      el("p", { class: "field-hint", text: "" + t("rep.pick_types_hint") }),
+      typeBox,
+      el("h4", { class: "card-title mt", text: "" + t("report.export") }),
+      fmtBox,
+      el("div", { class: "cred-list" }, [
+        toggleRow({ title: t("rep.cred_toggle"), desc: t("rep.cred_toggle_hint"), checked: state.creds, onChange: (on) => { state.creds = on; sync(); } }),
+      ]),
+      hintBox, colBox,
+      el("div", { class: "row end mt" }, [dlBtn]),
+    );
+
+    /* toggle`ning ikki nusxasi emas — faqat toggleRow ichidagi switch ishlatiladi */
+
+    dlBtn.addEventListener("click", generate);
+
+    /* ustunlar ro'yxati + ogohlantirish — rejimga qarab o'zgaradi */
+    function sync() {
+      fmtBox.querySelectorAll(".rep-fmt").forEach((b) => {
+        b.classList.toggle("btn-primary", b.dataset.fmt === state.format);
+        b.classList.toggle("btn-light", b.dataset.fmt !== state.format);
+      });
+      const n = state.roles.size;
+      dlBtn.disabled = state.loading || n === 0;
+
+      hintBox.innerHTML = "";
+      if (state.creds) {
+        /* --- REJIM A: login/parol FAQAT --- */
+        hintBox.append(el("div", { class: "cred-warn", icon: "alert" }, [
+          el("div", { class: "cred-warn-t", text: "" + t("rep.cred_toggle_warn") }),
+        ]));
+        hintBox.append(el("p", { class: "field-hint", text: "" + t("rep.pw_new_needed_hint") }));
+        colBox.textContent = "" + t("rep.wrong_mode");
+      } else {
+        /* --- REJIM B: to'liq ma'lumot, login/parol YO'Q --- */
+        colBox.textContent = "" + t("rep.wrong_mode");
+      }
+      colBox.dataset.mode = state.creds ? "creds" : "full";
+    }
+
+    async function generate() {
+      if (state.loading) return;
+      if (!state.roles.size) { errToast({ code: "rep.no_types", params: {} }); return; }
+      state.loading = true;
+      sync();
+      const btnLabel = dlBtn.querySelector("span:not(.ico)") || null;
+      dlBtn.textContent = "";
+      dlBtn.append(el("i", { class: "ico ico-spin" }), document.createTextNode(" " + t("rep.generating")));
+      try {
+        const blob = await API.post("reports/generate", {
+          report: "users",
+          roles: Array.from(state.roles),
+          format: state.format,
+          include_credentials: state.creds,
+          lang: (typeof I18N !== "undefined" && I18N.lang) ? I18N.lang : "uz",
+        });
+        if (!(blob instanceof Blob)) throw new Error("err.server_error");
+        if (blob.size === 0) throw new Error("err.export.failed");
+        saveBlob(blob, (state.creds ? "login_parollar." : "hisobot.") + state.format);
+        toast(t("rep.exported"));
+      } catch (e) { errToast(e); }
+      finally {
+        state.loading = false;
+        sync();
+        dlBtn.innerHTML = "";
+        dlBtn.append(el("i", { class: "ico" }), document.createTextNode(" " + t("common.download")));
+      }
+    }
+
+    sync();
+    return p;
+  }
+
+  /* ---------------- 3) CSV import ---------------- */
+  function importPanel() {
+    const p = el("div", { class: "card" });
+    const ta = el("textarea", {
+      class: "input", style: "min-height:190px;font-family:monospace;font-size:13px",
+      text: "first_name;last_name;middle_name;birth_date;phone;group_name;license_category;address;notes\nBekzod;Raimov;Akmalovich;2005-03-12;+998901112233;B-24;B;Farg'ona shahar;import",
+    });
+    p.append(
+      el("h3", { class: "mb", icon: "download", text: "" + t("student.import") }),
+      el("p", { class: "field-hint", text: "CSV: first_name;last_name;middle_name;birth_date;phone;group_name;license_category;address;notes" }),
+      ta,
+      el("div", { class: "row end mt" }, [
+        el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => { ta.value = ""; } }),
+        el("button", { class: "btn btn-primary", text: t("common.create"), onclick: () => doImport(ta.value) }),
+      ]),
+      el("p", { class: "field-hint mt", text: "" + t("rep.audit_note") }),
+    );
+    return p;
+  }
+
+  async function doImport(csvText) {
+    try {
+      const res = await API.post("admin/students/import", { csv: csvText });
+      const r = res.results;
+      const box = el("div", {});
+      [["📄", t("common.all") + ":", r.total], ["✅", t("import.created"), r.created],
+       ["⚠️", t("import.duplicates"), r.duplicates], ["❌", t("import.errors"), r.errors.length],
+      ].forEach(([a, b, c]) => box.append(el("div", { class: "kv" }, [
+        el("span", { class: "k", text: a + " " + b }), el("span", { class: "v", text: String(c) })])));
+      if (r.credentials && r.credentials.length) {
+        box.append(el("h4", { class: "card-title mt", text: "🔑 " + t("rep.tab.creds") }));
+        r.credentials.slice(0, 20).forEach((cr, i) => box.append(el("div", { class: "kv" }, [
+          el("span", { class: "k", text: "#" + (i + 1) }), el("span", { class: "v", text: cr.login + " / " + cr.password })])));
+      }
+      modal("📥 " + t("student.import"), [box,
+        el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.close"), onclick: (ev) => ev.target.closest(".modal-overlay").close() })]),
+      ], { wide: true });
+    } catch (e) { errToast(e); }
+  }
+
+  /* Blob'ni fayl sifatida saqlaydi (barcha eksportlar uchun umumiy). */
+  function saveBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 600);
   }
 
   /* ============================ AUDIT ============================ */
@@ -1453,5 +2022,8 @@ window.AdminViews = (function () {
     return wrap;
   }
 
-  return { dashboard, base, users, students, instructors, cars, lessons, calendar, requests, reports, analytics, audit, backup, settings, profile, notifications: () => Shared.notificationsPage() };
+  /* MODUL 3: `importModal` eksportga qo'shildi — endi faqat "Hisobotlar"
+     bo'limidagi "Import" tab orqali ochiladi (Baza bo'limidan olib
+     tashlandi, lekin funksiya O'CHIRILMADI). */
+  return { dashboard, base, users, students, instructors, cars, lessons, calendar, requests, reports, analytics, audit, backup, settings, profile, importModal, notifications: () => Shared.notificationsPage() };
 })();

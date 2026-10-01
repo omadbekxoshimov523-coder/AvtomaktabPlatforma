@@ -307,11 +307,10 @@ const Shared = (function () {
         line.append(avatar(stu, 36),
           el("div", { class: "f1" }, [
             el("div", { class: "cell-strong", text: `${stu.first_name} ${stu.last_name} ${stu.middle_name || ""}`.trim() }),
-            el("div", { class: "muted sm", text: (stu.group_name || "") + " · " + t("lesson.pickup") + ": " + (stu.pickup_address || "—") }),
+            el("div", { class: "muted sm", text: (stu.group_name || "") + " · " + t("meeting.place") + ": " + (stu.pickup_address || "—") }),
           ]));
         const acts = el("div", { class: "row gap-sm wrap" }, []);
         // MODUL 4: xarita (Yandex Maps) — matni endi "Xaritada ko'rish"
-        if (stu.pickup_lat && stu.pickup_lng) acts.append(mapLink(stu.pickup_lat, stu.pickup_lng, "🗺️ " + t("map.open")));
         if (role === "instructor" || role === "admin") {
           acts.append(callLink(stu.phone));
           acts.append(el("button", { class: "btn btn-light btn-sm", icon: "message", text: "" + t("lesson.message"),
@@ -336,7 +335,7 @@ const Shared = (function () {
         }
         // talaba — pickup tahrirlash
         if (role === "student" && s.status === "scheduled") {
-          acts.append(el("button", { class: "btn btn-light btn-sm", icon: "map", text: "" + t("lesson.pickup_edit"),
+          acts.append(el("button", { class: "btn btn-light btn-sm", icon: "edit", text: "" + t("meeting.place_edit"),
             onclick: () => openPickupEdit(s, m) }));
         }
         line.append(acts);
@@ -350,12 +349,11 @@ const Shared = (function () {
       line.append(
         el("div", { class: "f1" }, [
           el("div", { class: "cell-strong", icon: "user", text: "" + t("auth.role_student") }),
-          el("div", { class: "muted sm", text: t("lesson.pickup") + ": " + (s.pickup_address || "—") }),
+          el("div", { class: "muted sm", text: t("meeting.place") + ": " + (s.pickup_address || "—") }),
         ]));
       const acts = el("div", { class: "row gap-sm wrap" }, []);
-      if (s.pickup_lat && s.pickup_lng) acts.append(mapLink(s.pickup_lat, s.pickup_lng, "🗺️ " + t("map.open")));
       if (s.status === "scheduled") {
-        acts.append(el("button", { class: "btn btn-light btn-sm", icon: "map", text: "" + t("lesson.pickup_edit"),
+        acts.append(el("button", { class: "btn btn-light btn-sm", icon: "edit", text: "" + t("meeting.place_edit"),
           onclick: () => openPickupEdit(s, m) }));
       }
       if (s.attendance_status && s.attendance_status !== "unmarked") {
@@ -378,22 +376,71 @@ const Shared = (function () {
     return el("div", {}, kids);
   }
 
-/* BAND 1 — "Olib ketish joyi" (pickup) tahrirlash, YANGI USUL.
+/* ======================================================================
+     "Uchrashuv joyi" (pickup) — VAQTINCHA ODDIY MATN REJIMI
 
-     AVVALGI holat: "Kenglik" (41.31...) va "Uzunlik" (69.24...) degan IKKITA
-     maydon bor edi — foydalanuvchi uchun tushunarsiz, xato ehtimoli yuqori.
+     XARITA VAQTINCHA O'CHIRILGAN — API kalit va Geosuggest to'liq sozlangandan
+     so'ng qayta yoqiladi. Sababi: Yandex API kaliti hali yo'q.
 
-     HOZIR:
-       * Kenglik/uzunlik maydonlari UI'dan BUTUNLAY olib tashlandi.
-       * Bitta "Manzil" inputi — ichida Yandex AUTOCOMPLETE (BAND 1):
-         "Beshariq" deb yozilsa variantlar chiqadi (Yandex Go tajribasi),
-         tanlanganda to'liq manzil inputga yoziladi va xaritada nuqta qo'yiladi.
-       * Xaritada NUQTA bosish mumkin — nuqta avtomatik MANZIL nomiga aylanadi
-         (reverse geocoding).
-       * Koordinatalar FAQAT backend orqali DB'ga boradi; foydalanuvchi ularni
-         ko'rmaydi va qo'lda kiritmaydi.
-  */
+     HOZIRGI MANTIQ (butun platformada bir xil):
+       * Bitta oddiy erkin MATN maydoni — "Uchrashuv joyi".
+       * Xarita YO'Q, autocomplete YO'Q, koordinata kiritish YO'Q.
+       * Foydalanuvchi shunchaki qo'lda yozadi: "Beshariq, Mustaqillik maydoni".
+       * Majburiylik avvalgidek saqlanadi: bo'sh qoldirilsa -> 400
+         (`map.address_required`).
+       * `pickup_lat` / `pickup_lng` bazada NULL bo'lib qoladi (ustunlar
+         O'CHIRILMAGAN — kelajakdagi xarita uchun joy saqlanadi).
+
+     QAYTA QO'YISH (kelajakda):
+       1) Bu yerdagi `MAP_DISABLED` = false qiling.
+       2) Quyidagi "=== XARITA KO'DI (SAQLANGAN) ===" blokini oching va
+          `openPickupEditMap()` ni asosiy funksiya qilib qo'ying
+          (`_openPickupEdit_unused_map` yordamchisi shuni tayyor).
+       3) `web/js/map.js` allaqachon butunligicha saqlangan (o'chirilmagan).
+       4) `.env` ga `YANDEX_MAPS_API_KEY` va `YANDEX_GEOCODER_API_KEY` qo'ying.
+     ====================================================================== */
+  const MAP_DISABLED = true;
+
   function openPickupEdit(s, m) {
+    /* Oddiy matn rejimi: bitta maydon, xaritasiz. */
+    const addr = input({ value: s.pickup_address || "", placeholder: t("meeting.place_ph") });
+    const err = el("div", { class: "map-msg map-msg-err hidden" });
+
+    function showErr(code, detail) {
+      err.textContent = errorText(code) + (detail ? " " + detail : "");
+      err.classList.remove("hidden");
+    }
+    function clearErr() { err.textContent = ""; err.classList.add("hidden"); }
+
+    const sm = modal(t("meeting.place"), [
+      field(t("meeting.place"), addr, { hint: t("meeting.place_hint") }),
+      err,
+      el("div", { class: "row end mt" }, [
+        el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => sm.close() }),
+        el("button", { class: "btn btn-primary", text: t("common.save"),
+          onclick: async () => {
+            clearErr();
+            const text = String(addr.value || "").trim();
+            /* Bo'sh qoldirilsa — server ham rad etadi. Ikki qatlamli himoya. */
+            if (!text) { showErr("map.address_required"); return; }
+            try {
+              /* `lat`/`lng` YUBORILMAYDI -> bazada NULL qoladi (kelajak uchun). */
+              await API.put(`student/sessions/${s.id}/pickup`, { address: text });
+              toast(t("misc.saved")); sm.close(); m && m.close(); openSession(s.id, "student");
+            } catch (e) { errToast(e); }
+          } }),
+      ]),
+    ]);
+  }
+
+  /* ======================================================================
+     === XARITA KO'DI (VAQTINCHA ISHLATILMAYDI — KELAJAK UCHUN SAQLANGAN) ===
+
+     Bu kod `MAP_DISABLED = false` bo'lganda qayta kerak bo'ladi. O'CHIRILMAGAN.
+     Saqlangan: Yandex xaritasi, AUTOCOMPLETE (geosuggest), marker,
+     reverse geocoding, "nuqta bosish" va lat/lng yuborish.
+     ====================================================================== */
+  function openPickupEditMap(s, m) {
     const addr = input({ value: s.pickup_address || "", placeholder: t("map.address_ph") });
     const err = el("div", { class: "map-msg map-msg-err hidden" });
     const mapBox = el("div", { class: "map-picker" });
@@ -417,15 +464,13 @@ const Shared = (function () {
       mapNote.className = "map-msg " + (cls || "map-msg-warn");
     }
 
-    /* Xarita yuklangach nuqtani shu joyga ko'rsatamiz (autocomplete tanlanganda
-       yoki nuqta bosilganda chaqiriladi). `mount` Promise qaytaradi. */
     let map = null;
     function showPoint(la, ln) {
       if (map && typeof map.setPoint === "function") map.setPoint(la, ln, false);
     }
 
-    /* --- Save/Enter: autocomplete tanlanmagan bo'lsa ham, yozilgan manzil
-       bo'yicha ANIQ koordinata izlanadi (noto'g'ri nuqta saqlanmasin) --- */
+    /* Save/Enter: autocomplete tanlanmagan bo'lsa ham, yozilgan manzil bo'yicha
+       ANIQ koordinata izlanadi (noto'g'ri nuqta saqlanmasin). */
     async function resolveFromText() {
       const v = String(addr.value || "").trim();
       if (!v) return { ok: false };
@@ -438,11 +483,11 @@ const Shared = (function () {
         if (ac) ac.setValue(addr.value);
         return { ok: true, lat: picked.lat, lng: picked.lng };
       }
-      return { ok: true, lat: null, lng: null };  /* manzil saqlanadi, xarita nuqtasi yo'q */
+      return { ok: true, lat: null, lng: null };
     }
 
     let ac = null;
-    const sm = modal(t("lesson.pickup"), [
+    const sm = modal(t("meeting.place"), [
       field(t("map.address"), addr, { hint: t("map.address_hint") }),
       err,
       mapBox, mapHint, mapNote, yandex,
@@ -465,18 +510,15 @@ const Shared = (function () {
       ]),
     ]);
 
-    /* --- Autocomplete: Yandex takliflar + xarita --- */
+    /* Autocomplete: Yandex takliflar + xarita */
     MapView.config().then(function (c) {
       if (!c || c.geocoder_enabled !== true) {
-        /* Kalit yo'q — aniq xabar (soxta kalit QO'YILMAYDI) + ishlash rejimi:
-           foydalanuvchi faqat xaritada nuqtana bosadi. */
         showNote("map.geocoder_no_key", "map-msg-err");
       } else {
         showNote("map.autocomplete_hint", "map-msg-ok");
       }
     });
     ac = MapView.attachAutocomplete(addr, {
-      /* Tanlangan variant: to'liq manzil inputga + nuqta xaritada. */
       onPick: function (item) {
         picked = { lat: item.lat, lng: item.lng };
         clearErr();
@@ -486,19 +528,14 @@ const Shared = (function () {
         if (String(v || "").trim().length >= 3) showNote("map.no_result", "map-msg-warn");
       },
       onUnavailable: function () { showNote("map.geocoder_no_key", "map-msg-err"); },
-      /* Enter bosilganda — variant tanlanmagan bo'lsa. */
       onEnter: function () { resolveFromText(); },
     });
 
-    /* Xarita modal ichida yuklanadi (lazy) — sahifa ochilganda emas.
-       `onChange` — nuqtani bosish yoki marker surish: koordinata saqlanadi va
-       nuqta avtomatik MANZIL nomiga aylanadi (BAND 1). */
     Promise.resolve(MapView.mount(mapBox, {
       lat: picked.lat, lng: picked.lng,
       onChange: async function (la, ln) {
         picked = { lat: Number(la), lng: Number(ln) };
         clearErr();
-        /* Nuqtadan manzil: foydalanuvchi hech qanday raqam kiritmadi. */
         const name = await MapView.reverseGeocode(la, ln);
         if (name) {
           addr.value = name;
@@ -510,6 +547,11 @@ const Shared = (function () {
       },
     })).then(function (mm) { map = mm; }).catch(function () { /* xarita yuklanmadi */ });
   }
+  /* === /XARITA KO'DI (VAQTINCHA ISHLATILMAYDI) === */
+
+  /* Xarita rejimi kerak bo'lsa shu qatori ikalasini almashtiradi:
+       openPickupEdit = openPickupEditMap; */
+  function _openPickupEdit_unused_map(s, m) { return openPickupEditMap(s, m); }
 
   /* ---------- ADMIN: session boshqarish ---------- */
   function adminSessionActions(s, m) {

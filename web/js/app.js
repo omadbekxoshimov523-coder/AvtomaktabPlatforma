@@ -14,7 +14,9 @@
 
   const NAV_KEYS = {
     admin: [
-      ["dashboard", "dashboard", "nav.dashboard"],
+      /* MODUL 1: "Dashboard" -> "Bosh sahifa" (Talaba/Instruktor kabi).
+         `nav.home` kaliti ishlatiladi — `nav.dashboard` o'chirilgan. */
+      ["dashboard", "dashboard", "nav.home"],
       ["notifications", "bell", "nav.notifications"],
       ["base", "book", "nav.base"],
       ["calendar", "calendar", "nav.calendar"],

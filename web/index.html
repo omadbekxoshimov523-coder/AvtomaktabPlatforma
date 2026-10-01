@@ -285,8 +285,13 @@ window.addEventListener("unhandledrejection", function (e) {
 
 <script src="/js/i18n.js"></script>
 <script src="/js/api.js"></script>
-<!-- MODUL 4: xarita moduli. `ui.js` undan foydalanadi, shuning uchun
-     `ui.js` dan OLDIN yuklanadi. -->
+<!-- XARITA VAQTINCHA O'CHIRILGAN — API kalit va Geosuggest to'liq sozlangandan
+     so'ng qayta yoqiladi. "Uchrashuv joyi" hozir oddiy MATN maydoni
+     (`shared.js` -> `openPickupEdit`). Xarita moduli `map.js` BUTUNLIGICHA
+     saqlangan va yuklanmoqda davom etadi (u `config()`/`mount()` CHAQLANGANDA
+     faqat Yandex skriptini yuklaydi — sahifa ochilganda yuklamaydi), shuning
+     uchun kelajakda faqat `shared.js` dagi `MAP_DISABLED` bayrog'ini o'zgartirish
+     yetarli bo'ladi. -->
 <script src="/js/map.js"></script>
 <script src="/js/ui.js"></script>
 <script src="/js/views-admin.js"></script>

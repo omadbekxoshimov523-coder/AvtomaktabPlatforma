@@ -1,0 +1,14 @@
+# ============================================================================
+# AVTO MAKTAB — FAQAT TEST va TEKSHIRUV uchun kutubxonalar.
+# Server ishga tushishi uchun bu fayl KERAK EMAS (qarang: requirements.txt).
+#
+#   pip install -r requirements-dev.txt
+# ============================================================================
+
+# --- haqiqiy JavaScript sintaksis/binding tekshiruvi (tests/test_js_syntax.py)
+# Nima uchun: `tools_js_check.py` — qo'lda yozilgan lekser; u faqat qavs
+# muvozanatini tekshiradi va `x : null` kabi YARIM qolgan shartli operatorni
+# ko'rmaydi. Brauzer esa butun faylni rad etib, butun bo'limni ishlamay
+# qoldiradi. `esprima` — haqiqiy JS parser: sintaksis xatosini va
+# "X is not defined" (aniqlanmagan yordamchi) xatosini ushlaydi.
+esprima>=4.0.1,<5.0

@@ -49,7 +49,7 @@ const I18N = (function () {
 
     // ---- app / nav
     "nav.home": { uz: "Bosh sahifa", ru: "Главная", en: "Home" },
-    "nav.dashboard": { uz: "Dashboard", ru: "Дашборд", en: "Dashboard" },
+    "nav.dashboard": { uz: "Bosh sahifa", ru: "Главная", en: "Dashboard" },
     "nav.base": { uz: "Yangi baza", ru: "Новая база", en: "User base" },
     "nav.today": { uz: "Bugun", ru: "Сегодня", en: "Today" },
     "nav.schedule": { uz: "Jadval", ru: "Расписание", en: "Schedule" },
@@ -91,7 +91,8 @@ const I18N = (function () {
     "nav.messages": { uz: "Xabarlar", ru: "Сообщения", en: "Messages" },
     "nav.audit": { uz: "Audit jurnali", ru: "Журнал аудита", en: "Audit log" },
     "nav.calendar": { uz: "Kalendar", ru: "Календарь", en: "Calendar" },
-    "nav.backup": { uz: "Backup", ru: "Резервная копия", en: "Backup" },
+    // MODUL 7: avval "Backup" (inglizcha) — UZ da ham tarjima qilindi.
+    "nav.backup": { uz: "Zaxira nusxa", ru: "Резервная копия", en: "Backup" },
     "nav.import_export": { uz: "Import / Eksport", ru: "Импорт / Экспорт", en: "Import / Export" },
 
     // ---- dashboard stats
@@ -180,7 +181,7 @@ const I18N = (function () {
     "common.edit": { uz: "Tahrirlash", ru: "Редактировать", en: "Edit" },
     "common.delete": { uz: "O'chirish", ru: "Удалить", en: "Delete" },
     "common.search": { uz: "Qidiruv...", ru: "Поиск...", en: "Search..." },
-    "common.filter": { uz: "Filter", ru: "Фильтр", en: "Filter" },
+    "common.filter": { uz: "Saralash", ru: "Фильтр", en: "Filter" },
     "common.status": { uz: "Holat", ru: "Статус", en: "Status" },
     "common.phone": { uz: "Telefon", ru: "Телефон", en: "Phone" },
     "common.date": { uz: "Sana", ru: "Дата", en: "Date" },
@@ -229,7 +230,7 @@ const I18N = (function () {
     "err.bad_request": { uz: "So'rov ma'lumotlari noto'g'ri", ru: "Некорректные данные запроса", en: "Invalid request data" },
     "err.user.name_required": { uz: "Ism va familiya majburiy", ru: "Имя и фамилия обязательны", en: "First and last name are required" },
     "err.user.invalid_role": { uz: "Noto'g'ri rol", ru: "Неверная роль", en: "Invalid role" },
-    "err.user.bulk_role": { uz: "Bulk yaratish faqat talabalar uchun", ru: "Массовое создание только для учеников", en: "Bulk creation is for students only" },
+    "err.user.bulk_role": { uz: "Tezkor yaratish faqat talabalar uchun", ru: "Быстрое создание только для учеников", en: "Quick create is for students only" },
     "err.user.bulk_count": { uz: "Soni 1–1000 orasida bo'lsin", ru: "Количество от 1 до 1000", en: "Count must be 1–1000" },
     "err.user.not_found": { uz: "Foydalanuvchi topilmadi", ru: "Пользователь не найден", en: "User not found" },
     /* MODUL 4 — kenglik/uzunlik validatsiyasi xatolari */
@@ -255,7 +256,7 @@ const I18N = (function () {
     "err.attendance.bad_status": { uz: "Noto'g'ri davomat holati", ru: "Неверный статус посещаемости", en: "Invalid attendance status" },
     "err.notif.empty": { uz: "Xabar matni bo'sh", ru: "Текст сообщения пуст", en: "Message text is empty" },
     "err.msg.empty": { uz: "Xabar matni bo'sh", ru: "Текст сообщения пуст", en: "Message text is empty" },
-    "err.backup.disabled": { uz: "Backup o'chirilgan", ru: "Резервное копирование отключено", en: "Backup is disabled" },
+    "err.backup.disabled": { uz: "Zaxira nusxa o'chirilgan", ru: "Резервное копирование отключено", en: "Backup is disabled" },
     "err.capacity_full": { uz: "Avtomobilning amaliy mashg'ulot sig'imi to'lgan", ru: "Вместимость автомобиля заполнена", en: "Car practice capacity is full" },
     "err.student_busy": { uz: "Talaba shu vaqtda boshqa mashg'ulotga yozilgan", ru: "Ученик записан на другое занятие в это время", en: "Student is booked in another lesson at this time" },
     "err.instructor_busy": { uz: "Instruktor shu vaqtda boshqa mashg'ulot bilan band", ru: "Инструктор занят в это время", en: "Instructor is busy at this time" },
@@ -335,6 +336,9 @@ const I18N = (function () {
     "lesson.status.ongoing": { uz: "🔵 Davom etmoqda", ru: "🔵 Идёт", en: "🔵 Ongoing" },
     "lesson.status.completed": { uz: "✅ Yakunlangan", ru: "✅ Завершено", en: "✅ Completed" },
     "lesson.status.cancelled": { uz: "❌ Bekor qilingan", ru: "❌ Отменено", en: "❌ Cancelled" },
+    // ---- ESKI nomlar ("Olib ketish joyi"). Endi ishlatilMAYdi — faqat
+    //      xarita qaytadiganda kerak bo'ladi. O'chirilmadi (i18n QA ogohlantirish
+    //      bermasligi uchun ham saqlanib qoldi).
     "lesson.pickup": { uz: "Olib ketish joyi", ru: "Место забора", en: "Pickup location" },
     "lesson.map": { uz: "Xaritada ko'rish", ru: "Смотреть на карте", en: "View on map" },
     "lesson.call": { uz: "Qo'ng'iroq", ru: "Звонок", en: "Call" },
@@ -345,6 +349,7 @@ const I18N = (function () {
     "lesson.late": { uz: "Kechikdi", ru: "Опоздал", en: "Late" },
     "lesson.absent": { uz: "Kelmagan", ru: "Не пришёл", en: "Absent" },
     "lesson.unmarked": { uz: "Belgilanmagan", ru: "Не отмечено", en: "Unmarked" },
+    // ---- ESKI (xarita rejimi uchun saqlangan).
     "lesson.pickup_edit": { uz: "Qayerdan olib ketilsin?", ru: "Откуда забрать?", en: "Where should you be picked up?" },
     /* MODUL 4 — XARITA (Yandex Maps). Avval "lat"/"lng" yozuvlari ko'rinmasdi. */
     "map.open": { uz: "Xaritada ko'rish", ru: "Открыть на карте", en: "View on map" },
@@ -404,7 +409,8 @@ const I18N = (function () {
     "import.success": { uz: "Muvaffaqiyatli", ru: "Успешно", en: "Successful" },
     "import.no_errors": { uz: "Xatosiz", ru: "Без ошибок", en: "No errors" },
     "student.import": { uz: "Import (CSV)", ru: "Импорт (CSV)", en: "Import (CSV)" },
-    "student.bulk": { uz: "Bulk yaratish", ru: "Массовое создание", en: "Bulk create" },
+    // MODUL 3: "Bulk yaratish" -> "Tezkor yaratish".
+    "student.bulk": { uz: "Tezkor yaratish", ru: "Быстрое создание", en: "Quick create" },
     "common.count": { uz: "Soni", ru: "Количество", en: "Count" },
     "common.send": { uz: "Yuborish", ru: "Отправить", en: "Send" },
 
@@ -507,13 +513,117 @@ const I18N = (function () {
     "report.per_instructor": { uz: "Instruktorlar faoliyati", ru: "Активность инструкторов", en: "Instructor activity" },
     "report.per_car": { uz: "Avtomobillardan foydalanish", ru: "Использование автомобилей", en: "Car usage" },
 
+    // ====================================================================
+    // MODUL 2 — Baza bo'limida toifa ichidagi foydalanuvchilar soni
+    // ====================================================================
+    "base.count": { uz: "Jami: {n} ta {what}", ru: "Всего: {n} {what}", en: "Total: {n} {what}" },
+    "base.unit.student": { uz: "talaba", ru: "ученик(а/ов)", en: "student(s)" },
+    "base.unit.instructor": { uz: "instruktor", ru: "инструктор(а/ов)", en: "instructor(s)" },
+    "base.unit.admin": { uz: "admin", ru: "админ(а/ов)", en: "admin(s)" },
+    "base.count_filtered": { uz: "(filtr bo'yicha {n} ta natija)", ru: "(по фильтру {n} результатов)", en: "({n} results by filter)" },
+
+    // ====================================================================
+    // MODUL 3 — Tugmalar: "Tezkor yaratish", Import ko'chirilgani
+    // ====================================================================
+    "base.go_reports": { uz: "Hisobot", ru: "Отчёт", en: "Report" },
+    "base.go_reports_hint": { uz: "Hisobotlar bo'limiga o'tish", ru: "Перейти в раздел Отчёты", en: "Go to Reports section" },
+
+    // ====================================================================
+    // MODUL 4 — Eskirgan so'rovlar (24 soat)
+    // ====================================================================
+    "req.expired": { uz: "Muddati o'tgan", ru: "Срок истёк", en: "Expired" },
+    "req.expired_hint": { uz: "24 soatdan ko'p vaqt o'tdi, hali tasdiqlanmagan", ru: "Прошло более 24 часов, не подтверждён", en: "Over 24 hours, still not confirmed" },
+    "req.filter_active": { uz: "Faol", ru: "Активные", en: "Active" },
+    "req.filter_expired": { uz: "Eskirgan", ru: "Просроченные", en: "Expired" },
+    "req.filter_history": { uz: "Tarix", ru: "История", en: "History" },
+    "req.auto_hidden": { uz: "Eskirgan so'rovlar asosiy ro'yxatdan avtomatik yashiriladi", ru: "Просроченные заявки автоматически скрываются из основного списка", en: "Expired requests are automatically hidden from the main list" },
+
+    // ====================================================================
+    // MODUL 5 — TO'LIQ HISOBOTLAR TIZIMI
+    // ====================================================================
+    "rep.tab.data": { uz: "Ma'lumot", ru: "Данные", en: "Data" },
+    "rep.tab.creds": { uz: "Login va parollar", ru: "Логины и пароли", en: "Logins and passwords" },
+    "rep.tab.import": { uz: "Import", ru: "Импорт", en: "Import" },
+    "rep.pick_types": { uz: "Toifani tanlang", ru: "Выберите категорию", en: "Select categories" },
+    "rep.pick_types_hint": { uz: "Bir nechtasini bir vaqtda tanlashingiz mumkin", ru: "Можно выбрать несколько одновременно", en: "You may select several at once" },
+    "rep.cred_toggle": { uz: "Login va parollarni hisobotga qo'shish", ru: "Добавить логины и пароли в отчёт", en: "Include logins and passwords in the report" },
+    "rep.cred_toggle_hint": { uz: "Yoqilgan holda hisiborat FAQAT: Ism, Familiya, Guruh, Login, Parol. Boshqa ma'lumot (statistika, jadval) QO'SHILMAYDI.", ru: "Когда выключено, отчёт содержит ТОЛЬКО: Имя, Фамилия, Группа, Логин, Пароль. Другие данные (статистика, расписание) НЕ добавляются.", en: "When ON, the report contains ONLY: First name, Last name, Group, Login, Password. Other data (statistics, schedule) is NOT included." },
+    "rep.cred_toggle_warn": { uz: "Diqqat: bu hisobotda parollar ochiq matn ko'rinishida bo'ladi. Faylni xavfsiz saqlang va ishonchli bo'lmagan kanallar orqali yubormang.", ru: "Внимание: в этом отчёте пароли будут видны открытым текстом. Сохраните файл в безопасном месте и не отправляйте по ненадёжным каналам.", en: "Warning: passwords will appear in plain text in this report. Store the file securely and do not send it over untrusted channels." },
+    "rep.wrong_mode": { uz: "Ikkala rejim aralashmaydi: login/parol yoqilgan — to'liq ma'lumot, o'chirilgan — maxfiy ma'lumot", ru: "Режимы не смешиваются: с логинами/паролями — полные данные, без — конфиденциальные", en: "Modes never mix: with credentials — full data, without — confidential data" },
+    "rep.exported": { uz: "Hisobot yuklab olindi", ru: "Отчёт скачан", en: "Report downloaded" },
+    "rep.type.students": { uz: "Talabalar", ru: "Ученики", en: "Students" },
+    "rep.type.instructors": { uz: "Instruktorlar", ru: "Инструкторы", en: "Instructors" },
+    "rep.type.admins": { uz: "Adminlar", ru: "Админы", en: "Admins" },
+    "rep.fmt.csv": { uz: "CSV", ru: "CSV", en: "CSV" },
+    "rep.fmt.xlsx": { uz: "XLSX", ru: "XLSX", en: "XLSX" },
+    "rep.fmt.pdf": { uz: "PDF", ru: "PDF", en: "PDF" },
+    "rep.no_types": { uz: "Kamida bitta toifa tanlang", ru: "Выберите хотя бы одну категорию", en: "Select at least one category" },
+    "rep.col.name": { uz: "Ism", ru: "Имя", en: "First name" },
+    "rep.col.lastname": { uz: "Familiya", ru: "Фамилия", en: "Last name" },
+    "rep.col.group": { uz: "Guruh", ru: "Группа", en: "Group" },
+    "rep.col.login": { uz: "Login", ru: "Логин", en: "Login" },
+    "rep.col.password": { uz: "Parol", ru: "Пароль", en: "Password" },
+    "rep.col.progress": { uz: "Progress", ru: "Прогресс", en: "Progress" },
+    "rep.col.done": { uz: "O'tilgan mashg'ulotlar", ru: "Проведённые занятия", en: "Lessons taken" },
+    "rep.col.total": { uz: "Jami belgilangan", ru: "Всего назначено", en: "Total assigned" },
+    "rep.col.status": { uz: "Holat", ru: "Статус", en: "Status" },
+    "rep.col.phone": { uz: "Telefon", ru: "Телефон", en: "Phone" },
+    "rep.col.cat": { uz: "Toifa", ru: "Категория", en: "License category" },
+    "rep.col.birth": { uz: "Tug'ilgan sana", ru: "Дата рождения", en: "Date of birth" },
+    "rep.col.enrolled": { uz: "Qabul sanasi", ru: "Дата зачисления", en: "Enrolled" },
+    "rep.creds_title": { uz: "LOGIN VA PAROLLAR", ru: "ЛОГИНЫ И ПАРОЛИ", en: "LOGINS AND PASSWORDS" },
+    "rep.creds_sub": { uz: "{n} ta yozuv", ru: "{n} записей", en: "{n} record(s)" },
+
+    // ====================================================================
+    // MODUL 6 — Ommaviy (bulk) amallar
+    // ====================================================================
+    "bulk.pick": { uz: "Tanlangan foydalanuvchilar", ru: "Выбранные пользователи", en: "Selected users" },
+    "bulk.count": { uz: "{n} ta tanlangan", ru: "{n} выбрано", en: "{n} selected" },
+    "bulk.none": { uz: "Hech kim tanlanmagan", ru: "Ничего не выбрано", en: "None selected" },
+    "bulk.select_all": { uz: "Hammasini tanlash", ru: "Выбрать все", en: "Select all" },
+    "bulk.deselect_all": { uz: "Tanlashni bekor qilish", ru: "Снять выделение", en: "Clear selection" },
+    "bulk.delete": { uz: "Ommaviy o'chirish", ru: "Удалить выбранных", en: "Bulk delete" },
+    "bulk.edit": { uz: "Ommaviy tahrirlash", ru: "Изменить выбранных", en: "Bulk edit" },
+    "bulk.confirm_delete": { uz: "{n} ta foydalanuvchini o'chirmoqchimisiz?\n\nBu amalni qaytarib bo'lmaydi: ularning ma'lumotlari, mashg'ulotlari va tarixi butunlay o'chib ketadi.", ru: "Удалить {n} пользователей?\n\nЭто действие необратимо: их данные, занятия и история будут полностью удалены.", en: "Delete {n} user(s)?\n\nThis cannot be undone: their data, lessons and history will be permanently removed." },
+    "bulk.edit_title": { uz: "Ommaviy tahrirlash", ru: "Массовое изменение", en: "Bulk edit" },
+    "bulk.edit_hint": { uz: "Bo'sh qoldirilgan maydonlar O'ZGARTIRILMAYDI — faqat to'ldirilganlar barcha tanlanganlarga qo'llaniladi.", ru: "Пустые поля НЕ ИЗМЕНЯЮТСЯ — заполненные применяются ко всем выбранным.", en: "Empty fields are NOT changed — only filled ones apply to all selected." },
+    "bulk.edit_group": { uz: "Guruh", ru: "Группа", en: "Group" },
+    "bulk.edit_category": { uz: "Haydovchilik toifasi", ru: "Категория прав", en: "License category" },
+    "bulk.edit_status": { uz: "Holat", ru: "Статус", en: "Status" },
+    "bulk.edit_notes": { uz: "Izoh", ru: "备注", en: "Notes" },
+    "bulk.done": { uz: "{n} ta foydalanuvchi yangilandi", ru: "{n} пользователей обновлено", en: "{n} user(s) updated" },
+    "bulk.deleted": { uz: "{n} ta foydalanuvchi o'chirildi", ru: "{n} пользователей удалено", en: "{n} user(s) deleted" },
+    "bulk.confirm_all": { uz: "Filtr bo'yicha topilgan BARCHA {n} ta natisani tanlamoqchimisiz? (joriy sahifadagilar emas)", ru: "Выбрать ВСЕ {n} результатов по фильтру? (не только на текущей странице)", en: "Select ALL {n} results by filter? (not just the current page)" },
+    "err.bulk.none": { uz: "Kamida bitta foydalanuvchini tanlang", ru: "Выберите хотя бы одного пользователя", en: "Select at least one user" },
+    "err.bulk.too_many": { uz: "Bir vaqtda ko'p foydalanuvchini tahrirlab bo'lmaydi (maksimum {n})", ru: "Слишком много пользователей за раз (максимум {n})", en: "Too many users at once (max {n})" },
+    "err.bulk.bad_id": { uz: "Foydalanuvchi identifikatori noto'g'ri", ru: "Некорректный идентификатор пользователя", en: "Invalid user identifier" },
+    "err.bulk.self_protected": { uz: "O'z akkauntingizni o'chira yoki arxivlaya olmaysiz", ru: "Нельзя удалить или архивировать собственную учётную запись", en: "You cannot delete or archive your own account" },
+    "err.bulk.nothing_to_change": { uz: "O'zgartiriladigan maydon kiritilmadi", ru: "Не указано ни одно поле для изменения", en: "No fields to change were provided" },
+    "err.bulk.mixed_roles": { uz: "Turli rolli foydalanuvchilarni birga tahrirlab bo'lmaydi — avval bittasini tanlang", ru: "Нельзя изменять пользователей разных ролей вместе — выберите одну роль", en: "Cannot bulk-edit mixed roles at once — pick a single role" },
+    // ---- VAZIFA 1: hisobot yaratish
+    "err.export.bad_format": { uz: "Format noto'g'ri (CSV, XLSX yoki PDF)", ru: "Неверный формат (CSV, XLSX или PDF)", en: "Invalid format (CSV, XLSX or PDF)" },
+    "err.export.bad_role": { uz: "Noma'lum rol: {role}", ru: "Неизвестная роль: {role}", en: "Unknown role: {role}" },
+    "err.export.bad_roles": { uz: "Ro'yxatlar noto'g'ri", ru: "Некорректный список категорий", en: "Invalid category list" },
+    "err.export.xlsx_unavailable": { uz: "XLSX uchun 'openpyxl' kutubxonasi o'rnatilmagan. Serverga: pip install openpyxl", ru: "Для XLSX не установлена библиотека 'openpyxl'. На сервере: pip install openpyxl", en: "The 'openpyxl' library is not installed for XLSX. On the server: pip install openpyxl" },
+    "err.export.pdf_unavailable": { uz: "PDF uchun 'reportlab' kutubxonasi o'rnatilmagan. Serverga: pip install reportlab", ru: "Для PDF не установлена библиотека 'reportlab'. На сервере: pip install reportlab", en: "The 'reportlab' library is not installed for PDF. On the server: pip install reportlab" },
+    "err.export.pdf_broken": { uz: "PDF yaratilishida xatolik (fayl to'g'ri shakllanmagan)", ru: "Ошибка создания PDF (файл сформирован неверно)", en: "PDF generation error (file malformed)" },
+    "err.export.failed": { uz: "Hisobot yaratishda xatolik", ru: "Ошибка при создании отчёта", en: "Failed to generate report" },
+    "err.rep.no_rows": { uz: "Tanlangan toifada foydalanuvchi topilmadi", ru: "В выбранных категориях нет пользователей", en: "No users found in the selected categories" },
+    "rep.pw_new_needed": { uz: "YANGI_KERAK", ru: "НУЖЕН НОВЫЙ", en: "NEW_REQUIRED" },
+    "rep.pw_new_needed_hint": { uz: "Parollar platformada scrypt bilan saqlanadi (xom ko'rinishda saqlanmaydi), shuning uchun tiklanmaydi. 'Parolni tiklash' orqali YENGI parol bering — eskisi o'chadi.", ru: "Пароли хранятся в виде scrypt-хеша (в открытом виде не сохраняются), поэтому их нельзя восстановить. Сбросьте НОВЫЙ пароль — старый станет недействителен.", en: "Passwords are stored as scrypt hashes (never in plain text) and cannot be recovered. Reset to issue a NEW password — the old one stops working." },
+    "rep.audit_note": { uz: "Har bir yuklanish audit jurnalida qayd etiladi.", ru: "Каждое скачивание записывается в журнал аудита.", en: "Every download is recorded in the audit log." },
+    "rep.generating": { uz: "Yaratilmoqda...", ru: "Создание...", en: "Generating..." },
+    // ---- MODUL 4: eskirgan so'rovlar
+    "err.req.expired_not_editable": { uz: "Muddati o'tgan so'rovni tahrirlab bo'lmaydi", ru: "Нельзя изменить заявку с истёкшим сроком", en: "An expired request cannot be edited" },
+
     // ---- audit
     "audit.title": { uz: "Audit jurnali", ru: "Журнал аудита", en: "Audit log" },
 
     // ---- backup
-    "backup.title": { uz: "Backup", ru: "Резервная копия", en: "Backup" },
-    "backup.create": { uz: "Backup yaratish", ru: "Создать резервную копию", en: "Create backup" },
-    "backup.created": { uz: "Backup yaratildi", ru: "Резервная копия создана", en: "Backup created" },
+    // MODUL 7: UZ da "Backup" -> "Zaxira nusxa" (inglizcha so'z qolmasin).
+    "backup.title": { uz: "Zaxira nusxa", ru: "Резервная копия", en: "Backup" },
+    "backup.create": { uz: "Zaxira nusxa yaratish", ru: "Создать резервную копию", en: "Create backup" },
+    "backup.created": { uz: "Zaxira nusxa yaratildi", ru: "Резервная копия создана", en: "Backup created" },
 
     // ---- settings
     "settings.title": { uz: "Sozlamalar", ru: "Настройки", en: "Settings" },
@@ -649,6 +759,13 @@ const I18N = (function () {
     "map.no_result": { uz: "Bunday manzil topilmadi. Xaritada nuqtani bosing yoki ko'proq ma'lumot qo'shing.", ru: "Такой адрес не найден. Нажмите точку на карте или добавьте больше данных.", en: "No such address found. Click a point on the map or add more detail." },
     "map.reverse_fail": { uz: "Bu nuqta uchun aniq manzil topilmadi - manzilni qo'lda to'ldiring.", ru: "Для этой точки точный адрес не найден - заполните адрес вручную.", en: "No exact address found for this point - fill the address manually." },
     "map.reverse_ok": { uz: "Nuqtani manzilga aylantirildi", ru: "Координаты преобразованы в адрес", en: "Point converted to an address" },
+    // ---- "Olib ketish joyi" -> "Uchrashuv joyi" (xarita vaqtincha o'chirilgan).
+    //      `meeting.*` — oddiy MATN maydoni (xaritasiz). `map.*` esa xarita
+    //      qaytadiganda kerak bo'ladi va o'chirilmagan.
+    "meeting.place": { uz: "Uchrashuv joyi", ru: "Место встречи", en: "Meeting place" },
+    "meeting.place_edit": { uz: "Uchrashuv joyini tahrirlash", ru: "Изменить место встречи", en: "Edit meeting place" },
+    "meeting.place_hint": { uz: "Instruktor sizni shu yerdan kutadi. Yozib qo'ying \u2014 masalan: Beshariq, Mustaqillik maydoni yonida.", ru: "Инструктор ждёт вас здесь. Напишите \u2014 например: Бекарык, рядом с площадью Независимости.", en: "The instructor will meet you here. Type it \u2014 e.g.: Beshariq, next to Independence Square." },
+    "meeting.place_ph": { uz: "Masalan: Beshariq, Mustaqillik maydoni yonida", ru: "Например: Бекарык, рядом с площадью Независимости", en: "E.g.: Beshariq, next to Independence Square" },
     "notif.cat_lesson": { uz: "Mashg'ulotlar", ru: "Занятия", en: "Lessons" },
     "notif.cat_message": { uz: "Xabarlar", ru: "Сообщения", en: "Messages" },
     "notif.cat_reminder": { uz: "Mashg'ulot eslatmalari", ru: "Напоминания о занятиях", en: "Lesson reminders" },

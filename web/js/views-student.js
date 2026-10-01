@@ -138,13 +138,10 @@ window.StudentViews = (function () {
         el("div", { icon: "instructor", text: "" + (s.instructor_name || "") }),
         el("div", { icon: "car", text: "" + (s.car_name_snapshot || "") + " · " + s.car_plate_snapshot }),
         el("div", { icon: "users", text: "" + (s.student_count || 0) + "/" + s.capacity_snapshot }),
-        // BAND 1: olish manzili matn sifatida + xaritada ochish havolasi
-        // (koordinatalar UI'da kiritilmaydi).
+        // BAND 1: olish manzili matn sifatida (xarita havolaasi vaqtinchalik
+        // o'chirilgan — API kalitlari to'liq sozlangandan keyin qaytariladi).
         el("div", { icon: "map" }, [
           el("span", { text: "📍 " + (s.pickup_address || "—") }),
-          s.pickup_lat && s.pickup_lng
-            ? el("span", {}, ["  ", mapLink(s.pickup_lat, s.pickup_lng, t("map.open"))])
-            : null,
         ]),
       ]),
     ]);

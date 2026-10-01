@@ -262,7 +262,9 @@ const MapView = (function () {
   }
 
   /* ================================================================== AUTOCOMPLETE
-     BAND 1 — "Olib ketish joyi" uchun manzil AUTOCOMPLETE.
+     BAND 1 — "Uchrashuv joyi" uchun manzil AUTOCOMPLETE.
+     (XARITA VAQTINCHA O'CHIRILGAN: bu modul `shared.js` dan chaqirilmaydi,
+      lekin to'liq saqlangan — API kaliti tayyor bo'lgach qayta yoqiladi.)
 
      Yandex Go tajribasi: foydalanuvchi "Beshariq" deb yozadi → variantlar
      (Beshariq tumani, Beshariq MFY, Beshariq ko'chasi, ...) pastda ochiladi →

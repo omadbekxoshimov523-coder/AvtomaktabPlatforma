@@ -1,0 +1,23 @@
+# ============================================================================
+# AVTO MAKTAB — server (app/ + server.py) uchun kutubxonalar.
+#
+# Eslatma: yadro (server, DB, API, Telegram bot) faqat STDLIB ishlatadi.
+# Quyidagi IKKI kutubxona FAQAT hisobot eksporti (VAZIFA 1) uchun kerak:
+#   openpyxl  — haqiqiy XLSX (Excel) fayl yaratish
+#   reportlab — haqiqiy PDF fayl yaratish (avvalgi "PDF" HTML fayl edi)
+#
+# Alohida o'rnatish (kerak bo'lmasa):
+#   pip install openpyxl reportlab
+#
+# Ular o'rnatilmagan bo'lsa, platforma ISHLASHDA DAVOM ETADI:
+#   CSV  -> har doim ishlaydi (faqat standart `csv` moduli)
+#   XLSX -> 503 `export.xlsx_unavailable` (bo'sh/buzilgan fayl QAYTARILMAYDI)
+#   PDF  -> 503 `export.pdf_unavailable`
+# ============================================================================
+
+# --- hisobot eksporti ---
+# `reportlab` 4.x va 5.x bilan tekshirilgan (joriy muhitda 5.0.1).
+# Chegara `<6.0` — kelgusi kichik inkrementlar uchun ochiq, lekin asosiy
+# o'zgarishlarda (6.x) avval sinovdan o'tkazilishi shart.
+openpyxl>=3.1,<4.0
+reportlab>=4.0,<6.0
