@@ -126,6 +126,21 @@ def yandex_api_key() -> str:
     return _env("YANDEX_MAPS_API_KEY")
 
 
+def yandex_geocoder_key() -> str:
+    """BAND 1: AUTOCOMPLETE uchun Yandex Geocoder kaliti.
+
+    Yandex Maps JS API kaliti va Geocoder (manzil qidirish) kaliti — bu
+    Yandex'da BIR xil API hisobiga tegadi, lekin JS moduli ichida
+    `ymaps.geocoder` faqat JS API kaliti bilan ishlaydi. Alohida
+    `YANDEX_GEOCODER_API_KEY` berilgan bo'lsa — u ishlatiladi, aks holda
+    `YANDEX_MAPS_API_KEY`.
+
+    Hech qanday kalit TOPILMASA — `""` qaytariladi: frontend "xarita
+    sozlanmagan" deb aniq xabar beradi. Soxta kalit QO'YILMAYDI.
+    """
+    return _env("YANDEX_GEOCODER_API_KEY") or _env("YANDEX_MAPS_API_KEY")
+
+
 def map_center() -> dict:
     """Xarita markazi. Toshkent — standart (`.env` da o'zgartirilishi mumkin)."""
     return {
@@ -147,13 +162,20 @@ def public_map_config() -> dict:
     Yandex Maps JS API kaliti ommaviy (brauzerda ko'rinishi shart).
     """
     key = yandex_api_key()
+    geo_key = yandex_geocoder_key()
     return {
         "provider": map_provider(),
         "api_key": key,
+        # BAND 1: autocomplete uchun. `geocoder_enabled` — kalit yo'q bo'lsa
+        # frontend faqat xaritada nuqta bosish + kiritish imkonini taklif qiladi.
+        "geocoder_api_key": geo_key,
+        "geocoder_enabled": bool(geo_key) and map_provider() != "none",
         "enabled": bool(key) and map_provider() != "none",
         "center": map_center(),
         "zoom": map_center()["zoom"],
         # Quyidagi ikki qiymat frontend uchun qulaylik (server ularni
         # ishlatmaydi, lekin JS bitta manbadan oladi).
-        "region": "Tashkent",
+        "region": _env("MAP_REGION", "Tashkent"),
+        # BAND 1: qidiruv natijalari shu hududga bog'lanadi (masalan "uz").
+        "lang": _env("MAP_LANG", "uz"),
     }

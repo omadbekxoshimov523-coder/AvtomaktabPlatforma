@@ -1,4 +1,4 @@
-/* Umumiy komponentlar: session detallari, foydalanuvchi formasi, xabarlar, yordamchilar */
+﻿/* Umumiy komponentlar: session detallari, foydalanuvchi formasi, xabarlar, yordamchilar */
 const Shared = (function () {
   const { t, fmtDate, fmtDateTime, errorText, notifLabel, notifText } = I18N;
   const UI = window.UI;
@@ -32,7 +32,11 @@ const Shared = (function () {
       duplicate_student_in_session: t("err.session.duplicate_student"),
       session_too_long: t("err.session_too_long"), time_order: t("err.invalid_time"),
     };
-    return map[code] || code;
+    if (map[code]) return map[code];
+    /* BAND 6: parol kuchlilik qoidalari `auth.password_*` kodlari bilan
+       keladi — ular uchun umumiy `errorText` ishlatiladi (`err.*` lug'ati). */
+    const e = I18N.errorText(code);
+    return (e && e !== code) ? e : code;
   }
 
   function rulesList(errs) {
@@ -41,8 +45,11 @@ const Shared = (function () {
     return ul;
   }
 
-  /* ---------- hisob ma'lumotlari (login/parol) ---------- */
-  function credBox(login, password) {
+  /* ---------- hisob ma'lumotlari (login/parol) ----------
+     BAND 6: parol DB'da PLAIN TEXT emas (scrypt hash) va admin uni
+     hech qachon qaytara olmaydi. Shu sababli yangi parol faqat SHUNING
+     o'zida yaratilgan paytdin — bir marta ko'rsatiladi. `hint` — ogohlantirish. */
+  function credBox(login, password, hint) {
     function row(label, value) {
       const inp = el("input", { class: "input", value: value || "", readonly: "" });
       const copyB = el("button", { class: "btn btn-light btn-sm", icon: "copy", text: "" + t("common.copy"),
@@ -52,10 +59,12 @@ const Shared = (function () {
         copyB,
       ]);
     }
-    return el("div", { class: "cred-box" }, [
+    const kids = [
       el("div", { class: "field-label", icon: "key", text: "" + t("student.credentials") }),
       row(t("auth.login"), login), row(t("auth.password"), password),
-    ]);
+    ];
+    if (hint) kids.push(el("p", { class: "cred-warn", icon: "warn", text: hint }));
+    return el("div", { class: "cred-box" }, kids);
   }
 
   /* ---------- XABAR YUBORISH ---------- */
@@ -369,70 +378,137 @@ const Shared = (function () {
     return el("div", {}, kids);
   }
 
-  /* MODUL 4: "Olish manzili" (pickup) tahrirlash.
-     - Xarita: Yandex Maps JS API (Toshkent markazida). Nuqtani bosish
-       kenglik/uzunlikni avtomatik to'ldiradi.
-     - Maydonlar: "Kenglik" (latitude) va "Uzunlik" (longitude) — avvalgi
-       "lat"/"lng" yozuvlari tushunarsiz edi. Qo'lda kiritish ham saqlanib
-       qoladi (agar xarita yuklanmasa yoki kalit yo'q bo'lsa ham). */
+/* BAND 1 — "Olib ketish joyi" (pickup) tahrirlash, YANGI USUL.
+
+     AVVALGI holat: "Kenglik" (41.31...) va "Uzunlik" (69.24...) degan IKKITA
+     maydon bor edi — foydalanuvchi uchun tushunarsiz, xato ehtimoli yuqori.
+
+     HOZIR:
+       * Kenglik/uzunlik maydonlari UI'dan BUTUNLAY olib tashlandi.
+       * Bitta "Manzil" inputi — ichida Yandex AUTOCOMPLETE (BAND 1):
+         "Beshariq" deb yozilsa variantlar chiqadi (Yandex Go tajribasi),
+         tanlanganda to'liq manzil inputga yoziladi va xaritada nuqta qo'yiladi.
+       * Xaritada NUQTA bosish mumkin — nuqta avtomatik MANZIL nomiga aylanadi
+         (reverse geocoding).
+       * Koordinatalar FAQAT backend orqali DB'ga boradi; foydalanuvchi ularni
+         ko'rmaydi va qo'lda kiritmaydi.
+  */
   function openPickupEdit(s, m) {
-    const addr = input({ value: s.pickup_address || "", placeholder: t("lesson.pickup") });
-    const lat = input({ value: s.pickup_lat || "", placeholder: "41.311081", inputmode: "decimal" });
-    const lng = input({ value: s.pickup_lng || "", placeholder: "69.240562", inputmode: "decimal" });
+    const addr = input({ value: s.pickup_address || "", placeholder: t("map.address_ph") });
     const err = el("div", { class: "map-msg map-msg-err hidden" });
     const mapBox = el("div", { class: "map-picker" });
     const mapHint = el("p", { class: "field-hint", icon: "map", text: t("map.pick_hint") });
+    const mapNote = el("div", { class: "map-msg hidden" });
     const yandex = el("a", { class: "link", href: "https://yandex.uz/maps/", target: "_blank", rel: "noopener", text: "Yandex Maps" });
 
-    function showErr(code) {
-      err.textContent = errorText(code);
+    /* Tanlangan koordinata — UI'da ko'rinmaydi, faqat saqlash uchun yuboriladi. */
+    let picked = { lat: null, lng: null };
+    if (MapView.isNum(s.pickup_lat) && MapView.isNum(s.pickup_lng)) {
+      picked = { lat: Number(s.pickup_lat), lng: Number(s.pickup_lng) };
+    }
+
+    function showErr(code, detail) {
+      err.textContent = errorText(code) + (detail ? " " + detail : "");
       err.classList.remove("hidden");
     }
     function clearErr() { err.textContent = ""; err.classList.add("hidden"); }
-
-    /* Kenglik/uzunlikni tekshirish (backend ham tekshiradi, lekin bu yerda
-       foydalanuvchi darhol ko'radigan xato beradi — jim qolmasligi uchun). */
-    function coords() {
-      clearErr();
-      const la = String(lat.value).trim().replace(",", ".");
-      const ln = String(lng.value).trim().replace(",", ".");
-      if (la === "" && ln === "") return { lat: null, lng: null };
-      if (la === "" || ln === "") { showErr("coord.pair_incomplete"); return null; }
-      const a = Number(la), b = Number(ln);
-      if (!isFinite(a) || a < -90 || a > 90) { showErr("coord.bad_lat"); return null; }
-      if (!isFinite(b) || b < -180 || b > 180) { showErr("coord.bad_lng"); return null; }
-      return { lat: a, lng: b };
+    function showNote(code, cls) {
+      mapNote.textContent = t(code);
+      mapNote.className = "map-msg " + (cls || "map-msg-warn");
     }
 
+    /* Xarita yuklangach nuqtani shu joyga ko'rsatamiz (autocomplete tanlanganda
+       yoki nuqta bosilganda chaqiriladi). `mount` Promise qaytaradi. */
+    let map = null;
+    function showPoint(la, ln) {
+      if (map && typeof map.setPoint === "function") map.setPoint(la, ln, false);
+    }
+
+    /* --- Save/Enter: autocomplete tanlanmagan bo'lsa ham, yozilgan manzil
+       bo'yicha ANIQ koordinata izlanadi (noto'g'ri nuqta saqlanmasin) --- */
+    async function resolveFromText() {
+      const v = String(addr.value || "").trim();
+      if (!v) return { ok: false };
+      if (picked.lat !== null && picked.lng !== null) return { ok: true, lat: picked.lat, lng: picked.lng };
+      const g = await MapView.geocode(v);
+      if (g && MapView.isNum(g.lat) && MapView.isNum(g.lng)) {
+        picked = { lat: Number(g.lat), lng: Number(g.lng) };
+        showPoint(picked.lat, picked.lng);
+        addr.value = g.name || v;
+        if (ac) ac.setValue(addr.value);
+        return { ok: true, lat: picked.lat, lng: picked.lng };
+      }
+      return { ok: true, lat: null, lng: null };  /* manzil saqlanadi, xarita nuqtasi yo'q */
+    }
+
+    let ac = null;
     const sm = modal(t("lesson.pickup"), [
-      field(t("lesson.pickup"), addr),
-      el("div", { class: "row" }, [
-        field(t("map.lat"), lat, { class: "f1", hint: t("map.lat_hint") }),
-        field(t("map.lng"), lng, { class: "f1", hint: t("map.lng_hint") }),
-      ]),
+      field(t("map.address"), addr, { hint: t("map.address_hint") }),
       err,
-      mapBox, mapHint, yandex,
+      mapBox, mapHint, mapNote, yandex,
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => sm.close() }),
         el("button", { class: "btn btn-primary", text: t("common.save"),
           onclick: async () => {
-            const c = coords();
-            if (!c) return; // xatoli maydon — saqlash TO'XTATILADI
+            clearErr();
+            const text = String(addr.value || "").trim();
+            if (!text) { showErr("map.address_required"); return; }
             try {
+              const r = await resolveFromText();
+              if (!r.ok) { showErr("map.geocoder_failed"); return; }
               await API.put(`student/sessions/${s.id}/pickup`, {
-                address: addr.value, lat: c.lat, lng: c.lng,
+                address: text, lat: r.lat, lng: r.lng,
               });
-              toast(t("misc.saved")); sm.close(); m.close(); openSession(s.id, "student");
+              toast(t("misc.saved")); sm.close(); m && m.close(); openSession(s.id, "student");
             } catch (e) { errToast(e); }
           } }),
       ]),
     ]);
 
-    /* Xarita modal ichida yuklanadi (lazy) — sahifa ochilganda emas. */
-    MapView.mount(mapBox, {
-      lat: s.pickup_lat, lng: s.pickup_lng,
-      onChange: (la, ln) => { lat.value = Number(la).toFixed(6); lng.value = Number(ln).toFixed(6); clearErr(); },
+    /* --- Autocomplete: Yandex takliflar + xarita --- */
+    MapView.config().then(function (c) {
+      if (!c || c.geocoder_enabled !== true) {
+        /* Kalit yo'q — aniq xabar (soxta kalit QO'YILMAYDI) + ishlash rejimi:
+           foydalanuvchi faqat xaritada nuqtana bosadi. */
+        showNote("map.geocoder_no_key", "map-msg-err");
+      } else {
+        showNote("map.autocomplete_hint", "map-msg-ok");
+      }
     });
+    ac = MapView.attachAutocomplete(addr, {
+      /* Tanlangan variant: to'liq manzil inputga + nuqta xaritada. */
+      onPick: function (item) {
+        picked = { lat: item.lat, lng: item.lng };
+        clearErr();
+        showPoint(item.lat, item.lng);
+      },
+      onNoResult: function (v) {
+        if (String(v || "").trim().length >= 3) showNote("map.no_result", "map-msg-warn");
+      },
+      onUnavailable: function () { showNote("map.geocoder_no_key", "map-msg-err"); },
+      /* Enter bosilganda — variant tanlanmagan bo'lsa. */
+      onEnter: function () { resolveFromText(); },
+    });
+
+    /* Xarita modal ichida yuklanadi (lazy) — sahifa ochilganda emas.
+       `onChange` — nuqtani bosish yoki marker surish: koordinata saqlanadi va
+       nuqta avtomatik MANZIL nomiga aylanadi (BAND 1). */
+    Promise.resolve(MapView.mount(mapBox, {
+      lat: picked.lat, lng: picked.lng,
+      onChange: async function (la, ln) {
+        picked = { lat: Number(la), lng: Number(ln) };
+        clearErr();
+        /* Nuqtadan manzil: foydalanuvchi hech qanday raqam kiritmadi. */
+        const name = await MapView.reverseGeocode(la, ln);
+        if (name) {
+          addr.value = name;
+          if (ac) ac.setValue(name);
+          showNote("map.reverse_ok", "map-msg-ok");
+        } else {
+          showNote("map.reverse_fail", "map-msg-warn");
+        }
+      },
+    })).then(function (mm) { map = mm; }).catch(function () { /* xarita yuklanmadi */ });
   }
 
   /* ---------- ADMIN: session boshqarish ---------- */
@@ -863,34 +939,77 @@ const Shared = (function () {
     }
   }
 
-  /* ---- Profilni tahrirlash ---- */
+  /* ---- BAND 15: "Profilim" -> "Tahrirlash"
+       Tahrirlanadigan 5 ta maydon:
+         1. Tug'ilgan sana (birth_date)
+         2. Telefon (phone)
+         3. LOGIN — `usrL_` formatida va UNIKAL bo'lishi shart
+         4. Guruh (group_name)          — talaba uchun
+         5. Haydovchilik toifasi (license_category) — talaba uchun
+
+       PAROL BU YERDA YO'Q: ko'rsatilmaydi, tahrirlanmaydi. Uning o'zgarishi
+       faqat `Parolni o'zgartirish` oqimi orqali (eski parol + kuchli yangi).
+       "Ro'yxatga olingan sana" (enrolled_at) ham tahrirlanmaydi va talabaga
+       ko'rsatilmaydi — bu ma'lumot faqat admin uchun (BAND 16). */
   function editProfileModal(user) {
+    const isStudent = (user.role === "student");
+    const stu = (App.me.student || {});
     const fName = input({ value: user.first_name || "" });
     const lName = input({ value: user.last_name || "" });
     const mName = input({ value: user.middle_name || "" });
-    const phone = input({ value: user.phone || "", placeholder: "+998 90 123 45 67" });
-    const m = modal(t("profile.edit"), [
-      el("div", { class: "grid-2" }, [
-        field(t("common.last_name"), lName),
-        field(t("common.first_name"), fName),
-        field(t("common.middle_name"), mName),
-        field(t("common.phone"), phone),
-      ]),
-      el("div", { class: "row end mt" }, [
-        el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
-        el("button", { class: "btn btn-primary", text: "" + t("common.save"),
-          onclick: async () => {
-            try {
-              await API.put("me/profile", {
-                first_name: fName.value, last_name: lName.value,
-                middle_name: mName.value, phone: phone.value,
-              });
-              toast(t("misc.saved")); m.close();
-              _profileRefresh();
-            } catch (e) { errToast(e); }
-          } }),
-      ]),
-    ]);
+    const phone = input({ value: user.phone || "", placeholder: "+998 90 123 45 67", inputmode: "tel" });
+    const birth = input({ type: "date", value: user.birth_date || "", max: Shared.todayISO() });
+    /* LOGIN: `usrL_` + 14..32 belgi (harf/raqam). Boshqa foydalanuvchining
+       login'i bilan bir xil bo'lsa — backend `profile.login_taken` qaytaradi
+       va bu yerda tushunarli xabar ko'rsatiladi. */
+    const login = input({ value: user.login || "", placeholder: "usrL_…", autocapitalize: "off",
+      autocomplete: "off", spellcheck: false });
+    const group = input({ value: stu.group_name || "", placeholder: t("student.group_ph") });
+    const cat = input({ value: stu.license_category || "", placeholder: t("student.category_ph") });
+    const loginHint = el("p", { class: "field-hint", text: t("profile.login_hint") });
+
+    const rows = [el("div", { class: "grid-2" }, [
+      field(t("common.last_name"), lName),
+      field(t("common.first_name"), fName),
+      field(t("common.middle_name"), mName),
+      field(t("common.phone"), phone),
+      field(t("student.birth_date"), birth),
+      field(t("common.login"), login, { hint: t("profile.login_hint") }),
+    ])];
+    if (isStudent) {
+      rows.push(el("div", { class: "grid-2" }, [
+        field(t("student.group"), group),
+        field(t("student.category"), cat),
+      ]));
+    }
+    rows.push(el("div", { class: "map-msg map-msg-warn mt" }, [
+      el("div", { text: t("profile.password_not_here") }),
+    ]));
+    rows.push(el("div", { class: "row end mt" }, [
+      el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
+      el("button", { class: "btn btn-primary", text: "" + t("common.save"),
+        onclick: async () => {
+          const payload = {
+            first_name: fName.value, last_name: lName.value,
+            middle_name: mName.value, phone: phone.value,
+            birth_date: birth.value, login: String(login.value || "").trim(),
+          };
+          if (isStudent) {
+            payload.group_name = group.value;
+            payload.license_category = cat.value;
+          }
+          try {
+            const r = await API.put("me/profile", payload);
+            toast(t("misc.saved")); m.close();
+            _profileRefresh();
+            /* Login o'zgarganda boshqa sessiyalar bekor qilinadi —
+               foydalanuvchiga buni aytib beramiz. */
+            if (r && r.login_changed) toast(t("profile.login_changed"));
+          } catch (e) { errToast(e); }
+        } }),
+    ]));
+
+    const m = modal(t("profile.edit"), rows);
   }
 
   /* ---- 2FA ---- */
@@ -973,7 +1092,9 @@ const Shared = (function () {
     ]);
   }
 
-  /* ---- Asosiy profil ko'rinishi (3 rol uchun) ---- */
+  /* ---- Asosiy profil ko'rinishi (3 rol uchun) ----
+     BAND 15: `opts.editable` — "Tahrirlash" tugmasi chiqadi.
+     Parol bu yerda KO'RSATILMAYDI (faqat "Parolni o'zgartirish" tugmasi). */
   function renderProfile(opts = {}) {
     const u = App.me.user;
     const wrap = el("div", {}, [el("h3", { class: "mb", icon: "user", text: "" + t("nav.profile") })]);
@@ -982,15 +1103,19 @@ const Shared = (function () {
       el("button", { class: "avatar-upload", icon: "camera", title: t("profile.upload_photo"),
         onclick: () => pickAvatar(u) }),
     ]);
+    const actions = el("div", { class: "row gap-sm mt wrap" }, []);
+    if (opts.editable !== false) {
+      actions.append(el("button", { class: "btn btn-cyan btn-sm", icon: "edit", text: "" + t("profile.edit"),
+        onclick: () => editProfileModal(u) }));
+    }
+    actions.append(el("button", { class: "btn btn-primary btn-sm", icon: "lock", text: "" + t("profile.change_pass"),
+      onclick: () => openChangePassword(true) }));
     const head = el("div", { class: "profile-head" }, [
       big,
       el("div", { class: "f1" }, [
         el("div", { class: "profile-name", text: profileFullName(u) }),
         el("div", { class: "muted", text: opts.roleLabel || u.role }),
-        el("div", { class: "row gap-sm mt wrap" }, [
-          el("button", { class: "btn btn-cyan btn-sm", icon: "user", text: "" + t("profile.edit"), onclick: () => editProfileModal(u) }),
-          el("button", { class: "btn btn-primary btn-sm", icon: "lock", text: "" + t("profile.change_pass"), onclick: () => openChangePassword(true) }),
-        ]),
+        actions,
       ]),
     ]);
     const card = el("div", { class: "card" }, [head]);
@@ -1015,12 +1140,17 @@ const Shared = (function () {
     return saved;
   }
 
-  const NOTIF_CATS = [
-    ["lesson", "settings.notif_lesson"],
-    ["request", "settings.notif_request"],
-    ["message", "settings.notif_message"],
-    ["security", "settings.notif_security"],
-    ["reminder", "settings.notif_reminder"],
+  /* BAND 17: bildirishnoma sozlamalari — 3 ta REAL soz-lama, barchasi DB'da.
+     `[frontend kalit, DB ustuni]`:
+       - "So'rovlar" va "Xavfsizlik hodisalari" olib tashlandi (BAND 8).
+       - "Admin xabarlari" alohida: `message` (tizim ichi chat) dan farqlanadi. */
+  const NOTIF_PREFS = [
+    ["reminder", "lesson_reminders", "settings.notif_reminder"],
+    ["admin", "admin_messages", "settings.notif_admin"],
+    ["lesson", "lesson_status_updates", "settings.notif_lesson"],
+    ["message", "messages", "settings.notif_message"],
+    ["requests", "requests", "settings.notif_request"],
+    ["security", "security", "settings.notif_security"],
   ];
 
   function settingsPage(opts = {}) {
@@ -1098,21 +1228,32 @@ const Shared = (function () {
     ]);
   }
 
+  /* BAND 17: har bir tugma REAL — o'zgarish darhol `PUT /api/me/settings`
+     orqali `notification_settings` jadvaliga yoziladi. Brauzer yopilsa yoki
+     boshqa qurilmada kirsangiz ham holat saqlanib qoladi (localStorage EMAS). */
   function notifSettingsCard(m) {
-    const prefs = Object.assign({}, m.notif || {});
+    const dbPrefs = Object.assign({}, m.notification_settings || {});
+    const legacy = Object.assign({}, m.notif || {});
+    /* Toggle o'zgarishida faqat o'sha ustunni yuboramiz — boshqalari buzilmaydi. */
+    function save(column, value) {
+      return API.put("me/settings", { notification_settings: { [column]: !!value } })
+        .catch((e) => errToast(e));
+    }
     const card = el("div", { class: "card mb" }, [
       el("h3", { class: "card-title", icon: "bell", text: "" + t("settings.notif_title") }),
       el("div", { class: "muted sm mb", text: t("settings.notif_hint") }),
-      el("div", {}, NOTIF_CATS.map(([key, labelKey]) => toggleRow({
-        title: "" + t(labelKey + "_title"),
-        desc: (() => { const d = t(labelKey + "_desc"); return d && d !== labelKey + "_desc" ? d : ""; })(),
-        checked: prefs[key] !== false,
-        onChange: (v) => {
-          prefs[key] = v;
-          API.put("me/settings", { notif: prefs }).catch(() => {});
-          toast(t("misc.saved"));
-        },
-      }))),
+      el("div", {}, NOTIF_PREFS.map(([legacyKey, column, labelKey]) => {
+        /* Manba: yangi `notification_settings`; eski `notif` — fallback. */
+        const on = Object.prototype.hasOwnProperty.call(dbPrefs, column)
+          ? dbPrefs[column] !== false
+          : legacy[legacyKey] !== false;
+        return toggleRow({
+          title: "" + t(labelKey + "_title"),
+          desc: (() => { const d = t(labelKey + "_desc"); return d && d !== labelKey + "_desc" ? d : ""; })(),
+          checked: on,
+          onChange: (v) => { save(column, v); toast(t("misc.saved")); },
+        });
+      })),
     ]);
     return card;
   }
@@ -1228,16 +1369,34 @@ const Shared = (function () {
   }
 
   /* ============================================================
-     M2/M13: BILDIRISHNOMALAR — to'liq bo'lim (sidebar bo'limi).
+     BILDIRISHNOMALAR — to'liq bo'lim (sidebar bo'limi).
      Barcha rollar uchun umumiy; filtrlash, o'chirish, tozalash.
+
+     BAND 8  — Kategoriyalar QISQARTIRILDI: "So'rovlar" va
+               "Xavfsizlik hodisalari" olib tashlandi. Qolganlari:
+               Barchasi · Mashg'ulotlar · Xabarlar · Mashg'ulot eslatmalari.
+     BAND 11 — Har bir bildirishnoma ALOHIDA DB qatori. Ro'yxatdagi matn
+               faqat o'sha qatorning `body`si; boshqa qatorga "ko'chmaydi".
+     BAND 12 — "Xabarlar" kategoriyasi FAQAT `source='ADMIN_MESSAGE'`
+               (admin yuborgan xabar) — avtomatik eslatma yoki boshqa
+               bildirishnoma bu yerda chiqmaydi.
+     BAND 21 — `data` matni bitta joyda (`JSON.parse`) va `metadata`
+               (tayyor ob'ekt) afzal ishlatiladi — noto'g'ri key/ID xatosi yo'q.
      ============================================================ */
-  function notifCategory(type) {
-    const t0 = String(type || "").toLowerCase();
+
+  /* Eski `type` bo'yicha kategoriya (fallback). */
+  function notifCategory(n) {
+    const src = String((n && n.source) || "").toUpperCase();
+    if (src === "LESSON_REMINDER") return "reminder";
+    if (src === "ADMIN_MESSAGE") return "message";
+    if (src === "LESSON_ASSIGNED" || src === "LESSON_COMPLETED" ||
+        src === "LESSON_CANCELLED" || src === "LESSON_RESCHEDULED" ||
+        src === "LESSON_STARTED") return "lesson";
+    const t0 = String((n && n.type) || "").toLowerCase();
+    if (t0 === "reminder") return "reminder";
+    if (t0 === "admin") return "message";
     if (t0.startsWith("lesson") || t0 === "cancel") return "lesson";
-    if (t0.startsWith("request")) return "request";
     if (t0.startsWith("message") || t0.startsWith("msg")) return "message";
-    if (t0.startsWith("security")) return "security";
-    if (t0.startsWith("reminder")) return "reminder";
     return "info";
   }
 
@@ -1249,13 +1408,12 @@ const Shared = (function () {
       body.innerHTML = "";
       const list = (res.notifications || []).slice();
       let filter = "all";
+      /* BAND 8: faqat 4 ta filtr. */
       const CATS = [
         ["all", t("notif.all")],
-        ["lesson", t("settings.notif_lesson_title")],
-        ["request", t("settings.notif_request_title")],
-        ["message", t("settings.notif_message_title")],
-        ["security", t("settings.notif_security_title")],
-        ["reminder", t("settings.notif_reminder_title")],
+        ["lesson", t("notif.cat_lesson")],
+        ["message", t("notif.cat_message")],
+        ["reminder", t("notif.cat_reminder")],
       ];
       const chipsRow = el("div", { class: "notif-filters" }, []);
       const listEl = el("div", { class: "notif-page" }, []);
@@ -1269,12 +1427,15 @@ const Shared = (function () {
             onclick: () => { filter = cat; render(); },
           }));
         });
-        const items = filter === "all" ? list : list.filter((n) => notifCategory(n.type) === filter);
+        const items = filter === "all" ? list : list.filter((n) => notifCategory(n) === filter);
         listEl.innerHTML = "";
         if (!items.length) { listEl.append(UI.emptyState("🔔", t("notif.empty"))); return; }
         items.forEach((n) => {
-          const data = {};
-          try { Object.assign(data, JSON.parse(n.data || "{}")); } catch (e) {}
+          /* BAND 21: metadata bitta qatorda tayyor ob'ekt bo'lsa — ishlatiladi,
+             aks holda `data` matnidan o'qiladi. Ikalasi ham bo'lmasa — {}. */
+          const data = (n.metadata && typeof n.metadata === "object")
+            ? n.metadata
+            : (function () { try { return JSON.parse(n.data || "{}") || {}; } catch (e) { return {}; } })();
           const senderName = n.sender_id
             ? [n.sender_first_name, n.sender_last_name].filter(Boolean).join(" ") || t("notif.unknown")
             : t("notif.system");
@@ -1283,14 +1444,21 @@ const Shared = (function () {
             ? avatar({ first_name: n.sender_first_name || "?", last_name: n.sender_last_name || "",
                        profile_image: n.sender_profile_image || "" }, 34)
             : el("div", { class: "avatar notif-sys-avatar", style: "width:34px;height:34px;font-size:16px", text: "⚙" });
-          listEl.append(el("div", { class: "notif-page-item" + (n.is_read ? "" : " unread"), onclick: async () => {
-            if (!n.is_read) {
-              n.is_read = 1;
-              API.post("me/notifications/read", { id: n.id }).catch(() => {});
-              render(); App.refreshMe();
-            }
-            Shared.openNotif(n, data);
-          } }, [
+          listEl.append(el("div", {
+            /* BAND 21: React kaliti emas, lekin barqaror identifikator —
+               `id` butun son, ko'rsatkich (index) EMAS. */
+            key: "notif-" + n.id,
+            class: "notif-page-item" + (n.is_read ? "" : " unread"),
+            dataset: { nid: String(n.id) },
+            onclick: async () => {
+              if (!n.is_read) {
+                n.is_read = 1;
+                API.post("me/notifications/read", { id: n.id }).catch(() => {});
+                render(); App.refreshMe();
+              }
+              Shared.openNotif(n, data);
+            },
+          }, [
             el("span", { class: "notif-unread-dot", "aria-hidden": "true" }),
             senderAvatar,
             el("div", { class: "f1" }, [

@@ -4,6 +4,7 @@ Barcha biznes qoidalar backendda majburiy bajariladi (app/rules.py).
 """
 import base64
 import csv
+import datetime as _dt
 import hashlib
 import hmac
 import io
@@ -16,12 +17,21 @@ import time as _time
 import urllib.parse
 
 from .auth import (
-    create_session, destroy_session, get_session_user, hash_password,
+    create_session, destroy_session, get_session, get_session_user, hash_password,
     verify_password, new_token, login_allowed, reset_login_attempts,
+    ip_blocked, reset_ip_attempts, generate_credentials, generate_password,
+    is_valid_login, password_strength_errors, credential_digest,
 )
 from .db import init_db, now, today, jload, jdump, next_credentials, Db
 from .rules import check_session_rules, session_auto_data, parse_date, validate_time_range
-from .notify import notify, notify_session_participants, audit, DEFAULT_NOTIF
+from .notify import (
+    notify, notify_session_participants, audit, DEFAULT_NOTIF, DEFAULT_NOTIFICATION_SETTINGS,
+    SRC_ADMIN_MESSAGE, SRC_LESSON_REMINDER, SRC_LESSON_ASSIGNED, SRC_LESSON_CANCELLED,
+    SRC_LESSON_COMPLETED, SRC_LESSON_RESCHEDULED, SRC_PRACTICE_REQUEST, SRC_MESSAGE,
+    SRC_SECURITY, SRC_SYSTEM, SOURCES, clear_lesson_reminders,
+    get_settings as notif_get_settings, set_settings as notif_set_settings,
+    session_student_user_ids, legacy_flags,
+)
 from .export import export_table
 from . import export as expmod
 from .config import public_map_config
@@ -138,62 +148,181 @@ def _platform_setting(db, key: str, default=None):
     return val if val is not None else default
 
 
-def ensure_reminders(db) -> int:
-    """Platforma 'reminder_minutes' sozlamasi bo'yicha yaqinlashayotgan
-    mashg'ulotlar uchun eslatma bildirishnomalari yuboradi (M12).
-
-    Har bir mashg'ulot uchun kuniga bitta eslatma ('reminder_log' yozuvi).
-    Yuborilgan eslatmalar sonini qaytaradi.
-    """
-    import datetime as _dt
+# ---------------------------------------------------------------------------
+# BAND 14 — MASHG'ULOTNING ANIQ BIZNES HOLATI
+#
+# DB'dagi `lesson_sessions.status` (scheduled/ongoing/completed/cancelled)
+# saqlanib qoladi. Lekin u Foydalanuvchiga yetarli emas: "scheduled" ham
+# kelmagan, ham o'tib ketgan dars uchun bir xil ko'rinardi. Shu sababdan
+# biznes holati (`_display_status`) va kelajak/o'tgan ajratmasi (`_is_future`)
+# HISOBLANADI va API javobida alohida maydon sifatida qaytariladi.
+#
+#   PENDING    KUTILMOQDA    — kelmagan, tasdiqlanmagan
+#   CONFIRMED  TASDIQLANGAN  — kelmagan, tasdiqlangan
+#   ONGOING    JARAYONDA     — ayni damda o'tmoqda
+#   COMPLETED  BAJARILGAN    — yakunlangan
+#   CANCELLED  BEKOR QILINGAN
+#   OVERDUE    O'TIB KETGAN  — vaqt o'tdi, lekin YAKUNLANMADI
+#                               (avtomatik "Bajarilgan" BO'LMAYDI!)
+#
+# So'rovlar uchun alohida holat: `practice_requests.status='rejected'` ->
+# RAD ETILGAN.
+# ---------------------------------------------------------------------------
+def _row_get(row, key, default=None):
+    """sqlite3.Row / dict'dan qiymatni xatosiz olish (ustun yo'q bo'lsa default)."""
     try:
-        minutes = int(_platform_setting(db, "reminder_minutes", 60) or 60)
-    except (TypeError, ValueError):
-        minutes = 60
-    minutes = max(minutes, 1)
-    td = _dt.date.today()
+        v = row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if v is None else v
+
+
+def session_business_status(row, today_iso: str = None, hhmm: str = None):
+    """Qatorga `_display_status` va `_is_future` qo'shadi (mutatsiyali)."""
+    today_iso = today_iso or today()
+    hhmm = hhmm or now()[11:16]
+    st = _row_get(row, "status", "")
+    date_s = _row_get(row, "date", "")
+    end_t = _row_get(row, "end_time", "")
+    is_future = bool(date_s) and (date_s > today_iso or (date_s == today_iso and end_t > hhmm))
+    row["_is_future"] = is_future
+    if st == "completed":
+        disp = "completed"
+    elif st == "cancelled":
+        disp = "cancelled"
+    elif st == "ongoing":
+        disp = "ongoing"
+    elif is_future:
+        # KELMAGAN: "Kutilmoqda" faqat shu yerda ishlatiladi.
+        disp = "confirmed" if _row_get(row, "confirm_state", "pending") == "confirmed" else "pending"
+    else:
+        # O'tib ketgan, lekin yakunlanmagan — BAJARILGAN emas.
+        disp = "overdue"
+    row["_display_status"] = disp
+    return disp
+
+
+def session_start_dt(date_str: str, time_str: str):
+    """'YYYY-MM-DD' + 'HH:MM' -> datetime (xato qiymatda None)."""
+    try:
+        sh, sm = map(int, str(time_str).split(":"))
+        y, mo, d = map(int, str(date_str).split("-"))
+        return _dt.datetime(y, mo, d, sh, sm)
+    except Exception:
+        return None
+
+
+# BAND 9 — 2 soat oldin eslatma. Doimiy qiymat platforma sozlamasidan
+# olinmaydi: talab aniq "2 SOAT" deb belgilagan.
+REMINDER_LEAD_MINUTES = 120
+
+
+def ensure_reminders(db) -> int:
+    """Mashg'ulot boshlanishidan 2 SOAT oldin talab va instruktorga
+    eslatma yuboradi (BAND 9). Qaytaradi: yuborilgan bildirishnomalar soni.
+
+    QOIDALAR (barchasi majburiy):
+      * FAQAT BIR MARTA — `ux_notif_reminder_once` UNIQUE indeksi
+        (user_id + related_lesson_id) kafolatlaydi. Parallel jarayonlar
+        ishlatsa ham, ikkinchi urinish `IntegrityError` beradi va o'tkazib
+        yuboriladi.
+      * VAQT O'ZGARSA — eslatma QAYTA HISOBLANADI: `admin_session_reschedule`
+        eslatmani o'chiradi (`clear_lesson_reminders`), shunda yangi vaqt
+        uchun yangi eslatma yuborilishi mumkin bo'ladi. Eski (noto'g'ri)
+        eslatma esa qolmaydi.
+      * BEKOR QILINGAN mashg'ulotga — hech qachon eslatma yuborilmaydi
+        (status='cancelled' filtrlanadi) va eslatmasi o'chiriladi.
+      * 2 SOATDAN KAM VAQT ichida yaratilgan mashg'ulotga — eslatma
+        YUBORILMAYDI: eslatma vaqti (T-2h) allaqachon o'tgan bo'lgani uchun
+        shart bajarilmaydi (`created_at > T-2h`). Shunday qilib "2 soatdan
+        kam vaqt ichida yaratilgan mashg'ulotda duplicate yoki noto'g'ri
+        bildirishnoma" chiqmaydi.
+      * Foydalanuvchi Sozlamalar → "Mashg'ulot eslatmalari" ni O'CHIRGAN
+        bo'lsa — unga eslatma yuborilmaydi.
+    """
     now_dt = _dt.datetime.now().replace(second=0, microsecond=0)
-    window_end = now_dt + _dt.timedelta(minutes=minutes)
+    lead = _dt.timedelta(minutes=REMINDER_LEAD_MINUTES)
+    # Barcha yaqin kelajakdagi mashg'ulotlar: bugundan keyingi 2 kun.
+    day_after = (_dt.date.today() + _dt.timedelta(days=2)).strftime("%Y-%m-%d")
     rows = db.q(
-        "SELECT id, date, start_time, end_time, instructor_id FROM lesson_sessions "
-        "WHERE date=? AND status!='cancelled'", (td.strftime("%Y-%m-%d"),))
-    log_row = db.q1("SELECT value FROM system_settings WHERE key='reminder_log'")
-    log = jload(log_row["value"], {}) if log_row else {}
-    log = log if isinstance(log, dict) else {}
+        """SELECT ls.id, ls.date, ls.start_time, ls.end_time, ls.instructor_id, ls.created_at,
+                  i.user_id AS instructor_uid
+           FROM lesson_sessions ls
+           JOIN instructors i ON i.id = ls.instructor_id
+           WHERE ls.status IN ('scheduled','ongoing') AND ls.date <= ?""",
+        (day_after,),
+    )
     sent_n = 0
     for r in rows:
-        try:
-            sh, sm = map(int, r["start_time"].split(":"))
-            start_dt = _dt.datetime(td.year, td.month, td.day, sh, sm)
-        except Exception:
+        start = session_start_dt(r["date"], r["start_time"])
+        if start is None:
             continue
-        if not (now_dt <= start_dt <= window_end):
+        remind_at = start - lead
+        # (a) Hali eslatma vaqti kelmagan
+        if now_dt < remind_at:
             continue
-        marker = r["date"] + " " + r["start_time"]
-        if log.get(str(r["id"])) == marker:
-            continue  # allaqachon yuborilgan
-        info = f"{r['date']} {r['start_time']}-{r['end_time']}"
-        rdata = {"session_id": r["id"], "verb": "reminder",
-                 "date": r["date"], "start_time": r["start_time"], "end_time": r["end_time"]}
-        inst = db.q1(
-            "SELECT u.id AS uid FROM instructors i JOIN users u ON u.id=i.user_id WHERE i.id=?",
-            (r["instructor_id"],))
-        if inst:
-            notify(db, inst["uid"], "lesson.reminder", info, "reminder", rdata)
-            sent_n += 1
-        students = db.q(
-            """SELECT u.id AS uid FROM session_students ss JOIN students s ON s.id=ss.student_id
-               JOIN users u ON u.id=s.user_id
-               WHERE ss.session_id=? AND ss.student_status='active'""", (r["id"],))
-        for s in students:
-            notify(db, s["uid"], "lesson.reminder", info, "reminder", rdata)
-            sent_n += 1
-        log[str(r["id"])] = marker
-    db.ex(
-        "INSERT INTO system_settings(key,value,updated_at) VALUES('reminder_log',?,?) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-        (jdump(log), now()))
+        # (b) Mashg'ulot allaqachon boshlangan/b tugagan
+        if now_dt >= start:
+            continue
+        # (c) Eslatma vaqti mashg'ulot YARATILGANDAN keyin o'tgan bo'lsa
+        #     (mashg'ulot 2 soatdan kam vaqt ichida yaratilgan) — yubormaymiz.
+        created = session_start_dt(str(r["created_at"])[:10], str(r["created_at"])[11:16])
+        if created is not None and created > remind_at:
+            continue
+        # (d) Boshqa kunka ko'chirilgan (eski eslatma qolgan bo'lishi mumkin)
+        if now_dt >= remind_at + lead:
+            continue
+
+        st = db.q1(
+            """SELECT ss.pickup_address FROM session_students ss
+               WHERE ss.session_id=? AND ss.student_status='active' LIMIT 1""",
+            (r["id"],),
+        )
+        meta = {
+            "session_id": r["id"], "verb": "reminder",
+            "date": r["date"], "start_time": r["start_time"], "end_time": r["end_time"],
+            "pickup_address": (st["pickup_address"] if st else "") or "",
+        }
+        recipients = [(r["instructor_uid"], r["instructor_id"])]
+        for u in db.q(
+            """SELECT u.id AS uid FROM session_students ss
+               JOIN students s ON s.id=ss.student_id JOIN users u ON u.id=s.user_id
+               WHERE ss.session_id=? AND ss.student_status='active'""", (r["id"],),
+        ):
+            recipients.append((u["uid"], None))
+        for uid, _iid in recipients:
+            sent_n += lesson_reminder(
+                db, r["id"], uid, r["date"], r["start_time"], r["end_time"], meta)
     return sent_n
+
+
+def lesson_reminder(db, lesson_id: int, user_id: int, date: str, start_time: str,
+                    end_time: str, meta: dict = None) -> int:
+    """Bitta qabulchiga 2-soat eslatmasini yuboradi. 1 = yuborildi, 0 = yo'q.
+
+    Matn talabdagidek: sana, vaqt, instruktor, olib ketish joyi.
+    """
+    from .notify import SRC_LESSON_REMINDER, notify as _notify
+    info = db.q1(
+        """SELECT u.first_name||' '||u.last_name AS name
+           FROM lesson_sessions ls JOIN instructors i ON i.id=ls.instructor_id
+           JOIN users u ON u.id=i.user_id WHERE ls.id=?""", (lesson_id,),
+    )
+    m = dict(meta or {})
+    m.setdefault("session_id", lesson_id)
+    m["date"] = date
+    m["start_time"] = start_time
+    m["end_time"] = end_time
+    m["instructor_name"] = (info["name"] if info else "") or m.get("instructor_name", "")
+    try:
+        nid = _notify(
+            db, user_id, "lesson.reminder_2h", f"{date} {start_time}-{end_time}",
+            "reminder", m, None, "", source=SRC_LESSON_REMINDER, related_lesson_id=lesson_id,
+        )
+    except ValueError:
+        return 0
+    return 1 if nid else 0
+
 
 
 def upload_dir(*parts: str) -> str:
@@ -236,13 +365,22 @@ class Api:
         self.token = token
         self.tab = tab or None
         self.user = get_session_user(db, token, self.tab) if token else None
+        # BAND 6: sessiya qatori (CSRF token'i shu yerda). `sid` cookie'si
+        # HttpOnly bo'lgani uchun JS uni ko'ra olmaydi — CSRF token'i alohida
+        # sarlavha orqali yuboriladi va shu sessiyaga bog'liq.
+        self.session = get_session(db, token, self.tab) if (token and self.user) else None
 
     # ------------------------------------------------------------------ auth
-    def auth_login(self, body):
+    def auth_login(self, body, client_ip: str = ""):
         login = str(body.get("login", "")).strip()
         password = str(body.get("password", ""))
         role = str(body.get("role", "")).strip()
         remember = bool(body.get("remember"))
+        # BAND 6: IP bo'yicha vaqtinchalik blok. 1) bloklangan IP
+        # 2) bitta login'ga juda ko'p urinish — ikkalasi ham rad etiladi.
+        wait = ip_blocked(client_ip)
+        if wait:
+            return BAD, err("auth.ip_blocked", {"seconds": wait})
         if not login or not password:
             return BAD, err("auth.missing_fields")
         if not login_allowed("login:" + login):
@@ -269,6 +407,7 @@ class Api:
             if not self._check_twofa_code(u, otp):
                 return BAD, err("auth.otp_invalid")
         reset_login_attempts("login:" + login)
+        reset_ip_attempts(client_ip)   # muvaffaqiyatli kirish — IP blokini bo'shatadi
         # Tab'ga xos rejim: cookie'ga qurilma kaliti yoziladi (HttpOnly), sessiya
         # esa shu qurilma + shu tab birligidan yaratiladi. Shunda boshqa tab'
         # kirganda bu tab'ning sessiyasi buzilmaydi.
@@ -278,24 +417,53 @@ class Api:
             # (cookie qiymati endi qurilma kaliti sifatida ishlatiladi).
             destroy_session(self.db, self.token)
         self.db.upd("UPDATE users SET last_login_at=? WHERE id=?", (now(), u["id"]))
-        return OK, {"ok": True, "token": token, "user": user_public(u)}
+        sess = get_session(self.db, token, self.tab)
+        return OK, {"ok": True, "token": token, "user": user_public(u),
+                    "csrf": (sess or {}).get("csrf_token", "")}
+
 
     def auth_logout(self):
         destroy_session(self.db, self.token, self.tab)
         return OK, {"ok": True}
 
     def auth_change_password(self, body):
+        """Parolni o'zgartirish — alohida xavfsiz oqim (BAND 15).
+
+        Profil tahrirlash orqali parol ALMASHMAYDI: bu endpoint
+        `auth/change-password`. Eski parol har doim talab qilinadi
+        (`must_change_password=1` bo'lsa ham — admin tomonidan berilgan
+        parolni bilmasligi mumkin, shuning uchun majburiy emas).
+        """
         if not self.user:
             return UNAUTH, err("auth.required")
-        old = body.get("old_password", "") if not self.user["must_change_password"] else None
-        new = body.get("new_password", "")
-        if old is not None and not verify_password(old, self.user["password_hash"]):
-            return BAD, err("auth.wrong_old_password")
-        if len(new) < 5:
-            return BAD, err("auth.password_short")
+        old = str(body.get("old_password", ""))
+        new = str(body.get("new_password", ""))
+        if not self.user["must_change_password"]:
+            if not verify_password(old, self.user["password_hash"]):
+                return BAD, err("auth.wrong_old_password")
+        strength = password_strength_errors(new)
+        if strength:
+            return BAD, err("auth.password_weak", {"errors": strength})
+        if new == old:
+            return BAD, err("auth.password_same")
+        # Yangi parol boshqa foydalanuvchining paroli bilan bir xil bo'lmasin
+        # (BAND 7) — buni tekshirish uchun barcha hash'larni tekshiramiz.
+        pd = credential_digest(new)
+        if self.db.q1("SELECT 1 FROM used_credentials WHERE password_digest=?", (pd,)):
+            return BAD, err("auth.password_used")
+        self.db.transaction(lambda c: c.execute(
+            "INSERT INTO used_credentials(login_digest, password_digest, created_at) VALUES(?,?,?)",
+            (credential_digest("manual:" + str(self.user["id"]) + ":" + new), pd, now()),
+        ))
         self.db.upd(
             "UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?",
             (hash_password(new), now(), self.user["id"]),
+        )
+        # BAND 6: parol o'zgarganda boshqa qurilmalardagi sessiyalar
+        # bekor qilinadi (faqat joriy sessiya qoladi).
+        self.db.upd(
+            "DELETE FROM sessions_ring WHERE user_id=? AND token_hash!=?",
+            (self.user["id"], (self.session or {}).get("token_hash") or ""),
         )
         return OK, {"ok": True}
 
@@ -320,10 +488,16 @@ class Api:
         row = self.db.q1("SELECT * FROM password_reset_tokens WHERE token_hash=?", (hash_password(token),))
         if not row or row["used_at"] or row["expires_at"] < now():
             return BAD, err("auth.invalid_token")
-        if len(newpass) < 5:
-            return BAD, err("auth.password_short")
-        self.db.upd("UPDATE users SET password_hash=?, updated_at=? WHERE id=?", (hash_password(newpass), now(), row["user_id"]))
+        strength = password_strength_errors(newpass)
+        if strength:
+            return BAD, err("auth.password_weak", {"errors": strength})
+        pd = credential_digest(newpass)
+        if self.db.q1("SELECT 1 FROM used_credentials WHERE password_digest=?", (pd,)):
+            return BAD, err("auth.password_used")
+        self.db.upd("UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?", (hash_password(newpass), now(), row["user_id"]))
         self.db.upd("UPDATE password_reset_tokens SET used_at=? WHERE id=?", (now(), row["id"]))
+        # Parol tiklangan — barcha sessiyalar bekor qilinadi.
+        self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (row["user_id"],))
         return OK, {"ok": True}
 
     # ------------------------------------------------------------ me (barcha)
@@ -331,30 +505,105 @@ class Api:
         if not self.user:
             return UNAUTH, err("auth.required")
         u = user_public(self.user)
+        # BAND 16: "Ro'yxatga olingan sana" talaba/instruktorga KO'RSATILMAYDI.
+        # Ma'lumot DB'da saqlanib qoladi; faqat admin ko'ra oladi.
+        u.pop("created_at", None)
         extra = {"unread": self.db.q1("SELECT COUNT(*) c FROM notifications WHERE user_id=? AND is_read=0", (self.user["id"],))["c"]}
         if u["role"] == "student":
             st = self.db.q1("SELECT * FROM students WHERE user_id=?", (self.user["id"],))
             if st:
-                extra["student"] = st
+                extra["student"] = student_private(st)
         elif u["role"] == "instructor":
             inst = self.db.q1("SELECT * FROM instructors WHERE user_id=?", (self.user["id"],))
             if inst:
+                inst = dict(inst)
+                inst.pop("created_at", None)
                 extra["instructor"] = inst
                 car = self.db.q1("SELECT * FROM cars WHERE id=?", (inst["assigned_car_id"],)) if inst["assigned_car_id"] else None
                 if car:
                     extra["car"] = car
-        return OK, {"ok": True, "user": u, **extra}
+        return OK, {"ok": True, "user": u,
+                    # BAND 6: CSRF token frontend'ga shu javob orqali beriladi
+                    # (sid cookie'si HttpOnly — JS uni o'zi olmaydi).
+                    "csrf": (self.session or {}).get("csrf_token") or "",
+                    **extra}
 
-    def me_notifications(self):
+    # ---- bildirishnomalar (BAND 8/11/12) ----
+    NOTIF_CATEGORIES = {
+        # kategoriya -> SQL sharti. "Xabarlar" = FAQAT haqiqiy admin xabarlari.
+        "all": None,
+        "lesson": ("(n.source IN (?,?,?,?) OR n.type IN ('lesson','cancel'))",),
+        "message": None,   # quyida maxsus shart bilan
+        "reminder": None,  # quyida maxsus shart bilan
+    }
+
+    def me_notifications(self, query=None):
+        """`GET /me/notifications[?category=]`
+
+        Har bir qator — MUSTAQIL DB record. Har biri o'z `id`, `source`,
+        `title`, `body`, `related_lesson_id`, `created_by` qiymatiga ega:
+        biri boshqasining matnini ko'chira olmaydi (BAND 11).
+        """
         if not self.user:
             return UNAUTH, err("auth.required")
+        cat = str((query or {}).get("category", "all")).strip() or "all"
+        params = [self.user["id"]]
+        where = "n.user_id=?"
+        if cat == "lesson":
+            where += (" AND (n.source IN (?,?,?,?) OR n.type IN ('lesson','cancel'))")
+            params += [SRC_LESSON_ASSIGNED, SRC_LESSON_RESCHEDULED,
+                       SRC_LESSON_CANCELLED, SRC_LESSON_COMPLETED]
+        elif cat == "message":
+            # BAND 12: faqat ADMIN yuborgan xabarlar. Avtomatik system
+            # bildirishnomalari (LESSON_REMINDER va h.k.) bu yerda CHIQMAYDI.
+            where += " AND n.source=?"
+            params.append(SRC_ADMIN_MESSAGE)
+        elif cat == "reminder":
+            where += " AND n.source=?"
+            params.append(SRC_LESSON_REMINDER)
+        elif cat != "all":
+            return BAD, err("bad_request")
         rows = self.db.q(
             """SELECT n.*, su.first_name AS sender_first_name, su.last_name AS sender_last_name,
                       su.profile_image AS sender_profile_image
                FROM notifications n LEFT JOIN users su ON su.id=n.sender_id
-               WHERE n.user_id=? ORDER BY n.id DESC LIMIT 100""", (self.user["id"],)
+               WHERE %s ORDER BY n.id DESC LIMIT 200""" % where, params
         )
-        return OK, {"ok": True, "notifications": rows}
+        for r in rows:
+            # `data` — JSON matn (frontend `JSON.parse` qiladi, moslik saqlanadi),
+            # `metadata` — tayyor ob'ekt (BAND 18: metadata maydoni).
+            r["metadata"] = jload(r.get("data"), {})
+        return OK, {"ok": True, "notifications": rows,
+                    "categories": ["all", "lesson", "message", "reminder"]}
+
+    def me_notification_detail(self, nid):
+        """`GET /me/notifications/{id}` — aynan O'SHA id bo'yicha bitta record.
+
+        BAND 6 (IDOR): `user_id` sharti bilan filtrlanadi — boshqa
+        foydalanuvchining bildirishnoma id'sini URL'ga qo'yib ko'rib
+        bo'lmaydi (boshqa id kiritilsa 404 qaytariladi).
+        """
+        if not self.user:
+            return UNAUTH, err("auth.required")
+        try:
+            nid = int(nid)
+        except (TypeError, ValueError):
+            return BAD, err("invalid_input")
+        row = self.db.q1(
+            """SELECT n.*, su.first_name AS sender_first_name, su.last_name AS sender_last_name,
+                      su.profile_image AS sender_profile_image
+               FROM notifications n LEFT JOIN users su ON su.id=n.sender_id
+               WHERE n.id=? AND n.user_id=?""", (nid, self.user["id"]),
+        )
+        if not row:
+            return NOTFOUND, err("not_found")
+        row["metadata"] = jload(row.get("data"), {})
+        if not row["is_read"]:
+            self.db.upd("UPDATE notifications SET is_read=1, read_at=? WHERE id=? AND user_id=?",
+                        (now(), nid, self.user["id"]))
+            row["is_read"] = 1
+        return OK, {"ok": True, "notification": row}
+
 
     def me_notifications_read(self, body):
         if not self.user:
@@ -385,19 +634,21 @@ class Api:
         self.db.upd("DELETE FROM notifications WHERE user_id=?", (self.user["id"],))
         return OK, {"ok": True, "unread": 0}
 
-    # ---- M12: shaxsiy sozlamalar (til / tema / bildirishnomalar) ----
+    # ---- BAND 17: shaxsiy sozlamalar (til / tema / bildirishnoma) ----
 
     def me_settings_get(self):
         if not self.user:
             return UNAUTH, err("auth.required")
         rows = self.db.q("SELECT key, value FROM user_settings WHERE user_id=?", (self.user["id"],))
         s = {r["key"]: jload(r["value"], {}) for r in rows}
-        notif = s.get("notif")
-        notif = notif if isinstance(notif, dict) else {}
+        notif = notif_get_settings(self.db, self.user["id"])
         return OK, {"ok": True, "settings": {
             "lang": s.get("lang", ""),
             "theme": s.get("theme", ""),
-            "notif": {**DEFAULT_NOTIF, **notif},
+            # Eski shakl saqlanadi (`notif`: kategoriya -> bool)
+            "notif": {**DEFAULT_NOTIF, **legacy_flags(self.db, self.user["id"])},
+            # Yangi aniq shakl (BAND 17): har bir sozlama alohida ustun
+            "notification_settings": notif,
         }}
 
     def me_settings_put(self, body):
@@ -406,26 +657,39 @@ class Api:
         uid = self.user["id"]
         t = now()
 
-        def _upsert(key_f, value, ok):
-            if ok:
-                self.db.ex(
-                    "INSERT INTO user_settings(user_id,key,value,updated_at) VALUES(?,?,?,?) "
-                    "ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-                    (uid, key_f, jdump(value), t))
+        def _upsert(key_f, value):
+            self.db.ex(
+                "INSERT INTO user_settings(user_id,key,value,updated_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (uid, key_f, jdump(value), t))
 
         if "lang" in body:
             lang = str(body["lang"]).strip()
-            _upsert("lang", lang, lang in ("uz", "ru", "en"))
+            if lang in ("uz", "ru", "en"):
+                _upsert("lang", lang)
         if "theme" in body:
             theme = str(body["theme"]).strip()
-            _upsert("theme", theme, theme in ("light", "dark", "system"))
-        if isinstance(body.get("notif"), dict):
-            row = self.db.q1("SELECT value FROM user_settings WHERE user_id=? AND key='notif'", (uid,))
-            cur = jload(row["value"], {}) if row else {}
-            cur = cur if isinstance(cur, dict) else {}
-            n = {k: bool(v) for k, v in body["notif"].items() if k in DEFAULT_NOTIF}
-            _upsert("notif", {**DEFAULT_NOTIF, **cur, **n}, True)
-        return OK, {"ok": True}
+            if theme in ("light", "dark", "system"):
+                _upsert("theme", theme)
+        # BAND 17: bildirishnoma sozlamalari — DB ga saqlanadi va
+        # `notify()` shu qiymatlarni tekshiradi. Toggle faqat dizayn EMAS.
+        payload = None
+        if isinstance(body.get("notification_settings"), dict):
+            payload = body["notification_settings"]
+        elif isinstance(body.get("notif"), dict):
+            # Eski frontend shakli: kategoriya -> bool
+            legacy = body["notif"]
+            cur = notif_get_settings(self.db, uid)
+            for col, key in (("lesson_reminders", "reminder"), ("lesson_status_updates", "lesson"),
+                             ("admin_messages", "admin"), ("messages", "message"),
+                             ("requests", "request"), ("security", "security")):
+                if key in legacy:
+                    cur[col] = bool(legacy[key])
+            payload = cur
+        if payload is not None:
+            notif_set_settings(self.db, uid, payload)
+        return OK, {"ok": True, "notification_settings": notif_get_settings(self.db, uid)}
+
 
     # ---- M12: maxfiylik va xavfsizlik — faol sessiyalar ----
 
@@ -504,18 +768,75 @@ class Api:
                sender_id=self.user["id"], sender_role=self.user["role"])
         return OK, {"ok": True, "id": mid}
 
+    # BAND 15: "Profilim" -> "Tahrirlash" — 5 ta maydon:
+    #   tug'ilgan sana, telefon, login, guruh, haydovchilik toifasi.
+    # Parol BU YERDA KO'RSATILMAYDI va o'zgartirilmaydi — u alohida
+    # xavfsiz oqim: `POST /api/auth/change-password`.
+    PROFILE_USER_FIELDS = ("birth_date", "phone", "first_name", "last_name", "middle_name")
+    PROFILE_STUDENT_FIELDS = ("group_name", "license_category")
+
     def me_update_profile(self, body):
+        """`PUT /api/me/profile` — o'z profilini tahrirlash.
+
+        Validatsiya IKKALA tomonda ham (server va frontend). Login:
+          * `usrL_` formatida bo'lishi shart (BAND 5/15),
+          * boshqa foydalanuvchining login'i bilan TAKRORLANMASIN.
+        Login o'zgartirilsa — eski sessiyalar BEKOR qilinadi (login
+        o'g'irlangan bo'lishi mumkin).
+        """
         if not self.user:
             return UNAUTH, err("auth.required")
         fields = {}
-        for f in ("phone", "first_name", "last_name", "middle_name"):
+        for f in self.PROFILE_USER_FIELDS:
             if f in body and body[f] is not None:
                 fields[f] = str(body[f]).strip()
+        # --- login (alohida: unikal + `usrL_` formati) ---
+        login_changed = False
+        if "login" in body and body["login"] is not None:
+            new_login = str(body["login"]).strip()
+            if not is_valid_login(new_login):
+                return BAD, err("profile.login_format")
+            if new_login != self.user["login"]:
+                # `deleted_at` filtrisiz: yumshoq o'chirilgan (archiv) login ham
+                # qayta ishlatilmasligi kerak (UNIQUE constraint shuni talab qiladi).
+                if self.db.q1("SELECT id FROM users WHERE login=?", (new_login,)):
+                    return BAD, err("profile.login_taken")
+                fields["login"] = new_login
+                login_changed = True
+        # --- telefon ---
+        if "phone" in fields:
+            phone = re.sub(r"[^\d+]", "", fields["phone"])
+            if phone and not (7 <= len(phone.lstrip("+")) <= 15):
+                return BAD, err("profile.phone_invalid")
+            fields["phone"] = phone
+        # --- tug'ilgan sana ---
+        if "birth_date" in fields and fields["birth_date"]:
+            d = parse_date(fields["birth_date"])
+            if not d:
+                return BAD, err("profile.birth_date_invalid")
+            if d.year < 1900 or d > _dt.date.today():
+                return BAD, err("profile.birth_date_invalid")
+            fields["birth_date"] = d.strftime("%Y-%m-%d")
         if fields:
             fields["updated_at"] = now()
             self.db.upd("UPDATE users SET " + ", ".join(f"{k}=?" for k in fields) + " WHERE id=?",
                         (*fields.values(), self.user["id"]))
-        return OK, {"ok": True}
+        # --- talabaga xos maydonlar (guruh, haydovchilik toifasi) ---
+        sfields = {}
+        for f in self.PROFILE_STUDENT_FIELDS:
+            if f in body and body[f] is not None:
+                sfields[f] = str(body[f]).strip()
+        if self.user["role"] == "student" and sfields:
+            st = self._stud_record()
+            if st:
+                self.db.upd("UPDATE students SET " + ", ".join(f"{k}=?" for k in sfields) + " WHERE id=?",
+                            (*sfields.values(), st["id"]))
+        if login_changed:
+            # Xavfsizlik: login o'zgargandan keyin boshqa qurilmalardagi
+            # sessiyalar yoki o'g'irlangan login bilan kirish to'xtatiladi.
+            self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (self.user["id"],))
+        return OK, {"ok": True, "updated": sorted(list(fields) + list(sfields)),
+                    "login_changed": login_changed}
 
     def me_update_avatar(self, body):
         """Profil rasmini yuklash: `data:image/png|jpeg|webp;base64,...` qabul qiladi.
@@ -697,6 +1018,11 @@ class Api:
                     "pct": round(done * 100 / total) if total else 0,
                 }
 
+        # BAND 22: admin ro'yxatida maqsadli (jami) darslar soni va qolgani
+        # ham ko'rsatiladi. Maqsad: talabaning o'z `total_lessons_target` qiymati,
+        # yo'q bo'lsa platforma umumiy sozlamasi.
+        group_target = DEFAULT_PLATFORM_SETTINGS["total_lessons_target"]
+
         inst_of = {}
         if any(u["role"] == "student" for u in out):
             for p in self.db.q(
@@ -726,7 +1052,18 @@ class Api:
                 s = st_by_uid.get(u["id"])
                 u["student"] = s
                 if s:
-                    u["progress"] = prog.get(s["id"], {"total": 0, "done": 0, "pct": 0})
+                    # BAND 16: `enrolled_at` faqat admin ko'radi (admin ro'yxati
+                    # shuning uchun to'liq qator qaytariladi).
+                    pr0 = dict(prog.get(s["id"], {"total": 0, "done": 0, "pct": 0}))
+                    own = s.get("total_lessons_target")
+                    target = int(own) if own else group_target
+                    pr0["target"] = target
+                    pr0["individual_target"] = int(own) if own else None
+                    pr0["group_target"] = group_target
+                    pr0["mode"] = "individual" if own else "group"
+                    pr0["remaining"] = max(0, target - pr0["done"])
+                    pr0["pct"] = round(pr0["done"] * 100 / target) if target else 0
+                    u["progress"] = pr0
                     u["instructors"] = inst_of.get(s["id"], [])
             elif u["role"] == "instructor":
                 i_ = inst_by_uid.get(u["id"])
@@ -882,17 +1219,211 @@ class Api:
         return OK, {"ok": True}
 
     def admin_user_reset_password(self, uid):
+        """`POST /api/admin/users/{id}/reset-password` — "Yangi parol yaratish".
+
+        BAND 5/6/7: parol `usrP_` + 14 ta xavfsiz random belgi (katta/kichik
+        harf, raqam, maxsus belgi majburiy). Parol BIR MARTA qaytariladi —
+        keyin uni hech kim, shu jumladan admin, ko'ra OLMAYDI (faqat hash).
+        Generator `secrets` (CSPRNG) ishlatadi; takrorlanish bo'lsa —
+        avtomatik qayta generatsiya (UNIQUE constraint).
+        """
         self._require("admin")
         u = self.db.q1("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (int(uid),))
         if not u:
             return NOTFOUND, err("user.not_found")
-        newpass = new_token(12)
+        newpass = self.db.transaction(lambda c: generate_credentials(c)[1])
         self.db.upd(
             "UPDATE users SET password_hash=?, must_change_password=1, updated_at=? WHERE id=?",
             (hash_password(newpass), now(), int(uid)),
         )
+        # Xavfsizlik: parol almashtirilgandan keyin barcha sessiyalar bekor qilinadi.
+        self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (int(uid),))
         audit(self.db, self.user["id"], "password reset", "users", int(uid))
-        return OK, {"ok": True, "login": u["login"], "password": newpass}
+        return OK, {"ok": True, "login": u["login"], "password": newpass,
+                    "password_format": "usrP_<14 random>", "shown_once": True}
+
+    # ---- BAND 3: jami mashg'ulotlar sonini o'zgartirish ----
+    def _student_progress(self, student_id: int) -> dict:
+        """Talabaning progress hisobi: {done, total, target, remaining, pct}."""
+        row = self.db.q1(
+            """SELECT COUNT(*) AS total,
+                      SUM(CASE WHEN ls.status='completed' THEN 1 ELSE 0 END) AS done
+               FROM session_students ss JOIN lesson_sessions ls ON ls.id=ss.session_id
+               WHERE ss.student_id=? AND ss.student_status='active' AND ls.status!='cancelled'""",
+            (student_id,),
+        )
+        done = int(row["done"] or 0)
+        st = self.db.q1("SELECT total_lessons_target FROM students WHERE id=?", (student_id,))
+        own = (st["total_lessons_target"] if st else None)
+        group = DEFAULT_PLATFORM_SETTINGS["total_lessons_target"]
+        target = int(own) if own else group
+        return {
+            "done": done,
+            "sessions": int(row["total"] or 0),
+            "target": target,
+            "individual_target": int(own) if own else None,
+            "group_target": group,
+            "mode": "individual" if own else "group",
+            "remaining": max(0, target - done),
+            "pct": round(done * 100 / target) if target else 0,
+        }
+
+    @staticmethod
+    def _coerce_total(value):
+        """`total_lessons` qiymatini butun songa aylantiradi.
+
+        QAT'IY: `12.5`, `"12.5"`, `"12abc"`, `True`, bo'sh bo'lmagan `[]` va
+        h.k. — RAD etiladi (`None` qaytariladi). Aks holda `int()` butunlikka
+        kesib tashlab ("12.5" -> 12) xato ma'lumot saqlanardi.
+        `None`/" " -> `None` (= platforma umumiy qiymatiga qaytarish).
+        """
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return -1                      # True/False — mantiqiy emas
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value) if value.is_integer() else -1
+        if isinstance(value, str):
+            s = value.strip()
+            if not s:
+                return None
+            try:
+                return int(s)
+            except ValueError:
+                return -1
+        return -1                          # list/dict/None-turlari
+
+    def _set_total_lessons(self, student_id: int, value) -> dict:
+        """Bitta talabaning jami darslar sonini o'zgartiradi (yoki umumiyga
+        qaytaradi). `value` bo'sh/None -> individual maqsad olib tashlanadi.
+
+        VALIDATSIYA (BAND 3): yangi jami < BAJARILGAN bo'lsa — RAD etiladi
+        ("Yangi darslar soni bajarilgan darslardan kam bo'lishi mumkin emas").
+        Bajarilgan mashg'ulotlar, tarix va booking O'CHIRILMAYDI.
+        """
+        st = self.db.q1("SELECT user_id FROM students WHERE id=?", (student_id,))
+        if not st:
+            return {"error": "user.not_found"}
+        pr = self._student_progress(student_id)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            self.db.upd("UPDATE students SET total_lessons_target=NULL WHERE id=?", (student_id,))
+            return {"ok": True, "mode": "group", "progress": self._student_progress(student_id)}
+        n = self._coerce_total(value)
+        if n is None or n < 1 or n > 999:
+            return {"error": "user.bad_total_lessons"}
+        if n < pr["done"]:
+            # BAND 3: yangi jami bajarilgan dan kam bo'lsa — qabul qilinmaydi.
+            return {"error": "user.total_lessons_below_done", "done": pr["done"], "min": pr["done"]}
+        self.db.upd("UPDATE students SET total_lessons_target=? WHERE id=?", (n, student_id))
+        return {"ok": True, "mode": "individual", "progress": self._student_progress(student_id)}
+
+    def admin_user_total_lessons(self, body):
+        """`POST /api/admin/users/total-lessons` — JUMLI mashg'ulotlar soni.
+
+        `scope`: "user" (bitta talaba) | "all" (barcha talabalar)
+        `user_id`: scope="user" uchun (users.id)
+        `total_lessons`: 1..999, yoki bo'sh/null -> platforma umumiy qiymatiga
+                          qaytarish (individual maqsad tozalanadi).
+        """
+        self._require("admin")
+        scope = str(body.get("scope", "user")).strip()
+        if scope == "all":
+            rows = self.db.q("SELECT id FROM students")
+            value = body.get("total_lessons")
+            # Ommaviy rejimda ham validatsiya: eng ko'p bajarilgan talabaga
+            # qarshi tekshiriladi — aks holda progress manfiy bo'lib ketadi.
+            if value is not None and str(value).strip() != "":
+                n = self._coerce_total(value)
+                if n is None or n < 1 or n > 999:
+                    return BAD, err("user.bad_total_lessons")
+                max_done = max([self._student_progress(r["id"])["done"] for r in rows] or [0])
+                if n < max_done:
+                    return BAD, err("user.total_lessons_below_done", {"done": max_done, "min": max_done})
+                value = n
+            updated, skipped, errors = 0, 0, []
+            for r in rows:
+                if value is None:
+                    self.db.upd("UPDATE students SET total_lessons_target=NULL WHERE id=?", (r["id"],))
+                    skipped += 1
+                    continue
+                res = self._set_total_lessons(r["id"], value)
+                if res.get("error"):
+                    errors.append({"student_id": r["id"], "error": res["error"]})
+                else:
+                    updated += 1
+            audit(self.db, self.user["id"], "total_lessons bulk", "students", None,
+                  {"scope": "all", "total": value, "updated": updated, "skipped": skipped})
+            return OK, {"ok": True, "scope": "all", "updated": updated,
+                        "cleared": skipped, "errors": errors}
+        uid = body.get("user_id")
+        if not uid:
+            return BAD, err("bad_request")
+        u = self.db.q1("SELECT id, role FROM users WHERE id=? AND deleted_at IS NULL", (int(uid),))
+        if not u:
+            return NOTFOUND, err("user.not_found")
+        if u["role"] != "student":
+            return BAD, err("user.not_a_student")
+        st = self.db.q1("SELECT id FROM students WHERE user_id=?", (u["id"],))
+        if not st:
+            return NOTFOUND, err("user.not_found")
+        res = self._set_total_lessons(st["id"], body.get("total_lessons"))
+        if res.get("error"):
+            # faqat MAVJUD parametrlarni yubaramiz (frontend `None` ko'rmasin)
+            _p = {k: v for k, v in (("done", res.get("done")),
+                                    ("min", res.get("min"))) if v is not None}
+            return BAD, err(res["error"], _p)
+        audit(self.db, self.user["id"], "total_lessons set", "students", st["id"],
+              {"total_lessons": body.get("total_lessons"), "mode": res["mode"]})
+        return OK, {"ok": True, "scope": "user", "user_id": u["id"],
+                    "mode": res["mode"], "progress": res["progress"]}
+
+    # ---- BAND 22: admin uchun foydalanuvchi profili ----
+    def admin_user_profile(self, uid):
+        """`GET /api/admin/users/{id}` — bitta foydalanuvchi to'liq profili.
+
+        Talaba, login, telefon, guruh, haydovchilik toifasi, jami darslar,
+        bajarilgan, qolgan, progress. BAND 16: `enrolled_at` shu yerda
+        KO'RSATILADI (faqat admin uchun).
+        """
+        self._require("admin")
+        uid = int(uid)
+        u = self.db.q1("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (uid,))
+        if not u:
+            return NOTFOUND, err("user.not_found")
+        out = user_public(u)
+        # Parol HECH QACHON qaytarilmaydi — admin uni ko'ra olmaydi (BAND 6).
+        out.pop("must_change_password", None)
+        out["has_password"] = bool(u["password_hash"])
+        progress = None
+        if u["role"] == "student":
+            st = self.db.q1("SELECT * FROM students WHERE user_id=?", (uid,))
+            out["student"] = st          # `enrolled_at` shu yerda (faqat admin)
+            if st:
+                progress = self._student_progress(st["id"])
+                out["instructors"] = [
+                    {"id": p["id"], "name": p["name"]}
+                    for p in self.db.q(
+                        """SELECT DISTINCT i.id AS id, us.first_name||' '||us.last_name AS name
+                           FROM session_students ss JOIN lesson_sessions ls ON ls.id=ss.session_id
+                           JOIN instructors i ON i.id=ls.instructor_id JOIN users us ON us.id=i.user_id
+                           WHERE ss.student_id=? AND ss.student_status='active'""", (st["id"],))
+                ]
+        elif u["role"] == "instructor":
+            inst = self.db.q1("SELECT * FROM instructors WHERE user_id=?", (uid,))
+            out["instructor"] = inst
+            if inst and inst["assigned_car_id"]:
+                out["car"] = self.db.q1(
+                    "SELECT id, brand, model, plate_number, status FROM cars WHERE id=?",
+                    (inst["assigned_car_id"],))
+            out["students_count"] = self.db.q1(
+                """SELECT COUNT(DISTINCT ss.student_id) c FROM lesson_sessions ls
+                   JOIN session_students ss ON ss.session_id=ls.id
+                   WHERE ls.instructor_id=? AND ss.student_status='active'""",
+                (inst["id"],))["c"] if inst else 0
+        out["progress"] = progress
+        return OK, {"ok": True, "user": out}
 
     def admin_user_delete(self, uid):
         """Soft delete — tarix buzilmaydi."""
@@ -1298,6 +1829,11 @@ class Api:
              auto.get("car_plate_snapshot"), auto.get("capacity_snapshot"), now(), int(sid)),
         )
         newrow = self.db.q1("SELECT * FROM lesson_sessions WHERE id=?", (int(sid),))
+        # BAND 9: vaqt o'zgarganda ESLATMA QAYTA HISOBLANADI — eski (noto'g'ri)
+        # eslatma o'chiriladi, shunda yangi vaqt uchun yangi eslatma yuborilishi
+        # mumkin bo'ladi. Aks holda eski eslatma qolib, yangisi yuborilmasligi
+        # (yoki ikkalasi birga chiqishi) mumkin edi.
+        clear_lesson_reminders(self.db, int(sid))
         notify_session_participants(self.db, newrow, "rescheduled", sender_id=self.user["id"], sender_role=self.user["role"])
         audit(self.db, self.user["id"], "session rescheduled", "lesson_sessions", int(sid),
               {"date": date, "start": start, "end": end, "instructor_id": instructor_id})
@@ -1312,6 +1848,9 @@ class Api:
         self.db.upd(
             "UPDATE lesson_sessions SET status='cancelled', cancel_reason=?, updated_at=? WHERE id=?",
             (reason, now(), int(sid)))
+        # BAND 9: bekor qilingan mashg'ulotga eslatma yuborilmaydi — avval
+        # yuborilgan eslatma ham o'chiriladi (noto'g'ri xabar qolmasin).
+        clear_lesson_reminders(self.db, int(sid))
         notify_session_participants(self.db, row, "cancelled", sender_id=self.user["id"], sender_role=self.user["role"])
         audit(self.db, self.user["id"], "session cancelled", "lesson_sessions", int(sid), {"reason": reason})
         return OK, {"ok": True}
@@ -1443,21 +1982,39 @@ class Api:
         return OK, {"ok": True, "notifications": rows}
 
     def admin_send_notification(self, body):
+        """`POST /api/admin/notifications` — admin xabari yuborish.
+
+        BAND 12: har bir qabulchi uchun ALOHIDA DB record yaratiladi va
+        `source = ADMIN_MESSAGE`, `created_by = <admin id>` belgilanadi.
+        Shu sababli "Xabarlar" kategoriyasida faqat SHU xabarlar chiqadi —
+        avtomatik tizim bildirishnomalari (2-soat eslatma, mashg'ulot
+        biriktirilishi va h.k.) admin xabari sifatida chiqmaydi va boshqa
+        bildirishnomalarda takrorlanmaydi (BAND 11).
+        """
         self._require("admin")
         role = body.get("role") or None
         title = str(body.get("title", "")).strip()
         text = str(body.get("text", "")).strip()
         if not text:
             return BAD, err("notif.empty")
+        if len(text) > 4000:
+            return BAD, err("notif.too_long")
         if role:
+            if role not in ROLES:
+                return BAD, err("bad_request")
             users = self.db.q("SELECT id FROM users WHERE role=? AND status='active' AND deleted_at IS NULL", (role,))
         else:
             users = self.db.q("SELECT id FROM users WHERE status='active' AND deleted_at IS NULL")
+        created, skipped = [], []
         for u in users:
-            notify(self.db, u["id"], title or "message", text, "admin",
-                   sender_id=self.user["id"], sender_role="admin")
-        audit(self.db, self.user["id"], "notification sent", None, None, {"role": role, "count": len(users)})
-        return OK, {"ok": True, "count": len(users)}
+            nid = notify(self.db, u["id"], title or "message", text, "admin",
+                         sender_id=self.user["id"], sender_role="admin",
+                         source=SRC_ADMIN_MESSAGE, created_by=self.user["id"])
+            (created if nid else skipped).append(nid or u["id"])
+        audit(self.db, self.user["id"], "notification sent", None, None,
+              {"role": role, "count": len(created), "skipped": len(skipped)})
+        return OK, {"ok": True, "count": len(created), "skipped": len(skipped),
+                    "ids": created, "source": SRC_ADMIN_MESSAGE}
 
     # ---- reports & export
     def admin_analytics(self, query):
@@ -1833,6 +2390,13 @@ class Api:
             return CONFLICT, err("session.wrong_status")
         self.db.upd("UPDATE lesson_sessions SET status='completed', completed_at=?, updated_at=? WHERE id=?",
                     (now(), now(), int(sid)))
+        # BAND 9/14: yakunlandi — 2-soat eslatmasi kerak emas (o'chiriladi),
+        # va har bir talabaga alohida BAJARILGAN bildirishnoma yoziladi
+        # (`source=LESSON_COMPLETED`, admin xabari sifatida chiqmaydi).
+        clear_lesson_reminders(self.db, int(sid))
+        newrow = self.db.q1("SELECT * FROM lesson_sessions WHERE id=?", (int(sid),))
+        notify_session_participants(self.db, newrow, "finished",
+                                    sender_id=self.user["id"], sender_role=self.user["role"])
         audit(self.db, self.user["id"], "session finished", "lesson_sessions", int(sid))
         return OK, {"ok": True}
 
@@ -1993,8 +2557,21 @@ class Api:
             # foiz 0 qoladi — xatolik chiqmasligi uchun.
             "pct": round(done_all * 100 / target) if target > 0 else 0,
         }
+        # BAND 13/14: kelmagan va o'tib ketgan mashg'ulotlar soni. "Kutilmoqda"
+        # faqat kelmaganlar uchun; o'tib ketgan lekin yakunlanmagan darslar
+        # alohida hisoblanadi va progress'ga kirMAYDI.
+        upcoming, overdue = 0, 0
+        for r in rows:
+            disp = session_business_status(r, today(), now()[11:16])
+            if disp in ("pending", "confirmed"):
+                upcoming += 1
+            elif disp == "overdue":
+                overdue += 1
         return OK, {"ok": True, "weekly": agg(wk_rows), "overall": agg(rows),
-                    "progress": progress, "next": nxt}
+                    "progress": progress, "next": nxt,
+                    "counts": {"total": len(rows), "done": done_all,
+                               "remaining": progress["remaining"], "upcoming": upcoming,
+                               "overdue": overdue}}
 
     def student_today(self):
         """M6: Talaba 'Bugun' bo'limi — bugungi mashg'ulotlar ro'yxati."""
@@ -2012,28 +2589,59 @@ class Api:
         return OK, {"ok": True, "sessions": rows}
 
     def student_sessions(self, query):
+        """`GET /api/student/sessions?upcoming=1|0|all`
+
+        BAND 13/14 — kelajakdagi va o'tilgan mashg'ulotlar ANIQ ajratiladi:
+          * KELAJAK (`upcoming=1`): faqat kelmagan/rejalashtirilgan mashg'ulotlar.
+            Bitta kun o'tib ketgan dars bu ro'yxatda QOLMAYDI (lekin DB'da
+            saqlanadi va "Mashg'ulotlar tarixi"ga kiradi).
+          * O'TGAN (`upcoming=0`): `completed` + `cancelled` + o'tib ketgan
+            lekin yakunlanmagan (`overdue`) mashg'ulotlar.
+          * `all`: ikkalasi birga.
+
+        BAND 14 — "Kutilmoqda" faqat KELMAGAN mashg'ulotlar uchun. Vaqt o'tib
+        ketgan, lekin haqiqatan bajarilmagan dars AVTOMATIK "Bajarilgan"
+        BO'LMAYDI — u `OVERDUE` ("o'tib ketgan, tasdiqlash kutilmoqda")
+        holatida tarixga tushadi. Bajarilgan darslar soniga faqat
+        `status='completed'` hisoblanadi.
+        """
         self._require("student")
         st = self._stud_record()
-        up = query.get("upcoming", "1")
+        sel = """SELECT ls.*, ls.confirm_state AS confirm_state,
+                        u.first_name||' '||u.last_name AS instructor_name, u.phone AS instructor_phone,
+                        ss.pickup_address, ss.pickup_lat, ss.pickup_lng, ss.attendance_status,
+                        (SELECT COUNT(*) FROM session_students s2 WHERE s2.session_id=ls.id AND s2.student_status='active') AS student_count
+                 FROM session_students ss JOIN lesson_sessions ls ON ls.id=ss.session_id
+                 JOIN instructors i ON i.id=ls.instructor_id JOIN users u ON u.id=i.user_id
+                 WHERE ss.student_id=? AND ss.student_status='active' """
+        up = str(query.get("upcoming", "1")).strip()
+        # Kelajak = kelmagan, bekor qilinmagan. VAQT O'TGAN darslar hamkiradi
+        # (bitta kun o'tishi yetarli).
+        future_cond = ("AND ls.status IN ('scheduled','ongoing') "
+                       "AND (ls.date > ? OR (ls.date = ? AND ls.end_time > ?))")
+        past_cond = ("AND (ls.status IN ('completed','cancelled') "
+                     "OR (ls.status IN ('scheduled','ongoing') "
+                     "AND NOT (ls.date > ? OR (ls.date = ? AND ls.end_time > ?)))) "
+                     "AND ls.id NOT IN (SELECT session_id FROM hidden_history WHERE user_id=?)")
+        params_all = [st["id"], today(), today(), now()[11:16]]
         if up == "1":
-            rows = self.db.q(
-                """SELECT ls.*, u.first_name||' '||u.last_name AS instructor_name, u.phone AS instructor_phone,
-                          ss.pickup_address, ss.pickup_lat, ss.pickup_lng, ss.attendance_status,
-                          (SELECT COUNT(*) FROM session_students s2 WHERE s2.session_id=ls.id AND s2.student_status='active') AS student_count
-                   FROM session_students ss JOIN lesson_sessions ls ON ls.id=ss.session_id
-                   JOIN instructors i ON i.id=ls.instructor_id JOIN users u ON u.id=i.user_id
-                   WHERE ss.student_id=? AND ss.student_status='active' AND ls.status IN ('scheduled','ongoing')
-                   ORDER BY ls.date, ls.start_time""", (st["id"],))
+            rows = self.db.q(sel + future_cond + " ORDER BY ls.date, ls.start_time", params_all)
+        elif up == "0":
+            rows = self.db.q(sel + past_cond + " ORDER BY ls.date DESC, ls.start_time DESC LIMIT 200",
+                             [st["id"], today(), today(), now()[11:16], st["id"]])
         else:
-            rows = self.db.q(
-                """SELECT ls.*, u.first_name||' '||u.last_name AS instructor_name, u.phone AS instructor_phone,
-                          ss.pickup_address, ss.attendance_status,
-                          (SELECT COUNT(*) FROM session_students s2 WHERE s2.session_id=ls.id AND s2.student_status='active') AS student_count
-                   FROM session_students ss JOIN lesson_sessions ls ON ls.id=ss.session_id
-                   JOIN instructors i ON i.id=ls.instructor_id JOIN users u ON u.id=i.user_id
-                   WHERE ss.student_id=? AND ss.student_status='active' AND ls.status IN ('completed','cancelled')
-                     AND ls.id NOT IN (SELECT session_id FROM hidden_history WHERE user_id=?)
-                   ORDER BY ls.date DESC, ls.start_time DESC LIMIT 200""", (st["id"], st["id"]))
+            rows = self.db.q(sel + " ORDER BY ls.date, ls.start_time LIMIT 400", [st["id"]])
+        for r in rows:
+            session_business_status(r, today(), now()[11:16])
+        if up == "all":
+            upcoming = [r for r in rows if r["_is_future"]]
+            past = [r for r in rows if not r["_is_future"]]
+            return OK, {"ok": True, "sessions": upcoming, "upcoming": upcoming,
+                        "past": past, "counts": {
+                            "upcoming": len(upcoming), "past": len(past),
+                            "overdue": sum(1 for r in past if r["_display_status"] == "overdue"),
+                            "completed": sum(1 for r in past if r["_display_status"] == "completed"),
+                        }}
         return OK, {"ok": True, "sessions": rows}
 
     def student_session_detail(self, sid):
@@ -2049,9 +2657,21 @@ class Api:
             (st["id"], int(sid)))
         if not row:
             return NOTFOUND, err("session.not_found")
+        # BAND 14: aniq biznes holati (KUTILMOQDA / TASDIQLANGAN / ... / O'TIB KETGAN)
+        session_business_status(row, today(), now()[11:16])
         return OK, {"ok": True, "session": row}
 
     def student_update_pickup(self, body, sid):
+        """`POST /api/student/sessions/{id}/pickup` — olib ketish joyini o'zgartirish.
+
+        BAND 1: koordinatalar FAQAT shu endpoint orqali (backend/DB) keladi —
+        UI'da kenglik/uzunlik inputlari YO'Q. Manzil Yandex autocomplete yoki
+        xaritada nuqta bosish orqali keladi.
+
+        IDOR HIMOYASI: `WHERE session_id=? AND student_id=?` — `/student/123`
+        o'rniga `/student/124` yozilsa, boshqa talabaning mashg'uloti
+        OG'IRILMAYDI (0 qator yangilanadi -> 404).
+        """
         self._require("student")
         st = self._stud_record()
         # MODUL 4: kenglik/uzunlik validatsiyasi. Noto'g'ri qiymat ("abc",
@@ -2081,7 +2701,15 @@ class Api:
                 (int(sid), st["id"])):
             return NOTFOUND, err("session.student_not_found")
         sets = ["pickup_address=?"]
-        params = [str(body.get("address", "")).strip()]
+        address = str(body.get("address", "")).strip()
+        if len(address) > 300:
+            return BAD, err("map.address_too_long")
+        # BAND 1: UI'da faqat MANZIL maydoni bor. So'rovda manzil ham, koordinata
+        # ham YO'Q bo'lsa — bu ma'nosiz so'rov (jim qolmasligi uchun rad etiladi).
+        # Noto'g'ri kiritilgan "Olib ketish joyi" saqlanib qolmasligi kerak.
+        if not address and not has_lat and not has_lng:
+            return BAD, err("map.address_required")
+        params = [address]
         if has_lat or has_lng:
             sets += ["pickup_lat=?", "pickup_lng=?"]
             params += [lat, lng]
@@ -2218,7 +2846,9 @@ class Api:
             if method == "POST" and seg[1] == "reset-password": return self.auth_reset_password(body)
         if seg[0] == "me":
             if method == "GET" and len(seg) == 1: return self.me()
-            if method == "GET" and seg[1] == "notifications": return self.me_notifications()
+            if method == "GET" and len(seg) == 2 and seg[1] == "notifications": return self.me_notifications(query)
+            if method == "GET" and len(seg) == 3 and seg[1] == "notifications":
+                return self.me_notification_detail(seg[2])
             if method == "POST" and len(seg) == 3 and seg[1] == "notifications" and seg[2] == "read": return self.me_notifications_read(body)
             if method == "POST" and len(seg) == 3 and seg[1] == "notifications" and seg[2] == "delete": return self.me_notifications_delete(body)
             if method == "POST" and len(seg) == 3 and seg[1] == "notifications" and seg[2] == "clear": return self.me_notifications_clear()
@@ -2253,9 +2883,13 @@ class Api:
                 if method == "GET": return self.admin_users(query)
                 if method == "POST": return self.admin_user_create(body)
             if seg[1] == "bulk" and method == "POST": return self.admin_users_bulk(body)
+            # BAND 3: jami mashg'ulotlar soni (bitta talaba | barcha talabalar)
+            if len(seg) == 2 and seg[1] == "total-lessons" and method == "POST":
+                return self.admin_user_total_lessons(body)
             if len(seg) == 2:
                 uid = seg[1]
                 if method == "PUT": return self.admin_users_update(body, uid)
+                if method == "GET": return self.admin_user_profile(uid)
                 if method == "DELETE": return self.admin_user_delete(uid)
             if len(seg) == 3 and seg[2] == "status": return self.admin_users_status(body, seg[1])
             if len(seg) == 3 and seg[2] == "reset-password": return self.admin_user_reset_password(seg[1])
@@ -2461,6 +3095,28 @@ def _new_totp_secret() -> str:
 def user_public(u) -> dict:
     out = {k: v for k, v in dict(u).items() if k not in ("password_hash", "totp_secret")}
     return out
+
+
+# BAND 16: talaba/instruktor uchun maxfiy maydonlar. "Ro'yxatga olingan sana"
+# (`enrolled_at`) DB'da saqlanib qoladi, lekin talabaga/instruktorga
+# YUBORILMAYDI — faqat admin endpoint'lari orqali olinadi.
+STUDENT_PRIVATE_FIELDS = ("enrolled_at",)
+
+
+def student_private(st) -> dict:
+    out = dict(st)
+    for f in STUDENT_PRIVATE_FIELDS:
+        out.pop(f, None)
+    return out
+
+
+def notif_legacy(db, user_id: int) -> dict:
+    """`notification_settings` -> eski kategoriya shakli (`user_settings.notif`).
+
+    Eski frontend (notifSettingsCard) `settings.notif.lesson` kabi kalitlarni
+    o'qiydi — shuning uchun eski shakl saqlanadi, yangi jadval esa MANBA.
+    """
+    return legacy_flags(db, user_id)
 
 
 import os  # noqa: E402  bu BACKUP_DIR uchun

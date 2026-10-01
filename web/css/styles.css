@@ -135,6 +135,53 @@ textarea.input { resize: vertical; min-height: 70px; }
 /* Yandex o'z pini va boshqaruvlarini yopmagan holda modal ichida joylashsin */
 .map-box .ymaps-2-1-79-ymaps__controls { position: absolute; right: 8px; }
 .map-box .ymaps-2-1-79-ymaps__type_selector { display: none; }
+
+/* ---- BAND 1: MANZIL AUTOCOMPLETE (Yandex Go tajribasi) ----
+   "Beshariq" deb yozilganda variantlar shu quti ostida ochiladi; biri
+   tanlanganda to'liq manzil inputga yoziladi va xaritada nuqta qo'yiladi. */
+.ac-wrap { position: relative; }
+.ac-input { width: 100%; }
+.ac-list {
+  position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 4px);
+  max-height: 280px; overflow-y: auto; overflow-x: hidden;
+  background: var(--surface, #fff); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 32, 60, .16);
+  padding: 4px;
+}
+.ac-list[hidden] { display: none; }
+.ac-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 10px; border: 0; background: transparent; border-radius: 9px;
+  font: inherit; color: var(--text, #0f203c); text-align: left; cursor: pointer;
+}
+.ac-item:hover, .ac-item.is-active { background: var(--surface-2, #eef1f4); }
+.ac-item-icon { flex: 0 0 auto; color: var(--gold-2, #d98b1f); }
+.ac-item-icon .ico, .ac-item-icon svg { width: 17px; height: 17px; }
+.ac-item-text { min-width: 0; }
+.ac-item-name {
+  display: block; font-size: 13.5px; line-height: 1.35; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ac-item-kbd {
+  flex: 0 0 auto; font-size: 11px; color: var(--muted, #6b7a90);
+  border: 1px solid var(--line); border-radius: 6px; padding: 1px 5px;
+}
+
+/* Xabar turlari: ok / warn */
+.map-msg-ok {
+  border-color: rgba(20, 90, 60, .28); background: rgba(20, 90, 60, .06);
+  margin-top: 8px; min-height: 0; font-size: 12.5px;
+}
+.map-msg-warn {
+  border-color: rgba(190, 120, 20, .32); background: rgba(190, 120, 20, .08);
+  margin-top: 8px; min-height: 0; font-size: 12.5px;
+}
+.cred-warn {
+  display: flex; align-items: flex-start; gap: 7px; margin: 8px 0 0;
+  font-size: 12.5px; color: #8a5a12; background: rgba(190, 120, 20, .10);
+  border: 1px solid rgba(190, 120, 20, .30); border-radius: 10px; padding: 8px 10px;
+}
+.cred-warn svg { flex: 0 0 auto; width: 16px; height: 16px; margin-top: 1px; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   padding: 10px 18px; border: none; border-radius: 10px; font: inherit; font-weight: 600;
@@ -515,6 +562,88 @@ textarea.input { resize: vertical; min-height: 70px; }
    media query'da ham 1 ustun, lekin har biri o'z balandligini saqlaydi) */
 @media (max-width: 640px) {
   .stat-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ============================================================================
+   BAND 2 — TALABA BOSH SAHIFASI
+   [Jami darslar] [Bajarilgan darslar] [Qolgan darslar] = 3 teng karta,
+   va pastroqda KATTA "Umumiy progress" bloki.
+   Barcha raqamlar backend'dan (DB) keladi — hech qanday hardcoded qiymat yo'q.
+   ============================================================================ */
+.stat-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.stat-row-3 .stat-card-equal { min-height: 128px; }
+.stat-row-3 .stat-value { font-size: 32px; font-variant-numeric: tabular-nums; }
+.stat-row-3 .stat-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.stat-row-3 .stat-sub { white-space: normal; }
+.stat-icon-gold { color: #fff; background: linear-gradient(135deg, var(--gold-1), var(--gold-2));
+  box-shadow: 0 6px 14px rgba(184, 120, 20, .28); }
+.stat-icon-amber { color: #fff; background: linear-gradient(135deg, #E8A33D, #C9761A);
+  box-shadow: 0 6px 14px rgba(201, 118, 26, .28); }
+
+.progress-big { padding: 20px 22px; }
+.progress-big .card-title { margin: 0 0 14px; }
+.progress-big-bar {
+  position: relative; height: 26px; border-radius: 999px; overflow: hidden;
+  background: var(--surface-2, #eef1f4); box-shadow: inset 0 1px 3px rgba(15, 32, 60, .10);
+}
+.progress-big-bar .progress-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold-1) 0%, var(--gold-2) 100%);
+  transition: width .45s ease;
+}
+.progress-big-label {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; text-shadow: 0 1px 0 rgba(255, 255, 255, .55);
+}
+.progress-big-meta {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px; margin-top: 16px;
+}
+.progress-big-meta .cell-strong { font-size: 21px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.progress-big-foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px;
+  border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 1.25;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.chip-cyan { background: rgba(0, 155, 190, .12); color: #0A6E86; border-color: rgba(0, 155, 190, .30); }
+.chip-orange { background: rgba(201, 118, 26, .12); color: #8A4C08; border-color: rgba(201, 118, 26, .32); }
+.chip-gray { background: rgba(107, 122, 144, .12); color: var(--text-secondary);
+  border-color: rgba(107, 122, 144, .28); }
+
+/* BAND 3 — "Jami amaliy mashg'ulotlar sonini o'zgartirish" modali:
+   [Bitta talaba] | [Barcha talabalar] tanlov tugmalari. */
+.scope-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.scope-btn {
+  padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface, #fff); color: var(--text-secondary, #5a6a80);
+  font: inherit; font-weight: 600; cursor: pointer; transition: all .15s;
+}
+.scope-btn:hover { border-color: var(--gold-line); }
+.scope-btn.on {
+  background: linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 100%);
+  color: #fff; border-color: transparent; box-shadow: 0 4px 12px rgba(16, 35, 63, .24);
+}
+.card-flat {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface, #fff); padding: 14px 16px;
+}
+.card-flat .kv + .kv { margin-top: 8px; }
+.user-cell.row-click { cursor: pointer; }
+.user-cell.row-click:hover .cell-strong { color: var(--gold-ink); }
+
+@media (max-width: 900px) {
+  .stat-row-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .progress-big-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .stat-row-3 { grid-template-columns: minmax(0, 1fr); }
+  .stat-row-3 .stat-card-equal { min-height: 0; }
+  .progress-big { padding: 16px; }
+  .progress-big-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .progress-big-meta .cell-strong { font-size: 18px; }
 }
 
 /* ---- M6: Bosh sahifa / Bugun ---- */

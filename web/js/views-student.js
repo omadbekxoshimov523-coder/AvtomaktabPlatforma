@@ -1,15 +1,36 @@
-/* TALABA kabineti: Bosh sahifa, Mening jadvalim, Amaliy mashg'ulotlarim, Tarix, So'rovlar, Profil */
+/* TALABA kabineti: Bosh sahifa, Amaliy mashg'ulotlarim, Tarix, So'rovlar, Profil
+
+   BAND 2  — Bosh sahifada 3 ta karta: [Jami darslar] [Bajarilgan] [Qolgan]
+             + pastroqda KATTА "Umumiy progress" bloki. Barcha raqamlar DB'dan.
+   BAND 4  — "Mening jadvalim" talaba interfeysidan, sidebar va routing'dan
+             BUTUNLAY olib tashlandi. Qolgan nom: "Amaliy mashg'ulotlarim".
+   BAND 10 — Bosh sahifadagi "So'nggi bildirishnomalar" bloki olib tashlandi.
+   BAND 13 — Kelajakdagi va o'tilgan mashg'ulotlar aniq ajratiladi:
+             1 kun o'tgan dars "kelayotgan" ro'yxatidan chiqadi, lekin
+             "Mashg'ulotlar tarixi"da saqlanadi va bajarilganlar soniga kiradi.
+   BAND 14 — Holatlar: KUTILMOQDA / TASDIQLANGAN / JARAYONDA / BAJARILGAN /
+             BEKOR QILINGAN / O'TIB KETGAN (yakunlanmagan). "Kutilmoqda" faqat
+             kelmagan mashg'ulotlar uchun.
+*/
 window.StudentViews = (function () {
   const { t, fmtDate } = I18N;
   const UI = window.UI;
-  const { el, toast, errToast, badge, statusText, avatar, emptyState, spinner, field, input, timeline, checklist, notifMini, mapLink } = UI;
+  const { el, toast, errToast, badge, statusText, avatar, emptyState, spinner, field, input, mapLink } = UI;
+
+  /* BAND 14: biznes holatidan badge. `scheduled` o'zi yetarli emas —
+     kelmagan, tasdiqlangan va o'tib ketgan holatlar boshqacha ko'rinadi. */
+  function statusBadge(s) {
+    const disp = s._display_status || s.status;
+    const label = t("st." + disp) || t("common.status");
+    return badge(disp, label);
+  }
 
   async function dashboard() {
-    const [home, notifRes] = await Promise.all([API.get("student/home"), API.get("me/notifications")]);
+    const home = await API.get("student/home");
     const st = App.me.student || {};
     const wrap = el("div", {}, []);
 
-    // Profil sarlavhasi
+    /* Profil sarlavhasi */
     wrap.append(el("div", { class: "card mb" }, [
       el("div", { class: "row between" }, [
         el("div", {}, [
@@ -20,65 +41,77 @@ window.StudentViews = (function () {
       ]),
     ]));
 
-    /* MODUL 5: "Haftadagi darslar" -> "Jami darslar", "Amaliy soatlar" kartasi
-       OLIB TASHLANDI. Endi faqat 2 ta karta bor — ikkalasi ham teng kenglik
-       va teng balandlikda (grid-2 + stat-card-equal), har birida progress
-       bar va foiz. Maqsad: individual (talaba) yoki ommaviy (platforma). */
+    /* ------------------------------------------------------------------ BAND 2
+       Uchta karta: [Jami darslar] [Bajarilgan darslar] [Qolgan darslar].
+       Barcha qiymatlar `student/home` -> progress (DB'dan). Hech qanday
+       hardcoded raqam yo'q. */
     const pr = home.progress || { target: 0, done: 0, remaining: 0, pct: 0, mode: "group" };
-    const ov = home.overall;
+    const target = Number(pr.target) || 0;
+    const done = Number(pr.done) || 0;
+    const remaining = Number(pr.remaining != null ? pr.remaining : Math.max(0, target - done));
+    const pct = target ? Math.max(0, Math.min(100, Math.round(done * 100 / target))) : 0;
     const isGroup = pr.mode !== "individual";
 
-    const statCard = (icon, label, value, sub, barPct, accent) => el("div", { class: "stat-card stat-card-equal" }, [
-      el("div", { class: "stat-icon" + (accent ? " stat-icon-" + accent : ""), icon }),
+    /* Yordamchi: bitta karta (ikona + qiymat + nom + izoh). */
+    const statCard = (icon, label, value, sub, accent) => el("div", { class: "stat-card stat-card-equal" }, [
+      el("div", { class: "stat-icon" + (accent ? " stat-icon-" + accent : "") , icon }),
       el("div", { class: "stat-body" }, [
         el("div", { class: "stat-value", text: String(value) }),
         el("div", { class: "stat-label", text: label }),
         sub ? el("div", { class: "stat-sub", text: sub }) : el("div", { class: "stat-sub" }),
-        el("div", { class: "progress-bar mt" }, [
-          el("div", {
-            class: "progress-fill" + (accent ? " fill-" + accent : ""),
-            style: "width:" + Math.max(0, Math.min(100, barPct)) + "%",
-          }),
-        ]),
-        el("div", { class: "stat-pct", text: barPct + "%" }),
       ]),
     ]);
 
-    wrap.append(el("div", { class: "grid-2 mb stat-row" }, [
-      // 1-karta: Jami darslar (maqsad)
-      statCard(
-        "calendar",
-        t("week.total_lessons"),
-        pr.target,
-        isGroup ? t("users.mode_group") : t("users.mode_individual"),
-        pr.pct,
-        "navy"
-      ),
-      // 2-karta: Bajarilgan darslar
-      statCard(
-        "check_circle",
-        t("week.done_lessons"),
-        pr.done,
-        t("week.remaining_lessons", { n: pr.remaining }),
-        pr.pct,
-        "gold"
-      ),
+    wrap.append(el("div", { class: "grid-3 mb stat-row stat-row-3" }, [
+      /* 1) JAMI darslar — maqsad (bitta talaba yoki barcha talabalar uchun) */
+      statCard("calendar", t("week.total_lessons"), target,
+               isGroup ? t("users.mode_group") : t("users.mode_individual"), "navy"),
+      /* 2) BAJARILGAN darslar — faqat `status='completed'` (o'tib ketgan yetmaydi!) */
+      statCard("check_circle", t("week.done_lessons"), done,
+               t("week.done_share", { n: pct }), "gold"),
+      /* 3) QOLGAN darslar — `remaining` (manfiy bo'lmaydi) */
+      statCard("hourglass", t("week.remaining_lessons"), remaining,
+               t("week.remaining_note"), "amber"),
     ]));
 
-    // Umumiy progress + muvaffaqiyat foizi
-    const progCard = el("div", { class: "card mb" }, [
+    /* ------------------------------------------------- BAND 2: KATTA progress */
+    const ov = home.overall || { sessions: 0, done: 0, hours: 0 };
+    const counts = home.counts || {};
+    const progCard = el("div", { class: "card mb progress-big" }, [
       el("h3", { class: "card-title", text: "📈 " + t("home.overall_progress") }),
-      el("div", { class: "prog-line" }, [el("span", { text: t("progress.total") }), el("strong", { text: String(ov.sessions) })]),
-      el("div", { class: "prog-line" }, [el("span", { text: t("progress.done") }), el("strong", { text: String(ov.done) })]),
-      el("div", { class: "prog-line" }, [el("span", { text: t("progress.remaining") }), el("strong", { text: String(ov.sessions - ov.done) })]),
-      el("div", { class: "prog-line" }, [el("span", { text: t("progress.hours") }), el("strong", { text: String(ov.hours) })]),
-      el("div", { class: "progress-bar mt" }, [el("div", { class: "progress-fill", style: "width:" + pr.pct + "%" })]),
-      el("div", { class: "muted sm mt", text: t("stat.success_label") + ": " + pr.pct + "%" }),
+      el("div", { class: "progress-big-bar" }, [
+        el("div", { class: "progress-fill", style: "width:" + pct + "%" }),
+        el("span", { class: "progress-big-label", text: pct + "%" }),
+      ]),
+      el("div", { class: "progress-big-meta" }, [
+        el("div", {}, [
+          el("div", { class: "muted sm", text: t("progress.done") }),
+          el("div", { class: "cell-strong", text: String(done) }),
+        ]),
+        el("div", {}, [
+          el("div", { class: "muted sm", text: t("progress.total") }),
+          el("div", { class: "cell-strong", text: String(target) }),
+        ]),
+        el("div", {}, [
+          el("div", { class: "muted sm", text: t("progress.remaining") }),
+          el("div", { class: "cell-strong", text: String(remaining) }),
+        ]),
+        el("div", {}, [
+          el("div", { class: "muted sm", text: t("progress.hours") }),
+          el("div", { class: "cell-strong", text: String(Number(ov.hours) || 0) }),
+        ]),
+      ]),
+      /* BAND 13/14: kelmagan / o'tib ketgan mashg'ulotlar aniq ko'rsatiladi. */
+      el("div", { class: "progress-big-foot" }, [
+        el("span", { class: "chip chip-cyan", text: t("home.upcoming_count", { n: Number(counts.upcoming) || 0 }) }),
+        el("span", { class: "chip chip-gray", text: t("home.sessions_count", { n: Number(counts.total) || 0 }) }),
+        Number(counts.overdue) ? el("span", { class: "chip chip-orange", text: t("home.overdue_count", { n: Number(counts.overdue) || 0 }) }) : null,
+      ]),
     ]);
     wrap.append(progCard);
 
-    // Keyingi mashg'ulot
-    const nextCard = el("div", { class: "card" }, [el("h3", { class: "card-title", text: "⏭️ " + t("lesson.next") }), el("div", { class: "mt" })]);
+    /* --------------------------------------------------------- Keyingi mashg'ulot */
+    const nextCard = el("div", { class: "card mb" }, [el("h3", { class: "card-title", text: "⏭️ " + t("lesson.next") }), el("div", { class: "mt" })]);
     const n = home.next;
     if (!n) {
       nextCard.append(emptyState("📅", t("lesson.no_upcoming")));
@@ -89,36 +122,24 @@ window.StudentViews = (function () {
     }
     wrap.append(nextCard);
 
-    // So'nggi bildirishnomalar (M1: tezkor havolalar olib tashlandi)
-    const notifCard = el("div", { class: "card mt" }, [
-      el("div", { class: "row between mb" }, [
-        el("h3", { class: "card-title", icon: "bell", text: " " + t("home.recent_notifications") }),
-        el("button", { class: "link-btn", text: t("home.mark_read"), onclick: async () => {
-          await API.post("me/notifications/read", {});
-          await App.refreshMe();
-          App.refreshView();
-        } }),
-      ]),
-      notifMini(notifRes.notifications, { onOpen: async (n, data) => {
-        if (!n.is_read) { await API.post("me/notifications/read", { id: n.id }); await App.refreshMe(); App.refreshView(); }
-        Shared.openNotif(n, data);
-      } }),
-    ]);
-    wrap.append(notifCard);
+    /* BAND 10: "So'nggi bildirishnomalar" bloki BU YERDAN BUTUNLAY
+       olib tashlangan. Bildirishnomalar faqat `Bell` menyusi va alohida
+       "Bildirishnomalar" sahifasi orqali ko'rinadi. */
     return wrap;
   }
 
   function sessionCard(s) {
-    return el("div", { class: "session-card " + s.status, dataset: { sid: s.id }, onclick: () => Shared.openSession(s.id, "student") }, [
+    return el("div", { class: "session-card " + (s._display_status || s.status), dataset: { sid: s.id }, onclick: () => Shared.openSession(s.id, "student") }, [
       el("div", { class: "row between" }, [
         el("div", { class: "session-time", text: `${fmtDate(s.date)} · ${s.start_time}–${s.end_time}` }),
-        badge(s.status, statusText(s.status)),
+        statusBadge(s),
       ]),
       el("div", { class: "session-meta" }, [
         el("div", { icon: "instructor", text: "" + (s.instructor_name || "") }),
         el("div", { icon: "car", text: "" + (s.car_name_snapshot || "") + " · " + s.car_plate_snapshot }),
         el("div", { icon: "users", text: "" + (s.student_count || 0) + "/" + s.capacity_snapshot }),
-        // MODUL 4: olish manzili + "Xaritada ko'rish" (Yandex Maps) havolasi
+        // BAND 1: olish manzili matn sifatida + xaritada ochish havolasi
+        // (koordinatalar UI'da kiritilmaydi).
         el("div", { icon: "map" }, [
           el("span", { text: "📍 " + (s.pickup_address || "—") }),
           s.pickup_lat && s.pickup_lng
@@ -129,41 +150,36 @@ window.StudentViews = (function () {
     ]);
   }
 
-  async function schedule() {
-    const dateI = input({ type: "date", value: Shared.todayISO() });
-    const host = el("div", { class: "mt" });
-    const wrap = el("div", {}, [el("div", { class: "row mb" }, [field("📅 " + t("lesson.date"), dateI, { class: "f1" })])]);
-    wrap.append(host);
-    async function load() {
-      host.innerHTML = ""; host.append(spinner());
-      const res = await API.get("student/sessions?upcoming=1");
-      host.innerHTML = "";
-      const list = el("div", { class: "grid" });
-      res.sessions
-        .filter((s) => !dateI.value || s.date === dateI.value)
-        .forEach((s) => list.append(sessionCard(s)));
-      if (!list.children.length) list.append(emptyState("📅", t("lesson.no_upcoming")));
-      host.append(list);
-    }
-    dateI.addEventListener("change", load);
-    load();
-    return wrap;
-  }
-
+  /* ------------------------------------------------------------------ BAND 4
+     "Mening jadvalim" -> endi FAQAT "Amaliy mashg'ulotlarim" (KELMAGAN darslar).
+     Backend `?upcoming=1` allaqachon kelmaganlarni qaytaradi; BAND 13 bo'yicha
+     o'tib ketgan darslar bu ro'yxatga KIRMAYDI (ular "Tarix"da). */
   async function lessons() {
     const res = await API.get("student/sessions?upcoming=1");
     const wrap = el("div", {}, [el("h3", { class: "mb", icon: "car", text: "" + t("nav.my_lessons") })]);
-    if (!res.sessions.length) { wrap.append(emptyState("🚗", t("lesson.no_upcoming"))); wrap.append(el("button", { class: "btn btn-cyan mt", text: "📨 " + t("lesson.request_btn"), onclick: () => requestModal() })); return wrap; }
+    if (!res.sessions.length) {
+      wrap.append(emptyState("🚗", t("lesson.no_upcoming")));
+      wrap.append(el("button", { class: "btn btn-cyan mt", text: "📨 " + t("lesson.request_btn"), onclick: () => requestModal() }));
+      return wrap;
+    }
     const list = el("div", { class: "grid-2" });
     res.sessions.forEach((s) => list.append(sessionCard(s)));
     wrap.append(list);
     return wrap;
   }
 
+  /* ------------------------------------------------------------------ BAND 13/14
+     "Mashg'ulotlar tarixi": o'tilgan darslar. O'tib ketgan lekin yakunlanmagan
+     darslar ham shu yerda, `OVERDUE` badge bilan — ular "Bajarilgan" deb
+     hisoblanMAYDI. */
   async function history() {
     const res = await API.get("student/sessions?upcoming=0");
+    const overdue = res.sessions.filter((s) => s._display_status === "overdue").length;
     const wrap = el("div", {}, [el("div", { class: "row between mb" }, [
-      el("h3", { icon: "copy", text: "" + t("nav.history") }),
+      el("div", { class: "row gap-sm wrap" }, [
+        el("h3", { icon: "copy", text: "" + t("nav.history") }),
+        overdue ? el("span", { class: "chip chip-orange", text: t("home.overdue_count", { n: overdue }) }) : null,
+      ]),
       res.sessions.length ? el("button", { class: "btn btn-light btn-sm", icon: "trash", text: "" + t("history.clear_all"),
         onclick: () => UI.confirmDialog(t("history.clear_all_confirm"), async () => {
           try { await API.post("student/history/clear"); toast(t("misc.saved")); App.refreshView(); }
@@ -180,9 +196,9 @@ window.StudentViews = (function () {
       class: "row-click", onclick: () => Shared.openSession(s.id, "student"),
     }, [
       el("td", { text: fmtDate(s.date) }), el("td", { text: s.start_time + "–" + s.end_time }),
-      el("td", { text: s.instructor_name }), el("td", { text: s.car_name_snapshot + " " + s.car_plate_snapshot }),
+      el("td", { text: s.instructor_name }), el("td", { text: (s.car_name_snapshot || "") + " " + (s.car_plate_snapshot || "") }),
       el("td", {}, [attBadge(s.attendance_status)]),
-      el("td", {}, [badge(s.status, statusText(s.status))]),
+      el("td", {}, [statusBadge(s)]),
       el("td", {}, [el("button", { class: "btn-ghost btn-sm", title: t("history.delete"), text: "✕",
         onclick: (e) => {
           e.stopPropagation();
@@ -253,18 +269,25 @@ window.StudentViews = (function () {
     ]);
   }
 
+  /* ------------------------------------------------------------------ BAND 15/16
+     "Profilim" — ko'rsatish + "Tahrirlash" tugmasi.
+       * Tahrirlanadigan: tug'ilgan sana, telefon, login, guruh, haydovchilik toifasi.
+       * PAROL bu yerda KO'RSATILMAYDI va tahrirlanmaydi (alohida xavfsiz oqim:
+         "Parolni o'zgartirish" — `POST /api/auth/change-password`).
+       * "Ro'yxatga olingan sana" talabaga KO'RSATILMAYDI (backend ham yashiradi).
+  */
   async function profile() {
     const u = App.me.user;
     const st = App.me.student || {};
     return Shared.renderProfile({
-      roleLabel: t("auth.role_student"),
+      editable: true,          /* -> "Tahrirlash" tugmasi chiqadi */
       kvs: [
         [t("student.birth_date"), u.birth_date ? fmtDate(u.birth_date) : "—"],
         [t("common.phone"), u.phone || "—"],
         [t("common.login"), u.login],
         [t("student.group"), st.group_name || "—"],
         [t("student.category"), st.license_category || "—"],
-        [t("student.enrolled"), st.enrolled_at ? fmtDate(st.enrolled_at) : "—"],
+        /* BAND 16: `enrolled_at` talabaga umuman qaytarilmaydi (faqat admin). */
       ],
     });
   }
@@ -273,5 +296,9 @@ window.StudentViews = (function () {
     return Shared.settingsPage({ isAdmin: false });
   }
 
-  return { dashboard, schedule, lessons, history, requests, profile, settings, notifications: () => Shared.notificationsPage() };
+  return {
+    dashboard, lessons, history, requests, profile, settings,
+    notifications: () => Shared.notificationsPage(),
+    statusBadge,
+  };
 })();

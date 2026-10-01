@@ -6,6 +6,7 @@ Ishga tushirish:
 Brauzer: http://127.0.0.1:8080/
 """
 import base64
+import hmac
 import json
 import mimetypes
 import os
@@ -47,7 +48,7 @@ os.makedirs(BACKUP_DIR, exist_ok=True)
 
 from app.db import init_db
 from app.api import Api, configure
-from app.auth import TAB_HEADER
+from app.auth import TAB_HEADER, api_rate_allowed
 from app.seed import seed
 
 
@@ -166,6 +167,32 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file(f)
         return self._send_file(WEB_DIR / "index.html")  # SPA fallback
 
+    def _client_ip(self) -> str:
+        """Mijoz IP manzili. Proksi (nginx/Cloudflare) orqasida
+        `X-Forwarded-For` dagi birinchi qiymat ishlatiladi — faqat
+        `TRUSTED_PROXY=1` yoqilgan holatda (boshqasida hujjatlashtirilgan
+        `client_address` ishonchli hisoblanadi)."""
+        if os.environ.get("TRUSTED_PROXY") == "1":
+            xff = (self.headers.get("X-Forwarded-For") or "").strip()
+            if xff:
+                return xff.split(",")[0].strip()
+        return self.client_address[0] if self.client_address else ""
+
+    def _is_https(self) -> bool:
+        """So'rov HTTPS orqali kelayotganmi (teskari proksi orqali ham)."""
+        if (self.headers.get("X-Forwarded-Proto") or "").strip().lower() == "https":
+            return True
+        return (self.headers.get("X-Forwarded-Ssl") or "").strip().lower() == "on"
+
+    def _cookie_attrs(self) -> str:
+        """BAND 6: `sid` cookie'si — HttpOnly + SameSite=Lax (+ Secure
+        bo'lsa HTTPS orqali). `Secure` faqat HTTPS'da qo'shiladi — aks
+        holda localhost/http da cookie brauzerda saqlanmay qoladi."""
+        attrs = "Path=/; HttpOnly; SameSite=Lax"
+        if self._is_https() or os.environ.get("COOKIE_SECURE") == "1":
+            attrs += "; Secure"
+        return attrs
+
     def _api(self, method: str, sub: str, query: dict):
         # Cookie'dan QURILMA kaliti olinadi; tab kaliti — so'rov sarlavhasidan.
         # Ikkalasi birgalikda sessiyani belgilaydi, shuning uchun bitta brauzerdagi
@@ -173,22 +200,46 @@ class Handler(BaseHTTPRequestHandler):
         token = self._cookie("sid")
         tab = (self.headers.get(TAB_HEADER) or "").strip() or None
         api = Api(DB, token, tab)
+        client_ip = self._client_ip()
 
         if method == "GET" and sub == "health":
             return self._send_json(200, {"ok": True, "app": "Avtomaktab"})
 
-        # CSRF: muhim (non-GET) so'rovlar X-Requested-With sarlavhasiga ega bo'lishi shart
-        # (SameSite=Lax cookie bilan birga bu CSRF hujumini bloklaydi)
+        # BAND 6: umumiy API rate limit (bir IP'dan juda ko'p so'rov — DoS ga qarshi)
+        if not api_rate_allowed(client_ip):
+            return self._send_json(429, {"ok": False, "error": "rate_limited"})
+
+        # BAND 6 — CSRF HIMOYASI (ikki qatlamli):
+        #   1) `X-Requested-With: Avtomaktab` YOKI same-origin `Origin`.
+        #      Oddiy (cross-site) `<form>`/`fetch` so'rovida IKKALASI ham
+        #      bo'lmaydi yoki `Origin` boshqa domen bo'ladi -> rad etiladi.
+        #   2) SESSIYAGA BOG'LIQ CSRF token: `sessions_ring.csrf_token`.
+        #      Eski global `csrf_session` sozlamasi EMASLADI — u barcha
+        #      foydalanuvchilar uchun bir xil bo'lgani uchun himoya
+        #      bermasdi. Token `sid` cookie'sida EMAS (HttpOnly), faqat
+        #      javob tanasida qaytariladi va `X-CSRF-Token` sarlavhasi orqali
+        #      yuboriladi — XSS orqali o'g'irlab bo'lmaydi.
+        #      >>> Token YO'Q bo'lsa ham RAD etiladi. Aks holda hujjumchi
+        #      sarlavhani umuman yubormaydi (`sent == ""`) va butun qatlam
+        #      hech qachon ishga tushmasdi (2000-yilgi CSRF "himoyasi").
         if method not in ("GET", "HEAD") and not sub.startswith("auth/login"):
-            if self.headers.get("X-Requested-With") != "Avtomaktab":
-                if self.headers.get("Origin") and not self.headers.get("Origin", "").startswith("http://%s" % HOST):
-                    return self._send_json(403, {"ok": False, "error": "forbidden"})
+            origin = (self.headers.get("Origin") or "").strip()
+            same_origin = bool(origin) and (
+                origin.startswith("http://%s" % HOST) or origin.startswith("https://%s" % HOST))
+            if self.headers.get("X-Requested-With") != "Avtomaktab" and not same_origin:
+                return self._send_json(403, {"ok": False, "error": "csrf_origin"})
+            expected = (api.session or {}).get("csrf_token") or ""
+            sent = (self.headers.get("X-CSRF-Token") or "").strip()
+            if expected and not hmac.compare_digest(sent, expected):
+                # `sent` bo'sh bo'lsa ham, boshqa sessiyaning token'i
+                # bo'lsa ham, noto'g'ri bo'lsa ham — 403.
+                return self._send_json(403, {"ok": False, "error": "csrf_invalid"})
 
         body = self._read_body()
 
         # LOGIN — maxsus holat: cookie berish kerak
         if method == "POST" and sub == "auth/login":
-            status, payload = api.auth_login(body)
+            status, payload = api.auth_login(body, client_ip)
             extra = {}
             if status == 200 and payload.get("token"):
                 remember = bool(body.get("remember"))
@@ -196,16 +247,10 @@ class Handler(BaseHTTPRequestHandler):
                 #   yoqilgan  -> 30 kun (Max-Age beriladi, brauzer qayta ochilganda ham saqlanadi)
                 #   o'chirilgan -> Max-Age BERILMAYDI = "session cookie": brauzer
                 #                  yopilganda avtomatik o'chadi (sessiya cookie'si).
-                base = f"sid={urllib.parse.quote(payload['token'])}; Path=/; HttpOnly; SameSite=Lax"
+                base = f"sid={urllib.parse.quote(payload['token'])}; " + self._cookie_attrs()
                 cookie = base + ("; Max-Age=2592000" if remember else "")
                 extra = {"Set-Cookie": cookie}
                 payload.pop("token", None)
-                # CSRF token ham beramiz
-                import secrets
-                csrf = secrets.token_urlsafe(24)
-                DB.ex("INSERT OR REPLACE INTO system_settings(key,value,updated_at) VALUES('csrf_session',?,?)",
-                      (csrf, "now"))
-                payload["csrf"] = csrf
             return self._send_json(status, payload, extra)
 
         if method == "POST" and sub == "auth/logout":
@@ -216,7 +261,7 @@ class Handler(BaseHTTPRequestHandler):
                 # sessiyasini yo'qotamiz. Qurilma kaliti credential emas —
                 # o'zi bilan kirish mumkin emas — shuning uchun saqlanadi.
                 return self._send_json(status, payload)
-            extra = {"Set-Cookie": "sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"}
+            extra = {"Set-Cookie": "sid=; " + self._cookie_attrs() + "; Max-Age=0"}
             return self._send_json(status, payload, extra)
 
         status, payload = api.route(method, sub, query, body)

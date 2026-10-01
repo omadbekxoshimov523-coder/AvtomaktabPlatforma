@@ -445,7 +445,11 @@ const UI = (function () {
     return row;
   }
 
-  /* So'nggi bildirishnomalar (kabinetdagilari): onOpen(n, dataJson) */
+  /* So'nggi bildirishnomalar (sidebar/menu uchun): onOpen(n, data)
+     BAND 21: har bir element `key = "notif-" + n.id` bilan belgilanadi —
+     ro'yxatdagi POSITSIYA (index) identifikator sifatida ishlatilMAYDI,
+     shuning uchun yangi bildirishnoma kelganda (ro'yxat siljiganda)
+     boshqa qator ochilmaydi va matnlar aralashmaydi (BAND 11). */
   function notifMini(notifs, { onOpen, limit = 5 } = {}) {
     const list = el("div", { class: "notif-mini" });
     const items = (notifs || []).slice(0, limit);
@@ -454,8 +458,10 @@ const UI = (function () {
       return list;
     }
     items.forEach((n) => {
-      let data = {};
-      try { data = JSON.parse(n.data || "{}") || {}; } catch (e) {}
+      /* metadata — tayyor ob'ekt (BAND 18); eski `data` matni bilan moslik. */
+      let data = (n.metadata && typeof n.metadata === "object")
+        ? n.metadata
+        : (function () { try { return JSON.parse(n.data || "{}") || {}; } catch (e) { return {}; } })();
       const roleLabel = (r) => r === "student" ? t("auth.role_student") : r === "instructor" ? t("auth.role_instructor") : r === "admin" ? t("auth.role_admin") : t("notif.system");
       const senderName = n.sender_id
         ? [n.sender_first_name, n.sender_last_name].filter(Boolean).join(" ") || t("notif.unknown")
@@ -466,6 +472,9 @@ const UI = (function () {
                    profile_image: n.sender_profile_image || "" }, 26)
         : el("div", { class: "avatar notif-sys-avatar", style: "width:26px;height:26px;font-size:12px", text: "⚙" });
       list.append(el("div", {
+        /* BAND 21: barqaror identifikator — DB qatori ID'si, index EMAS. */
+        key: "notif-" + n.id,
+        dataset: { nid: String(n.id) },
         class: "notif-item" + (n.is_read ? "" : " unread"),
         onclick: () => onOpen && onOpen(n, data),
       }, [

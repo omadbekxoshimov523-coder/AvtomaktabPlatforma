@@ -41,9 +41,11 @@
       ["settings", "settings", "nav.settings"],
     ],
     student: [
+      /* BAND 4: "Mening jadvalim" (schedule) talaba uchun BUTUNLAY olib
+         tashlandi — sidebar, routing va view. Qolgan nom: "Amaliy
+         mashg'ulotlarim" (lessons). */
       ["dashboard", "dashboard", "nav.home"],
       ["notifications", "bell", "nav.notifications"],
-      ["schedule", "calendar", "nav.my_schedule"],
       ["lessons", "lessons", "nav.my_lessons"],
       ["history", "list", "nav.history"],
       ["requests", "inbox", "nav.requests"],
@@ -51,6 +53,17 @@
       ["settings", "settings", "nav.settings"],
     ],
   };
+
+  /* BAND 4: eski manzil ("#/student/schedule") endi top'ga olib borilmaydi —
+     foydalanuvchi "Mening jadvalim" o'rniga avtomatik "Amaliy mashg'ulotlarim"
+     sahifasiga yuboriladi (404/bo'sh sahifa ko'rsatilmaydi). */
+  const ROUTE_ALIASES = {
+    "student:schedule": "student:lessons",
+  };
+
+  function resolveRoute(role, view) {
+    return ROUTE_ALIASES[(role || "") + ":" + (view || "")] || view;
+  }
 
   function navFor(role) {
     return (NAV_KEYS[role] || []).map(([v, icon, key]) => [v, icon, t(key)]);
@@ -520,7 +533,9 @@
     // Route guard: autentifikatsiya yo'q bo'lsa hech qanday himoyalangan
     // bo'limga o'tilmaydi.
     if (!App.me || !App.me.user) { showLoginScreen(); return; }
-    App.view = view;
+    /* BAND 4: o'chirilgan sahifalar (masalan talaba "schedule") avtomatik
+       "Amaliy mashg'ulotlarim" ga yo'naltiriladi. */
+    App.view = resolveRoute(App.me.user.role, view);
     App.params = params || {};
     render();
   };
@@ -540,6 +555,14 @@
     // ya'ni chiqib ketgan foydalanuvchi admin dashboard'ini ko'ra olardi.
     if (!App.me || !App.me.user) { showLoginScreen(); return; }
     const role = App.me.user.role;
+    /* BAND 4: o'chirilgan/ko'chirilgan sahifalar avtomatik tuzatiladi
+       ("student/schedule" -> "student/lessons"). Frontend Tanlash ham
+       backend'dagi ro'l majburiyligiga mos keladi. */
+    const wanted = resolveRoute(role, App.view);
+    if (wanted !== App.view) {
+      App.view = wanted;
+      location.hash = "#/" + role + "/" + wanted;
+    }
     const views = VF[role];
     const fn = views[App.view] || views.dashboard;
     viewEl.innerHTML = "";

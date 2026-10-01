@@ -621,6 +621,77 @@ const I18N = (function () {
     "logout.server_error": { uz: "Serverga ulanib bo'lmadi — sessiya yopilmagan bo'lishi mumkin. Brauzerni yopib qayta oching.", ru: "Не удалось связаться с сервером — сессия могла не завершиться. Закройте и снова откройте браузер.", en: "Could not reach the server — the session may not have ended. Close and reopen your browser." },
     /* Sessiya almashib qolgan holat (tab'ga xos sessiya himoyasi) */
     "session.switched": { uz: "Sessiya boshqa foydalanuvchiga o'tdi. Xavfsizlik uchun ma'lumotlar yashirildi — qayta kiring.", ru: "Сессия перешла к другому пользователю. Данные скрыты в целях безопасности — войдите снова.", en: "This session now belongs to another user. Your data was hidden for safety — please sign in again." },
+    "err.auth.ip_blocked": { uz: "Juda ko'p urinish. {seconds} soniya kutib, qayta urinib ko'ring.", ru: "Слишком много попыток. Подождите {seconds} секунд и повторите.", en: "Too many attempts. Wait {seconds} seconds and try again." },
+    "err.auth.password_same": { uz: "Yangi parol eskisidan farq qilishi kerak.", ru: "Новый пароль должен отличаться от старого.", en: "The new password must be different from the old one." },
+    "err.auth.password_used": { uz: "Bu parol allaqachon ishlatilgan - boshqasini tanlang.", ru: "Этот пароль уже использовался - выберите другой.", en: "This password was already used - choose another one." },
+    "err.auth.password_weak": { uz: "Parol yetarli emas", ru: "Пароль недостаточно надёжен", en: "Password is not strong enough" },
+    "err.csrf_invalid": { uz: "Xavfsizlik tokeni yaroqli emas. Sahifani yangilang va qayta urinib ko'ring.", ru: "Недействительный токен безопасности. Обновите страницу и повторите.", en: "Invalid security token. Refresh the page and try again." },
+    "err.csrf_origin": { uz: "So'rov manzili mos kelmadi. Sahifani yangilang va qayta urinib ko'ring.", ru: "Адрес запроса не совпадает. Обновите страницу и повторите.", en: "The request origin does not match. Refresh the page and try again." },
+    "err.map.address_too_long": { uz: "Manzil juda uzun (maksimum 400 belgi).", ru: "Адрес слишком длинный (максимум 400 символов).", en: "The address is too long (maximum 400 characters)." },
+    "err.notif.too_long": { uz: "Xabar juda uzun (maksimum 2000 belgi).", ru: "Сообщение слишком длинное (максимум 2000 символов).", en: "The message is too long (maximum 2000 characters)." },
+    "err.profile.birth_date_invalid": { uz: "Tug'ilgan sana noto'g'ri yoki kelajakda bo'lishi mumkin emas.", ru: "Неверная дата рождения или дата в будущем.", en: "Invalid date of birth or the date is in the future." },
+    "err.profile.login_format": { uz: "Login `usrL_` bilan boshlanishi va 14-32 ta harf/raqamdan iborat bo'lishi kerak.", ru: "Логин должен начинаться с `usrL_` и содержать 14-32 буквы/цифры.", en: "The login must start with `usrL_` and contain 14-32 letters/digits." },
+    "err.profile.login_taken": { uz: "Bu login band. Boshqasini tanlang.", ru: "Этот логин занят. Выберите другой.", en: "This login is taken. Choose another one." },
+    "err.profile.phone_invalid": { uz: "Telefon raqam noto'g'ri (masalan: +998901234567).", ru: "Неверный номер телефона (например: +998901234567).", en: "Invalid phone number (e.g. +998901234567)." },
+    "err.rate_limited": { uz: "Juda ko'p so'rov. Biroz kutib, qayta urinib ko'ring.", ru: "Слишком много запросов. Подождите немного и повторите.", en: "Too many requests. Wait a moment and try again." },
+    "err.user.not_a_student": { uz: "Bu foydalanuvchi talaba emas.", ru: "Этот пользователь не студент.", en: "This user is not a student." },
+    "err.user.total_lessons_below_done": { uz: "Jami darslar soni bajarilganlardan kam bo'lishi mumkin emas (bajarilgan: {done}).", ru: "Общее число занятий не может быть меньше выполненных (выполнено: {done}).", en: "The total cannot be lower than completed lessons ({done} completed)." },
+    "home.overdue_count": { uz: "O'tib ketgan: {n}", ru: "Пропущено: {n}", en: "Overdue: {n}" },
+    "home.sessions_count": { uz: "Jami mashg'ulot: {n}", ru: "Всего занятий: {n}", en: "Total lessons: {n}" },
+    "home.upcoming_count": { uz: "Kelayotgan: {n}", ru: "Предстоит: {n}", en: "Upcoming: {n}" },
+    "map.address": { uz: "Manzil", ru: "Адрес", en: "Address" },
+    "map.address_hint": { uz: "Manzil tanlang yoki xaritada nuqtani bosing - koordinatani kiritish shart emas.", ru: "Выберите адрес или нажмите точку на карте - вводить координаты не нужно.", en: "Pick an address or click a point on the map - no coordinates needed." },
+    "map.address_ph": { uz: "Manzilni yozing (masalan: Beshariq tumani)", ru: "Введите адрес (например: Бекaryкский район)", en: "Type an address (e.g. Beshariq district)" },
+    "map.address_required": { uz: "Manzilni kiritish shart", ru: "Укажите адрес", en: "Address is required" },
+    "map.autocomplete_hint": { uz: "Manzilni yozing - variantlar paydo bo'ladi. Tanlangandan so'ng xaritada nuqta avtomatik qo'yiladi.", ru: "Введите адрес - появятся варианты. После выбора точка появится на карте автоматически.", en: "Type an address - suggestions will appear. After you pick one, the map pin is set automatically." },
+    "map.geocoder_failed": { uz: "Manzilni aniqlab bo'lmadi. Boshqa shaklda yozib ko'ring (masalan: ko'cha, uy raqami).", ru: "Не удалось определить адрес. Попробуйте написать иначе (например: улица, номер дома).", en: "Could not resolve the address. Try a different format (e.g. street, house number)." },
+    "map.geocoder_no_key": { uz: "Manzil avtomatik to'ldirilmaydi: Yandex geocoder kaliti serverga o'rnatilmagan. Xaritada nuqtani bosing yoki manzilni qo'lda yozing. Administrator `.env` fayliga `YANDEX_GEOCODER_API_KEY` qo'yishi kerak.", ru: "Автозаполнение адреса недоступно: на сервере не задан ключ Yandex geocoder. Нажмите точку на карте или введите адрес вручную. Администратор должен добавить `YANDEX_GEOCODER_API_KEY` в `.env`.", en: "Address autocomplete is unavailable: the Yandex geocoder key is not configured on the server. Click a point on the map or type the address manually. The administrator must set `YANDEX_GEOCODER_API_KEY` in `.env`." },
+    "map.no_result": { uz: "Bunday manzil topilmadi. Xaritada nuqtani bosing yoki ko'proq ma'lumot qo'shing.", ru: "Такой адрес не найден. Нажмите точку на карте или добавьте больше данных.", en: "No such address found. Click a point on the map or add more detail." },
+    "map.reverse_fail": { uz: "Bu nuqta uchun aniq manzil topilmadi - manzilni qo'lda to'ldiring.", ru: "Для этой точки точный адрес не найден - заполните адрес вручную.", en: "No exact address found for this point - fill the address manually." },
+    "map.reverse_ok": { uz: "Nuqtani manzilga aylantirildi", ru: "Координаты преобразованы в адрес", en: "Point converted to an address" },
+    "notif.cat_lesson": { uz: "Mashg'ulotlar", ru: "Занятия", en: "Lessons" },
+    "notif.cat_message": { uz: "Xabarlar", ru: "Сообщения", en: "Messages" },
+    "notif.cat_reminder": { uz: "Mashg'ulot eslatmalari", ru: "Напоминания о занятиях", en: "Lesson reminders" },
+    "notif.reminder_2h": { uz: "Sizning amaliy mashg'ulotingizga 2 soat qoldi.", ru: "До вашего практического занятия осталось 2 часа.", en: "2 hours left until your practical lesson." },
+    "profile.login_changed": { uz: "Login o'zgartirildi. Boshqa qurilmalardagi sessiyalar xavfsizlik uchun bekor qilindi.", ru: "Логин изменён. Сессии на других устройствах завершены из соображений безопасности.", en: "Login changed. Sessions on other devices were revoked for security." },
+    "profile.login_hint": { uz: "Login `usrL_` bilan boshlanadi va 14-32 ta harf/raqamdan iborat bo'lishi shart. Boshqa foydalanuvchida bo'lmasligi kerak.", ru: "Логин должен начинаться с `usrL_` и содержать 14-32 буквы/цифры. Он должен быть уникальным.", en: "The login must start with `usrL_` and contain 14-32 letters/digits and must be unique." },
+    "profile.password_not_here": { uz: "Parol bu oynada ko'rsatilmaydi va tahrirlanmaydi. Uni faqat «Parolni o'zgartirish» orqali almashtirasiz.", ru: "Пароль здесь не отображается и не изменяется. Смените его только через «Изменить пароль».", en: "The password is not shown or changed here. Use “Change password” instead." },
+    "settings.notif_admin": { uz: "admin_messages", ru: "admin_messages", en: "admin_messages" },
+    "settings.notif_admin_desc": { uz: "Administrator yuborgan xabarlar", ru: "Сообщения от администратора", en: "Messages sent by the administrator" },
+    "settings.notif_admin_title": { uz: "Admin xabarlari", ru: "Сообщения администратора", en: "Admin messages" },
+    "st.cancelled": { uz: "Bekor qilingan", ru: "Отменено", en: "Cancelled" },
+    "st.completed": { uz: "Bajarilgan", ru: "Выполнено", en: "Completed" },
+    "st.confirmed": { uz: "Tasdiqlangan", ru: "Подтверждено", en: "Confirmed" },
+    "st.ongoing": { uz: "Jarayonda", ru: "Идёт", en: "Ongoing" },
+    "st.overdue": { uz: "O'tib ketgan", ru: "Просрочено", en: "Overdue" },
+    "st.pending": { uz: "Kutilmoqda", ru: "Ожидает", en: "Pending" },
+    "st.rejected": { uz: "Rad etilgan", ru: "Отклонено", en: "Rejected" },
+    "student.category_ph": { uz: "Masalan: B", ru: "Например: B", en: "e.g. B" },
+    "student.group_ph": { uz: "Masalan: 2024-A", ru: "Например: 2024-A", en: "e.g. 2024-A" },
+    "users.edit_btn": { uz: "Ma'lumotni tahrirlash", ru: "Изменить данные", en: "Edit details" },
+    "users.field_name": { uz: "Talaba", ru: "Студент", en: "Student" },
+    "users.new_password": { uz: "Yangi parol yaratish", ru: "Создать новый пароль", en: "Generate new password" },
+    "users.new_password_confirm": { uz: "Ushbu foydalanuvchi uchun yangi parol yaratilsinmi? Eski parol darhol bekor qilinadi.", ru: "Создать новый пароль для этого пользователя? Старый пароль будет отменён немедленно.", en: "Generate a new password for this user? The old password is revoked immediately." },
+    "users.password_shown_once": { uz: "Bu parol faqat BIR MARTA ko'rsatiladi. Admin uni qayta ko'ra olmaydi - uni darhol foydalanuvchiga yetkazing.", ru: "Этот пароль показывается ОДИН раз. Администратор не сможет увидеть его снова - передайте его пользователю сразу.", en: "This password is shown ONCE. The admin cannot see it again - pass it to the user immediately." },
+    "users.profile_title": { uz: "Foydalanuvchi profili", ru: "Профиль пользователя", en: "User profile" },
+    "users.scope_all": { uz: "Barcha talabalar", ru: "Все студенты", en: "All students" },
+    "users.scope_single": { uz: "Bitta talaba", ru: "Один студент", en: "Single student" },
+    "users.total_all_hint": { uz: "BARCHA talabalar uchun jami son bir xil qilinadi. Bitta talabaning bajarilgan darslari soni bu qiymatdan ko'p bo'lsa — saqlanmaydi.", ru: "Общее число будет одинаковым для ВСЕХ студентов. Если у студента больше выполненных занятий - значение не сохранится.", en: "The same total will be set for ALL students. If a student has more completed lessons, the value will be rejected." },
+    "users.total_below_done": { uz: "Bajarilgan darslardan kam qilib bo'lmaydi (hozir {n} ta bajarilgan).", ru: "Нельзя меньше выполненных занятий (уже выполнено {n}).", en: "Cannot be lower than completed lessons ({n} completed)." },
+    "users.total_btn": { uz: "Jami dars sonini o'zgartirish", ru: "Изменить число занятий", en: "Change total lessons" },
+    "users.total_btn_all": { uz: "Barcha talabalar uchun", ru: "Для всех студентов", en: "For all students" },
+    "users.total_clear": { uz: "O'chirish (umumiy songa qaytarish)", ru: "Очистить (вернуть общему значению)", en: "Clear (revert to the group default)" },
+    "users.total_hint": { uz: "Bajarilgan mashg'ulotlar: {n}. Yangi son bundan kam bo'lishi mumkin emas. Bajarilgan mashg'ulotlar va tarix o'chirilmaydi.", ru: "Выполнено занятий: {n}. Новое число не может быть меньше. Выполненные занятия и история не удаляются.", en: "Completed lessons: {n}. The new value cannot be lower. Completed lessons and history are not deleted." },
+    "users.total_one_hint": { uz: "Faqat tanlangan talabaning jami soni o'zgaradi (bajarilgan: {n}).", ru: "Изменится только выбранного студента (выполнено: {n}).", en: "Only the selected student's total changes (completed: {n})." },
+    "users.total_saved_all": { uz: "Barcha talabalar uchun yangi jami saqlandi ({n} ta talaba)", ru: "Новое общее число сохранено для всех студентов ({n} студентов)", en: "New total saved for all students ({n} students)" },
+    "users.total_saved_one": { uz: "Talabaning jami mashg'ulotlar soni saqlandi", ru: "Общее количество занятий для студента сохранено", en: "The student's total number of lessons was saved" },
+    "users.total_scope": { uz: "Qaysi talabalar uchun?", ru: "Для каких студентов?", en: "For which students?" },
+    "users.total_title": { uz: "Jami amaliy mashg'ulotlar sonini o'zgartirish", ru: "Изменение общего количества практических занятий", en: "Change the total number of practical lessons" },
+    "week.done_share": { uz: "{n}% bajarilgan", ru: "{n}% выполнено", en: "{n}% completed" },
+    "week.remaining_note": { uz: "hali bajarilmagan", ru: "ещё не выполнено", en: "not completed yet" },
+    "err.auth.password_need_digit": { uz: "Parolda kamida bitta raqam bo'lsin", ru: "Пароль должен содержать цифру", en: "The password must contain a digit" },
+    "err.auth.password_need_lower": { uz: "Parolda kamida bitta kichik harf (a-z) bo'lsin", ru: "Пароль должен содержать строчную букву (a-z)", en: "The password must contain a lowercase letter (a-z)" },
+    "err.auth.password_need_upper": { uz: "Parolda kamida bitta katta harf (A-Z) bo'lsin", ru: "Пароль должен содержать заглавную букву (A-Z)", en: "The password must contain an uppercase letter (A-Z)" },
   };
 
   const LANGS = { uz: "O'zbek", ru: "Русский", en: "English" };
@@ -688,14 +759,28 @@ const I18N = (function () {
     return fmtDate(dt) + ", " + hh + ":" + mm;
   }
 
-  function errorText(key) {
+  /* BAND 23 — xato matni. `params` berilsa, matndagi {nom} joylari
+     almashtiriladi: errorText("err.user.total_lessons_below_done", { done: 8 })
+       -> "Jami darslar soni bajarilganlardan kam bo'lishi mumkin emas (bajarilgan: 8)".
+     Noma'lum kod qaytariladi — lekin TEXNIK xato matni (Python traceback
+     va h.k.) hech qachon foydalanuvchiga ko'rsatilmaydi. */
+  function errorText(key, params) {
     if (!key) return t("err.generic");
     const k = key.startsWith("err.") || key.includes(".") ? key : "err." + key;
+    let v = "";
     const direct = DICT["err." + key];
-    if (direct) return direct[current] || direct.uz || key;
-    const entry = DICT[k];
-    if (entry) return entry[current] || entry.uz || k;
-    return key;
+    if (direct) v = direct[current] || direct.uz || key;
+    else {
+      const entry = DICT[k];
+      v = entry ? (entry[current] || entry.uz || k) : key;
+    }
+    if (params) {
+      v = String(v).replace(/\{(\w+)\}/g, (m0, name) => {
+        const val = params[name];
+        return val !== undefined && val !== null ? String(val) : m0;
+      });
+    }
+    return v;
   }
 
   // T2:M2 — bildirishnoma kod (title) -> qisqa sarlavha (foydalanuvchi tilida)

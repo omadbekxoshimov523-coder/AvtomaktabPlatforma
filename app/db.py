@@ -136,6 +136,11 @@ CREATE TABLE IF NOT EXISTS lesson_sessions (
     original_end_time TEXT DEFAULT '',
     original_instructor_id INTEGER,
     rescheduled_from_id INTEGER,
+    -- BAND 14: aniq biznes holati. 'pending' = KUTILMOQDA (tasdiqlanmagan),
+    -- 'confirmed' = TASDIQLANGAN. Bajarilgan/bekor qilingan o'z holicha
+    -- `status` ustunida qoladi. Noto'g'ri qiymat CHECK bilan bloklanadi.
+    confirm_state TEXT NOT NULL DEFAULT 'pending'
+        CHECK (confirm_state IN ('pending','confirmed')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -183,10 +188,19 @@ CREATE TABLE IF NOT EXISTS practice_requests (
     processed_at TEXT DEFAULT ''
 );
 
+-- BAND 11/12/18: har bir bildirishnoma MUSTAQIL DB record. `source` — uning
+-- TABIATI (kim yuborgan / qanday hodisa):
+--     ADMIN_MESSAGE | LESSON_REMINDER | LESSON_ASSIGNED | LESSON_COMPLETED
+--     | LESSON_CANCELLED | LESSON_RESCHEDULED | PRACTICE_REQUEST | MESSAGE
+--     | SECURITY | SYSTEM
+-- `data` — metadata (JSON). `related_lesson_id` — qaysi mashg'ulotga tegishli.
+-- Eski `type` ustuni (kategoriya: lesson/cancel/request/...) saqlanib qoldi:
+-- u `user_settings` bildirishnoma filtrlari bilan bog'liq.
 CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
     type TEXT DEFAULT 'info',
+    source TEXT NOT NULL DEFAULT 'SYSTEM',
     title TEXT DEFAULT '',
     body TEXT DEFAULT '',
     data TEXT DEFAULT '{}',
@@ -194,9 +208,19 @@ CREATE TABLE IF NOT EXISTS notifications (
     read_at TEXT DEFAULT '',
     sender_id INTEGER REFERENCES users(id),
     sender_role TEXT DEFAULT '',
+    related_lesson_id INTEGER REFERENCES lesson_sessions(id) ON DELETE CASCADE,
+    created_by INTEGER,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, is_read);
+-- MUHIM: `source` ustuni va unga bog'liq indekslar (`idx_notif_source`,
+-- `ux_notif_reminder_once`) ataylab SHU YERGA yozilmaydi. Sababi: eski
+-- bazalarda `notifications` jadvali allaqachon mavjud bo'lib, `source` ustuni
+-- faqat `migrate()` da `ALTER TABLE ... ADD COLUMN` bilan qo'shiladi. Agar
+-- indeks shu yerda yaratilsa, `migrate()` ishlashidan OLDIN
+-- "no such column: source" xatosi bilan server ISHLAMAY qolardi.
+-- Har ikkala indeks `migrate()` da (442-446-qatorlar) yaratiladi — yangi va
+-- eski bazalar uchun ham xavfsiz.
 
 -- M6: 2FA SMS kodlar (QR'siz oqim). Kod bildirishnoma orqali simulyatsiya qilinadi.
 CREATE TABLE IF NOT EXISTS twofa_codes (
@@ -255,6 +279,7 @@ CREATE TABLE IF NOT EXISTS sessions_ring (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
+    csrf_token TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     last_seen TEXT DEFAULT ''
@@ -281,6 +306,29 @@ CREATE TABLE IF NOT EXISTS system_settings (
     key TEXT PRIMARY KEY,
     value TEXT DEFAULT '',
     updated_at TEXT NOT NULL
+);
+
+-- BAND 17: "Bildirishnoma sozlamalari" — har bir foydalanuvchi uchun alohida
+-- qator. Brauzer yopilsa ham, boshqa qurilmadan kirilsa ham shu yerdan
+-- o'qiladi (frontend localStorage'ga YOZMAS).
+CREATE TABLE IF NOT EXISTS notification_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    lesson_reminders INTEGER NOT NULL DEFAULT 1,
+    admin_messages INTEGER NOT NULL DEFAULT 1,
+    lesson_status_updates INTEGER NOT NULL DEFAULT 1,
+    messages INTEGER NOT NULL DEFAULT 1,
+    requests INTEGER NOT NULL DEFAULT 1,
+    security INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+);
+
+-- BAND 5/7: generatsiya qilingan parollarning BIR O'LCHAMLI izi (SHA-256).
+-- Parolning O'ZI saqlanmaydi — shuning uchun admin uni ko'ra olmaydi;
+-- faqat "bu parol ilgari chiqarilganmi?" degan savolga javob oladi.
+CREATE TABLE IF NOT EXISTS used_credentials (
+    login_digest TEXT PRIMARY KEY,
+    password_digest TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS translations (
@@ -369,6 +417,10 @@ def migrate(db: Db) -> None:
     `CREATE TABLE IF NOT EXISTS` mavjud jadvalga ustun qo'shmaydi, shuning
     uchun yangi xususiyatlar (masalan 2FA) eski bazalar uchun bu yerda
     migratsiya qilinadi.
+
+    QOID'A: hech qanday mavjud ma'lumot O'CHIRILMAYDI. Faqat `ALTER TABLE
+    ... ADD COLUMN` va `CREATE ... IF NOT EXISTS` ishlatiladi — ikkalasi ham
+    mavjud qatorlarga tegmaydi va qayta ishga tushirilsa xatosiz o'tadi.
     """
     cols = {r["name"] for r in db.q("PRAGMA table_info(users)")}
     if "totp_secret" not in cols:
@@ -381,11 +433,28 @@ def migrate(db: Db) -> None:
         db.upd("ALTER TABLE notifications ADD COLUMN sender_id INTEGER")
     if "sender_role" not in ncols:
         db.upd("ALTER TABLE notifications ADD COLUMN sender_role TEXT DEFAULT ''")
+    # BAND 18: bildirishnoma arxitekturasi — manba, tegishli mashg'ulot,
+    # yaratuvchi. `data` ustuni allaqachon metadata (JSON) uchun ishlatiladi.
+    if "source" not in ncols:
+        db.upd("ALTER TABLE notifications ADD COLUMN source TEXT NOT NULL DEFAULT 'SYSTEM'")
+    if "related_lesson_id" not in ncols:
+        db.upd("ALTER TABLE notifications ADD COLUMN related_lesson_id INTEGER")
+    if "created_by" not in ncols:
+        db.upd("ALTER TABLE notifications ADD COLUMN created_by INTEGER")
+    db.upd("CREATE INDEX IF NOT EXISTS idx_notif_source ON notifications(user_id, source, id)")
+    db.upd(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_notif_reminder_once "
+        "ON notifications(user_id, related_lesson_id) WHERE source = 'LESSON_REMINDER'"
+    )
     # MODUL 5: talaba uchun JUMLI darslar soni. NULL = platforma umumiy
     # sozlamasidan foydalaniladi (individual rejim).
     scols = {r["name"] for r in db.q("PRAGMA table_info(students)")}
     if "total_lessons_target" not in scols:
         db.upd("ALTER TABLE students ADD COLUMN total_lessons_target INTEGER")
+    # BAND 14: mashg'ulot tasdiqlash holati (KUTILMOQDA / TASDIQLANGAN)
+    lcols = {r["name"] for r in db.q("PRAGMA table_info(lesson_sessions)")}
+    if "confirm_state" not in lcols:
+        db.upd("ALTER TABLE lesson_sessions ADD COLUMN confirm_state TEXT NOT NULL DEFAULT 'pending'")
     # M5: avtomobil fotosuratlari (eski bazalar uchun ham xavfsiz)
     db.upd(
         """CREATE TABLE IF NOT EXISTS car_photos (
@@ -405,6 +474,38 @@ def migrate(db: Db) -> None:
                updated_at TEXT NOT NULL,
                PRIMARY KEY (user_id, key))"""
     )
+    # BAND 17: bildirishnoma sozlamalari — alohida jadval (eski bazalarda ham)
+    db.upd(
+        """CREATE TABLE IF NOT EXISTS notification_settings (
+               user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+               lesson_reminders INTEGER NOT NULL DEFAULT 1,
+               admin_messages INTEGER NOT NULL DEFAULT 1,
+               lesson_status_updates INTEGER NOT NULL DEFAULT 1,
+               messages INTEGER NOT NULL DEFAULT 1,
+               requests INTEGER NOT NULL DEFAULT 1,
+               security INTEGER NOT NULL DEFAULT 1,
+               updated_at TEXT NOT NULL)"""
+    )
+    # BAND 7: chiqarilgan credential izlari (parolning o'zi saqlanmaydi)
+    db.upd(
+        """CREATE TABLE IF NOT EXISTS used_credentials (
+               login_digest TEXT PRIMARY KEY,
+               password_digest TEXT NOT NULL UNIQUE,
+               created_at TEXT NOT NULL)"""
+    )
+    # BAND 6: sessiya darajasidagi CSRF token'i (global emas — har sessiyaga alohida)
+    sess_cols = {r["name"] for r in db.q("PRAGMA table_info(sessions_ring)")}
+    if "csrf_token" not in sess_cols:
+        db.upd("ALTER TABLE sessions_ring ADD COLUMN csrf_token TEXT NOT NULL DEFAULT ''")
+    # Eski bazalarda bildirishnomalarga tabiiy manba beriladi: `sender_id`
+    # bo'lganlar ADMIN_MESSAGE, qolganlari SYSTEM. Hujjatlashtirish/filtrlash
+    # to'g'ri ishlashi uchun — matn yoki ID hech qanday o'zgartirilmaydi.
+    db.upd(
+        "UPDATE notifications SET source = CASE "
+        "WHEN sender_id IS NOT NULL THEN 'ADMIN_MESSAGE' ELSE 'SYSTEM' END "
+        "WHERE (source IS NULL OR source = '' OR source = 'SYSTEM') "
+        "AND sender_id IS NOT NULL"
+    )
 
 
 def init_db(path: str) -> Db:
@@ -421,15 +522,21 @@ def init_db(path: str) -> Db:
 
 
 def next_credentials(conn: sqlite3.Connection) -> tuple:
-    """Avtomatik login/parol: usrL_00001, usrP_00001 ...
-    Transaction ichida bajarilishi shart — takrorlanmasligi kafolatlanadi."""
-    row = conn.execute("SELECT last_number FROM credential_sequence WHERE id=1").fetchone()
-    n = int(row["last_number"]) + 1
-    conn.execute(
-        "UPDATE credential_sequence SET last_number=?, updated_at=? WHERE id=1",
-        (n, now()),
-    )
-    return f"usrL_{n:05d}", f"usrP_{n:05d}"
+    """Avtomatik login/parol: `usrL_<14 xavfsiz random>`, `usrP_<14 xavfsiz random>`.
+
+    BAND 5/7: avvalgi ketma-ket format (`usrL_00001`, `usrP_00001`) olib
+    tashlandi — u taxmin qilinishi mumkin edi. Endi har bir qiymat
+    `secrets` (cryptographically secure, os.urandom asosida) bilan
+    generatsiya qilinadi. Ketma-ket/increment ishlatilmaydi.
+
+    Takrorlanish (collision) bo'lsa — avtomatik qayta generatsiya qilinadi:
+    login `users.login UNIQUE`, parol esa `used_credentials.password_digest
+    UNIQUE` orqali qayta tekshiriladi. UNIQUE constraint buzilmaydi.
+
+    Transaction ichida bajarilishi shart (ketma-ketlik kafolati).
+    """
+    from .auth import generate_credentials  # circular import dan qochish uchun lokal
+    return generate_credentials(conn)
 
 
 def jload(value, default=None):

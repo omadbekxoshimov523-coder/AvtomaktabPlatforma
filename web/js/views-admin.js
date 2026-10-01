@@ -1,10 +1,17 @@
-/* ADMIN ko'rinishlari: Dashboard, Yangi baza, Talabalar, Instruktorlar,
+﻿/* ADMIN ko'rinishlari: Dashboard, Yangi baza, Talabalar, Instruktorlar,
    Avtomobillar, Mashg'ulotlar, Kalendar, So'rovlar, Hisobotlar, Audit,
    Bildirishnomalar, Sozlamalar, Backup */
 window.AdminViews = (function () {
   const { t, fmtDate, fmtDateTime, errorText, monthShort } = I18N;
   const UI = window.UI;
   const { el, toast, errToast, badge, statusText, avatar, carPhoto, field, input, select, modal, emptyState, spinner, confirmDialog, callLink, mapLink, timeline, checklist, notifMini } = UI;
+
+  /* Rol nomini tarjima qilish (BAND 22: profil kartochkasida ishlatiladi). */
+  function roleName(role) {
+    const map = { student: "auth.role_student", instructor: "auth.role_instructor", admin: "auth.role_admin" };
+    const key = map[role];
+    return (key ? t(key) : "") || String(role || "");
+  }
 
   /* M9: vaqtga daqiqa qo'shish — "15:00" + 90 -> "16:30" */
   function addMinutesTo(time, minutes) {
@@ -333,6 +340,216 @@ window.AdminViews = (function () {
     return wrap;
   }
 
+/* =====================================================================
+     BAND 3 — "Jami amaliy mashg'ulotlar sonini o'zgartirish"
+
+     Modal sarlavhasi: "Jami amaliy mashg'ulotlar sonini o'zgartirish"
+     Tanlov (radio): [Bitta talaba] | [Barcha talabalar]
+     Maydon: jami mashg'ulotlar soni (1..999)
+     Tugma: Saqlash
+
+     QOIDALAR:
+       * Yangi jami < BAJARILGAN bo'lsa — backend RAD ETADI
+         (`user.total_lessons_below_done`) va modal ogohlantirish ko'rsatadi.
+       * Bajarilgan mashg'ulotlar, tarix va booking O'CHIRILMAYDI — faqat
+         maqsadli son o'zgaradi.
+       * Bo'sh qiymat = individual maqsadni bekor qilish (platforma
+         umumiy soniga qaytish).
+
+     ===================================================================== */
+  function totalLessonsModal(u, pr, onDone) {
+    let scope = u ? "user" : "all";
+    let value = (pr && pr.individual_target) ? String(pr.individual_target) : ((pr && pr.target) ? String(pr.target) : "");
+    const doneN = (pr && pr.done) || 0;
+
+    const errBox = el("div", { class: "map-msg map-msg-err hidden" });
+    const numI = input({ type: "number", min: "1", max: "999", step: "1", value: value,
+                         placeholder: String((pr && pr.target) || 30) });
+    /* "O'chirish" — individual maqsadni bekor qilish, umumiy songa qaytish. */
+    const clearBtn = el("button", { class: "btn btn-light btn-sm", text: "" + t("users.total_clear"),
+      onclick: () => { numI.value = ""; } });
+
+    const scopeRow = el("div", { class: "scope-row" });
+    const scopeBtns = {};
+    [["user", t("users.scope_single")], ["all", t("users.scope_all")]].forEach(([k, label]) => {
+      /* Bitta talaba tanlangan bo'lsa, "Barcha talabalar" tanlovi ham
+         ko'rsatiladi (masshtabli o'zgarish mumkin). */
+      if (k === "user" && !u) return;
+      const b = el("button", {
+        class: "scope-btn" + (scope === k ? " on" : ""), type: "button", text: label,
+        onclick: () => {
+          scope = k;
+          Object.keys(scopeBtns).forEach((x) => scopeBtns[x].classList.toggle("on", x === k));
+          infoBox.textContent = scope === "all" ? t("users.total_all_hint") : t("users.total_one_hint", { n: doneN });
+        },
+      });
+      scopeBtns[k] = b;
+      scopeRow.append(b);
+    });
+    const infoBox = el("p", { class: "field-hint",
+      text: scope === "all" ? t("users.total_all_hint") : t("users.total_one_hint", { n: doneN }) });
+
+    function showErr(code) {
+      /* BAND 3: aniq ogohlantirish — "bajarilgan darslardan kam qilib
+         bo'lmaydi (hozir N ta bajarilgan)". */
+      const code2 = String(code || "");
+      const e = I18N.errorText(code2, { n: doneN, done: doneN, min: doneN });
+      errBox.textContent = (e && e !== code2) ? e : t("users.total_below_done", { n: doneN });
+      errBox.classList.remove("hidden");
+    }
+    function clearErr() { errBox.textContent = ""; errBox.classList.add("hidden"); }
+
+    const m = modal(t("users.total_title"), [
+      field(t("users.total_lessons"), numI, { hint: t("users.total_hint", { n: doneN }) }),
+      clearBtn,
+      el("div", { class: "field mt" }, [el("label", { class: "lbl", text: t("users.total_scope") }), scopeRow]),
+      infoBox, errBox,
+      el("div", { class: "row end mt" }, [
+        el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
+        el("button", { class: "btn btn-primary", text: "" + t("common.save"),
+          onclick: async () => {
+            clearErr();
+            const raw = String(numI.value || "").trim();
+            if (raw !== "") {
+              const n = Number(raw);
+              if (!Number.isInteger(n) || n < 1 || n > 999) { showErr("user.bad_total_lessons"); return; }
+              /* BAND 3: oldindan tekshirish — foydalanuvchi tezroq xatoni ko'radi. */
+              if (scope === "user" && n < doneN) { showErr("user.total_lessons_below_done"); return; }
+            }
+            try {
+              const payload = scope === "all"
+                ? { scope: "all", total_lessons: raw === "" ? null : Number(raw) }
+                : { scope: "user", user_id: u.id, total_lessons: raw === "" ? null : Number(raw) };
+              const r = await API.post("admin/users/total-lessons", payload);
+              toast(scope === "all"
+                ? t("users.total_saved_all", { n: r.updated != null ? r.updated : 0 })
+                : t("users.total_saved_one"));
+              m.close();
+              if (typeof onDone === "function") onDone();
+            } catch (e) {
+              if (e && (e.code === "user.total_lessons_below_done" || e.code === "user.bad_total_lessons")) showErr(e.code);
+              else errToast(e);
+            }
+          } }),
+      ]),
+    ]);
+  }
+
+  /* =====================================================================
+     BAND 22 — FOYDALANUVCHI PROFILI (admin uchun to'liq kartochka)
+
+     Ko'rsatiladigan ma'lumot: Talaba (ism), Login, Telefon, Guruh,
+     Haydovchilik toifasi, Jami darslar, Bajarilgan, Qolgan, Progress.
+     Tugmalar:
+       * "Jami mashg'ulotlar sonini o'zgartirish"  -> totalLessonsModal()
+       * "Ma'lumotni tahrirlash"                     -> Shared.openUserForm()
+       * "Yangi parol yaratish"                      -> random parol (BAND 5/6)
+     BAND 16: "Ro'yxatga olingan sana" FAQAT shu yerdan ko'rinadi.
+     ===================================================================== */
+  async function openUserProfile(userId, onDone) {
+    const body = el("div", {}, [spinner()]);
+    const m = modal(t("users.profile_title"), [body]);
+    let data;
+    try {
+      data = (await API.get(`admin/users/${userId}`)).user;
+    } catch (e) {
+      body.innerHTML = "";
+      body.append(emptyState("⚠️", errorText(e && e.code)));
+      return;
+    }
+    const u = data || {};
+    const stu = u.student || {};
+    const pr = u.progress;
+
+    function kv(k, v) {
+      return el("div", { class: "kv" }, [el("span", { class: "k", text: k }), el("span", { class: "v", text: v })]);
+    }
+
+    body.innerHTML = "";
+    body.append(el("div", { class: "profile-head mb" }, [
+      avatar(u, 56),
+      el("div", { class: "f1" }, [
+        el("div", { class: "profile-name", text: `${u.first_name || ""} ${u.last_name || ""}`.trim() || "—" }),
+        el("div", { class: "muted", text: roleName(u.role) + " · " + u.login }),
+      ]),
+    ]));
+
+    /* --- Asosiy ma'lumotlar --- */
+    body.append(el("div", { class: "card-flat" }, [
+      kv(t("users.field_name"), `${u.first_name || ""} ${u.last_name || ""}`.trim() || "—"),
+      kv(t("common.login"), u.login || "—"),
+      kv(t("common.phone"), u.phone || "—"),
+      u.role === "student" ? kv(t("student.group"), stu.group_name || "—") : null,
+      u.role === "student" ? kv(t("student.category"), stu.license_category || "—") : null,
+      u.role === "instructor" && u.car ? kv(t("users.car"), `${u.car.brand || ""} ${u.car.model || ""} · ${u.car.plate_number || ""}`.trim() || "—") : null,
+      u.role === "instructor" ? kv(t("users.students_count"), String(u.students_count != null ? u.students_count : 0)) : null,
+      /* BAND 16: "Ro'yxatga olingan sana" — faqat admin ko'radi. */
+      stu.enrolled_at ? kv(t("student.enrolled"), fmtDate(stu.enrolled_at)) : null,
+    ]));
+
+    /* --- BAND 3/2: progress bloki (jami / bajarilgan / qolgan / %) --- */
+    if (pr) {
+      body.append(el("div", { class: "card-flat mt" }, [
+        el("div", { class: "row between" }, [
+          el("strong", { text: t("users.progress") }),
+          badge(pr.mode === "individual" ? "b-cyan" : "b-gray",
+                pr.mode === "individual" ? t("users.mode_individual") : t("users.mode_group")),
+        ]),
+        el("div", { class: "prog-mini mt" }, [
+          el("div", { class: "prog-mini-bar" }, [el("i", { style: `width:${pr.pct}%` })]),
+          el("span", { class: "muted sm", text: `${pr.done}/${pr.target} · ${pr.pct}%` }),
+        ]),
+        el("div", { class: "grid-3 mt" }, [
+          el("div", {}, [el("div", { class: "muted sm", text: t("week.total_lessons") }), el("div", { class: "cell-strong", text: String(pr.target) })]),
+          el("div", {}, [el("div", { class: "muted sm", text: t("week.done_lessons") }), el("div", { class: "cell-strong", text: String(pr.done) })]),
+          el("div", {}, [el("div", { class: "muted sm", text: t("week.remaining_lessons") }), el("div", { class: "cell-strong", text: String(pr.remaining) })]),
+        ]),
+      ]));
+    }
+
+    /* --- Amallar --- */
+    const acts = el("div", { class: "row wrap gap-sm mt" }, [
+      el("button", { class: "btn btn-cyan", icon: "target", text: "" + t("users.total_btn"),
+        onclick: () => {
+          /* Progress endi "jami" sifatida individual maqsad bo'lib ketadi. */
+          totalLessonsModal(u, pr, async () => {
+            m.close();
+            if (typeof onDone === "function") onDone();
+          });
+        } }),
+      el("button", { class: "btn btn-light", icon: "edit", text: "" + t("users.edit_btn"),
+        onclick: () => { m.close(); Shared.openUserForm(u.role, u); } }),
+      el("button", { class: "btn btn-primary", icon: "key", text: "" + t("users.new_password"),
+        onclick: async () => {
+          confirmDialog(t("users.new_password_confirm"), async () => {
+            try {
+              const r = await API.post(`admin/users/${u.id}/reset-password`);
+              /* Parol BIR MARTA ko'rsatiladi — admin uni keyin ko'ra OLMAYDI. */
+              Shared.credBox(r.login, r.password, t("users.password_shown_once"));
+            } catch (e) { errToast(e); }
+          });
+        } }),
+    ]);
+    body.append(acts);
+    /* "Jami mashg'ulotlar sonini o'zgartirish" — barcha talabalar uchun
+       (tanlov modal ichida ham bor). */
+    if (u.role === "student") {
+      body.append(el("div", { class: "row mt" }, [
+        el("button", { class: "btn btn-light btn-sm", icon: "users", text: "" + t("users.total_btn_all"),
+          onclick: () => totalLessonsModal(null, pr, async () => { m.close(); if (typeof onDone === "function") onDone(); }) }),
+      ]));
+    }
+  }
+
+  /* Ommaviy rejim uchun umumiy statistikani olish (modal ochilganda). */
+  async function openTotalLessonsAll(onDone) {
+    try {
+      const res = await API.get("admin/users?role=student");
+      const users = res.users.filter((x) => !x.deleted_at);
+      const maxDone = users.reduce((m, x) => Math.max(m, (x.progress && x.progress.done) || 0), 0);
+      totalLessonsModal(null, { done: maxDone, target: null, individual_target: null }, onDone);
+    } catch (e) { errToast(e); }
+  }
   // Eski havolalar (kichik o'zgarish uchun saqlanadi)
   function students(params) { return users({ tab: "student" }); }
   function instructors(params) { return users({ tab: "instructor" }); }
@@ -346,6 +563,7 @@ window.AdminViews = (function () {
   }
 
   /* ------------------------------ TALABALAR ------------------------------ */
+  /* BAND 22: jami / bajarilgan / qolgan — ustunlar aniq ko'rsatiladi. */
   function studentsTable(host) {
     const searchI = userSearchBox(t("users.search_student"));
     const addB = el("button", {
@@ -368,15 +586,18 @@ window.AdminViews = (function () {
         el("th", { text: t("student.group") }),
         el("th", { text: t("student.category") }),
         el("th", { text: t("users.instructor") }),
+        /* BAND 22: jami / bajarilgan / qolgan alohida, progress bar bilan. */
         el("th", { text: t("users.progress") }),
         el("th", { text: t("common.phone") }),
         el("th", { text: t("common.status") }),
         el("th", { text: t("common.actions") }),
       ])]), el("tbody", {}, list.map((u) => {
-        const pr = u.progress || { done: 0, total: 0, pct: 0 };
+        /* BAND 3/22: `target` = jami (maqsad), `done` = bajarilgan,
+           `remaining` = qolgan — hammasi DB'dan. */
+        const pr = u.progress || { done: 0, total: 0, target: 0, remaining: 0, pct: 0, mode: "group" };
         const names = (u.instructors || []).map((x) => x.name);
         return el("tr", {}, [
-          el("td", {}, [el("div", { class: "user-cell" }, [avatar(u, 34), el("div", {}, [
+          el("td", {}, [el("div", { class: "user-cell row-click", onclick: () => openUserProfile(u.id, load) }, [avatar(u, 34), el("div", {}, [
             el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
             el("div", { class: "muted", text: u.login })])])]),
           el("td", { text: (u.student && u.student.group_name) || "—" }),
@@ -386,11 +607,18 @@ window.AdminViews = (function () {
             : el("span", { class: "muted", text: "—" })]),
           el("td", {}, [el("div", { class: "prog-mini" }, [
             el("div", { class: "prog-mini-bar" }, [el("i", { style: `width:${pr.pct}%` })]),
-            el("span", { class: "muted sm", text: `${pr.done}/${pr.total}` }),
+            /* BAND 22: "bajarilgan / jami · qolgan" */
+            el("span", { class: "muted sm", text: `${pr.done}/${pr.target} · ${t("week.remaining_lessons")} ${pr.remaining}` }),
           ])]),
           el("td", { text: u.phone || "—" }),
           el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
           el("td", {}, [el("div", { class: "actions" }, [
+            /* BAND 22: profil kartasi (ma'lumot + 3 amal) */
+            el("button", { class: "btn btn-light btn-sm", title: t("users.profile_title"), text: "👤",
+              onclick: () => openUserProfile(u.id, load) }),
+            /* BAND 3: jami mashg'ulotlar sonini o'zgartirish */
+            el("button", { class: "btn btn-cyan btn-sm", title: t("users.total_btn"), text: "🎯",
+              onclick: () => totalLessonsModal(u, pr, load) }),
             el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("student", u) }),
             el("button", { class: "btn btn-danger btn-sm", text: "🗑", onclick: () => confirmDialog(t("users.delete_confirm", { name: `${u.first_name} ${u.last_name}` }), async () => {
               try { await API.del(`admin/users/${u.id}`); toast(t("misc.saved")); load(); } catch (e) { errToast(e); }

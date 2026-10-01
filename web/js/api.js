@@ -35,6 +35,33 @@ const API = (function () {
     return id;
   }
 
+  /* ------------------------------------------------------------------ CSRF
+     BAND 6: CSRF token `sid` cookie'sida EMAS (u HttpOnly, JS ko'ra olmaydi).
+     Server tokeni javob tanasida qaytaradi (`auth/login` va `GET /api/auth/me`),
+     frontend uni `sessionStorage` da saqlaydi va har bir o'zgartiruvchi
+     so'rovda `X-CSRF-Token` sarlavhasi orqali yuboradi.
+
+     Nima uchun shunday:
+       * `<form>` yoki `<img>` orqali so'rov yuborish mumkin emas
+         (`X-Requested-With` qo'shilmaydi) — 1-qatlam;
+       * token sessiyaga bog'langan — boshqa sayt/sessiya uchun ishlamaydi
+         (`hmac.compare_digest` bilan solishtiriladi) — 2-qatlam.
+
+     Token `sessionStorage` da: brauzer yopilsa yo'qoladi, lekin shunda
+     sessiya ham (`session cookie`) yo'qoladi — "eslab qolish" bilan
+     kirilganda login javobidan yangi token olinadi. */
+  const CSRF_KEY = "avto_csrf";
+  function csrfToken() {
+    try { return sessionStorage.getItem(CSRF_KEY) || ""; } catch (e) { return ""; }
+  }
+  function setCsrfToken(v) {
+    if (!v) return;
+    try { sessionStorage.setItem(CSRF_KEY, v); } catch (e) { /* bloklangan */ }
+  }
+  function clearCsrfToken() {
+    try { sessionStorage.removeItem(CSRF_KEY); } catch (e) { /* bloklangan */ }
+  }
+
   async function req(method, url, body) {
     const opts = { method, credentials: "same-origin", headers: { "X-Avto-Tab": tabId() } };
     if (body !== undefined) {
@@ -43,6 +70,8 @@ const API = (function () {
     }
     if (method !== "GET") {
       opts.headers["X-Requested-With"] = "Avtomaktab";
+      const tok = csrfToken();
+      if (tok) opts.headers["X-CSRF-Token"] = tok;
     }
     const res = await fetch("/api/" + url, opts);
     const ct = res.headers.get("Content-Type") || "";
@@ -50,6 +79,8 @@ const API = (function () {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status === 401) {
+          /* Sessiya tugagan — token ham ma'nosiz. */
+          clearCsrfToken();
           emit("logout");
         }
         const e = new Error(data.error || "err.generic");
@@ -57,6 +88,9 @@ const API = (function () {
         e.params = data.params || {};
         throw e;
       }
+      /* Server yangilangan CSRF token yuborsa — darhol qabul qilamiz
+         (sessiya yangilansa eskirgan token bilan so'rov yubormaslik). */
+      if (data && data.csrf) setCsrfToken(data.csrf);
       return data;
     }
     if (!res.ok) {
@@ -74,6 +108,8 @@ const API = (function () {
     post: (url, body = {}) => req("POST", url, body),
     put: (url, body = {}) => req("PUT", url, body),
     del: (url) => req("DELETE", url),
+    /* CSRF token — login va `GET /api/auth/me` javobida server beradi */
+    setCsrf: setCsrfToken, csrf: csrfToken, clearCsrf: clearCsrfToken,
     on, emit,
   };
 })();
