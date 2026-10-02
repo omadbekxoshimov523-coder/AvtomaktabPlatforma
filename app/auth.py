@@ -1,5 +1,11 @@
 """Xavfsizlik: parol hashing (scrypt), session/token boshqaruvi, RBAC, rate limiting.
-Plaintext parol database'da saqlanmaydi — faqat hash.
+
+Parol database'da IKKITA ko'rinishda saqlanadi:
+    * `password_hash` — scrypt hash (ASOSIY). Parolning o'zi yo'q.
+    * `password_enc`  — AES-256-GCM shifrlangan nusxa (MODUL 5), faqat
+      adminning ko'rish/o'zgartirish talabi uchun. Kalit `.env` da.
+XAVF: endi bu "bir yo'nalishli hash" emas — `.env` + bazaga kirish
+bo'lsa, barcha parollar ochiladi. Bu maxsus talab tufayli qabul qilingan.
 
 BAND 5/7 — CREDENTIAL GENERATSIYASI
     Har bir yangi foydalanuvchi uchun login va parol AVTOMATIK yaratiladi:
@@ -60,6 +66,77 @@ def verify_password(password: str, stored: str) -> bool:
 
 def new_token(length: int = 48) -> str:
     return secrets.token_urlsafe(length)
+
+
+# ---------------------------------------------------------------------------
+# MODUL 5 — PAROLNI QAYTARIB OCHISH (admin koʻrishi uchun)
+#
+# `password_hash` (scrypt) — ASOSIY saqlash. Uni qaytarib boʻlmaydi.
+# `password_enc`  (AES-256-GCM) — YOʻQCHA saqlash: admin foydalanuvchining
+#   parolini koʻra va 🔑 orqali oʻzgartira olishi uchun.
+#
+# Kalit `.env` dagi `CREDENTIALS_KEY` (base64, 32 bayt) — `app/config.py`.
+# Kalit yoʻq boʻlsa `password_enc` boʻsh qoladi: platforma ISHLAYVERADI,
+# faqat "parolni koʻrsatish" 503 qaytaradi (`cred.crypto_unavailable`).
+#
+# `cryptography` ixtiyoriy kutubxona — yoʻq boʻlsa xuddi shunday.
+# ---------------------------------------------------------------------------
+
+CRED_ENC_PREFIX = "enc:v1:"
+
+
+def credentials_crypto_available() -> bool:
+    """Parolni qaytarib ochish imkoniyati bormi (kalit + kutubxona)."""
+    from .config import ensure_credentials_key
+    if not ensure_credentials_key():
+        return False
+    try:
+        import cryptography  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def encrypt_secret(plain: str) -> str:
+    """`plain` ni AES-256-GCM bilan shifrlaydi, `enc:v1:<base64>` qaytaradi.
+
+    Chiqish: `nonce(12) || ciphertext || tag(16)` — barchasi bitta base64.
+    GCM authenticate — kalit yoki ma'lumot buzilsa `decrypt_secret` None
+    qaytaradi (jim xato bermaydi).
+    """
+    from .config import ensure_credentials_key
+    key_b64 = ensure_credentials_key()
+    if not key_b64:
+        raise RuntimeError("cred.crypto_no_key")
+    import base64
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = base64.urlsafe_b64decode(key_b64.encode())
+    nonce = secrets.token_bytes(12)
+    blob = nonce + AESGCM(key).encrypt(nonce, str(plain).encode("utf-8"), None)
+    return CRED_ENC_PREFIX + base64.urlsafe_b64encode(blob).decode()
+
+
+def decrypt_secret(blob: str):
+    """`encrypt_secret` ning teskari. Muvaffaqiyatsiz boʻlsa `None`.
+
+    `None` qaytish sabablari: boʻsh qiymat, notoʻgʻri prefiks, kalit
+    yoʻq/kalit boshqa, buzilgan ma'lumot.
+    """
+    blob = str(blob or "")
+    if not blob.startswith(CRED_ENC_PREFIX):
+        return None
+    from .config import credentials_key
+    key_b64 = credentials_key()
+    if not key_b64:
+        return None
+    try:
+        import base64
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        key = base64.urlsafe_b64decode(key_b64.encode())
+        raw = base64.urlsafe_b64decode(blob[len(CRED_ENC_PREFIX):].encode())
+        return AESGCM(key).decrypt(raw[:12], raw[12:], None).decode("utf-8")
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------

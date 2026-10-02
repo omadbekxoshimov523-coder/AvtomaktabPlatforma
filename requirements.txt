@@ -21,3 +21,16 @@
 # o'zgarishlarda (6.x) avval sinovdan o'tkazilishi shart.
 openpyxl>=3.1,<4.0
 reportlab>=4.0,<6.0
+
+# --- MODUL 5: admin uchun parolni QAYTARIB OCHISH (AES-256-GCM) ---
+# Talab: admin foydalanuvchi parolini ko'ra va o'zgartira olsin. Parol
+# scrypt hash bilan (bir yo'nalishli) saqlanadi va qo'shimcha ravishda
+# shu kutubxona orqali shifrlanadi (AES-256-GCM).
+#
+# O'rnatilmasa platforma ISHLASHDA DAVOM ETADI:
+#   * kirish, ro'yxat, parol o'zgartirish — hammasi ishlaydi;
+#   * `GET /api/admin/users/{id}/credentials` -> `can_view: false`,
+#     `reason: "crypto"` (admin parolni KO'RA OLMAYDI, lekin 🔑 orqali
+#     yangi parol o'rnatishi mumkin).
+#
+# pip install "cryptography>=42,<50"

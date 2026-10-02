@@ -21,6 +21,7 @@ from .auth import (
     verify_password, new_token, login_allowed, reset_login_attempts,
     ip_blocked, reset_ip_attempts, generate_credentials, generate_password,
     is_valid_login, password_strength_errors, credential_digest,
+    encrypt_secret, decrypt_secret, credentials_crypto_available,
 )
 from .db import init_db, now, today, jload, jdump, next_credentials, Db
 from .rules import check_session_rules, session_auto_data, parse_date, validate_time_range
@@ -532,6 +533,24 @@ def role_name(role) -> str:
     return _ROLE_UZ.get(str(role or ""), str(role or ""))
 
 
+# ======================================================================
+# MODUL 5 — PAROLNING QAYTARIB OCHILADIGAN NUSXASI
+#
+# `password_hash` (scrypt) — ASOSIY saqlash. O'zgartirilmaydi.
+# `password_enc`  (AES-256-GCM) — admin parolni ko'ra olishi uchun.
+#
+# `encrypt_par()` HECH QACHON xato OTARMAYDI: kalit yoki `cryptography`
+# yo'q bo'lsa bo'sh satr qaytaradi va platforma odatdagidek ishlayveradi
+# (faqat "parolni ko'rsatish" 503 qaytaradi). Parol o'zi hech qachon
+# qaytarib yozilmaydi — xato bo'lsa ham `password_hash` to'g'ri saqlanadi.
+# ======================================================================
+def encrypt_par(password: str) -> str:
+    try:
+        return encrypt_secret(password)
+    except Exception:
+        return ""
+
+
 def upload_dir(*parts: str) -> str:
     """web/uploads/<...> papkasi (loyiha ildiziga nisbatan)."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -694,8 +713,9 @@ class Api:
             pd = credential_digest(new)
             if self.db.q1("SELECT 1 FROM used_credentials WHERE password_digest=?", (pd,)):
                 return BAD, err("auth.password_used")
-            sets += ["password_hash=?", "must_change_password=0"]
+            sets += ["password_hash=?", "password_enc=?", "must_change_password=0"]
             params.append(hash_password(new))
+            params.append(encrypt_par(new))
             changed.append("password_changed")
         if changing_login:
             if not is_valid_login(new_login):
@@ -766,7 +786,7 @@ class Api:
         pd = credential_digest(newpass)
         if self.db.q1("SELECT 1 FROM used_credentials WHERE password_digest=?", (pd,)):
             return BAD, err("auth.password_used")
-        self.db.upd("UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?", (hash_password(newpass), now(), row["user_id"]))
+        self.db.upd("UPDATE users SET password_hash=?, password_enc=?, must_change_password=0, updated_at=? WHERE id=?", (hash_password(newpass), encrypt_par(newpass), now(), row["user_id"]))
         self.db.upd("UPDATE password_reset_tokens SET used_at=? WHERE id=?", (now(), row["id"]))
         # Parol tiklangan — barcha sessiyalar bekor qilinadi.
         self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (row["user_id"],))
@@ -1411,13 +1431,13 @@ class Api:
         t = _now()
         cur = c.execute(
             """INSERT INTO users(first_name,last_name,middle_name,birth_date,gender,phone,secondary_phone,
-                                 login,password_hash,role,status,profile_image,must_change_password,
+                                 login,password_hash,password_enc,role,status,profile_image,must_change_password,
                                  created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (first, last, str(body.get("middle_name", "")).strip(),
              str(body.get("birth_date", "")).strip(), str(body.get("gender", "")).strip(),
              str(body.get("phone", "")).strip(), str(body.get("secondary_phone", "")).strip(),
-             login, hash_password(password), role, "active",
+             login, hash_password(password), encrypt_par(password), role, "active",
              str(body.get("profile_image", "")).strip(), 1, t, t),
         )
         uid = cur.lastrowid
@@ -1704,8 +1724,9 @@ class Api:
             bir xil kuch talablariga (10+ belgi, bosh/kichik harf, raqam)
             javob berishi SHART (MODUL 4 — backendda qayta tekshiriladi).
 
-        Parol BIR MARTA qaytariladi — keyin uni hech kim, shu jumladan admin,
-        ko'ra OLMAYDI (faqat hash).
+        MODUL 5: parol endi `password_enc` (AES-256-GCM) sifatida ham
+        saqlanadi — admin uni 🔑 orqali keyin HAM ko'ra (va o'zgartira) oladi.
+        "Bir marta ko'rsatish" cheklovi OLIB TASHLANDI.
         """
         self._require("admin")
         body = body or {}
@@ -1728,17 +1749,211 @@ class Api:
         else:
             newpass = self.db.transaction(lambda c: generate_credentials(c)[1])
         self.db.upd(
-            "UPDATE users SET password_hash=?, must_change_password=1, updated_at=? WHERE id=?",
-            (hash_password(newpass), now(), int(uid)),
+            "UPDATE users SET password_hash=?, password_enc=?, must_change_password=1, updated_at=? WHERE id=?",
+            (hash_password(newpass), encrypt_par(newpass), now(), int(uid)),
         )
         # Xavfsizlik: parol almashtirilgandan keyin barcha sessiyalar bekor qilinadi.
         self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (int(uid),))
         audit(self.db, self.user["id"], action_type="user_password_reset", target_type="users",
               target_id=int(uid),
               description="%s: %s uchun yangi parol o'rnatildi" % (user_name(self.user), u["login"]))
+        # MODUL 5: parol endi DOIMIY saqlanadi — admin 🔑 orqali ko'ra,
+        # shu bilan birga login+parolni o'zgartira ham oladi.
         return OK, {"ok": True, "login": u["login"], "password": newpass,
                     "password_format": "usrP_<14 random>" if not custom else "custom",
-                    "shown_once": True}
+                    "stored_encrypted": bool(encrypt_par(newpass))}
+
+    # ====================================================================
+    # MODUL 5 — ADMIN: LOGIN VA PAROLNI KO'RISH / BIRGA O'ZGARTIRISH
+    #
+    # Talab: "admin har bir foydalanuvchining login va parolini ko'ra olsin
+    # va xohlagancha o'zgartira olsin". Buning uchun parol `password_enc`
+    # (AES-256-GCM, `app/auth.py`) sifatida QAYTARIB OCHILADIGAN saqlanadi.
+    #
+    # HIMOYALAR:
+    #   * RBAC — faqat `admin` (talaba/instruktor 403 oladi).
+    #   * OQILISH (GET) ham auditga yoziladi: kim, qachon, qaysi foydalanuvchi
+    #     parolini ko'rdi. Bu maxfiy ma'lumot — iz qolishi SHART.
+    #   * `password_enc` hech qanday ro'yxat/profil javobida chiqmaydi
+    #     (`user_public` uni filtrlab qo'yadi).
+    #   * Kalit/kutubxona yo'q bo'lsa `can_view: false` + `reason` qaytariladi —
+    #     platforma qolgan qismi ishlayveradi, frontend aniq xabar ko'rsatadi.
+    #   * O'zgartirish: `login` va `password` bir so'rovda yuboriladi.
+    #     Bo'sh qiymat = "o'zgartirma" (maʼlumot O'Z-O'ZINI qayta yozilmaydi —
+    #     aynan "agar admin o'zi almashtirsa, o'zgarishsiz saqlansin" talabi).
+    # ====================================================================
+
+    def admin_user_credentials_get(self, uid):
+        """`GET /api/admin/users/{id}/credentials` — login + parolni ko'rish."""
+        self._require("admin")
+        try:
+            uid = int(uid)
+        except (TypeError, ValueError):
+            return BAD, err("user.not_found")
+        # Arxivlangan foydalanuvchilarning credential'i ham ko'rinadi —
+        # admin arxivni ko'rib chiqayotgani mantiqan to'g'ri. Faqat o'zini
+        # bloklashga yo'l qo'yilmaydi (o'shandan keyin `active` emas).
+        u = self.db.q1("SELECT id,first_name,last_name,login,role,status,password_enc"
+                       " FROM users WHERE id=?", (uid,))
+        if not u:
+            return NOTFOUND, err("user.not_found")
+        pw = decrypt_secret(u["password_enc"])
+        audit(self.db, self.user["id"], action_type="user_credentials_viewed",
+              target_type="users", target_id=uid,
+              description="%s: %s (%s) login/parolini ko'rib chiqdi" % (
+                  user_name(self.user), u["login"], user_name(u)))
+        # `reason` — frontend aniq, tushunarli xabar ko'rsatsin:
+        #   none     — parol ko'rinadi (shifrlangan nusxa bor)
+        #   crypto   — kalit yoki `cryptography` yo'q: funksiya o'chirilgan
+        #   legacy   — foydalanuvchi eski modelda yaratilgan, `password_enc` yo'q
+        if pw is not None:
+            reason = "none"
+        elif not credentials_crypto_available():
+            reason = "crypto"
+        else:
+            reason = "legacy"
+        return OK, {
+            "ok": True,
+            "id": u["id"],
+            "name": user_name(u),
+            "role": u["role"],
+            "status": u["status"],
+            "login": u["login"],
+            "password": pw,
+            # False = parolni KO'RISH mumkin emas. Sabab `reason` da.
+            "can_view": pw is not None,
+            "reason": reason,
+        }
+
+    def admin_user_credentials_set(self, uid, body):
+        """`PUT /api/admin/users/{id}/credentials` — login va/yoki parolni
+        BIR VAQTDA o'zgartirish.
+
+        Tanlanmagan maydon (yoki bo'sh satr) — O'ZGARTIRILMAYDI.
+        """
+        self._require("admin")
+        try:
+            uid = int(uid)
+        except (TypeError, ValueError):
+            return BAD, err("user.not_found")
+        u = self.db.q1("SELECT * FROM users WHERE id=?", (uid,))
+        if not u:
+            return NOTFOUND, err("user.not_found")
+
+        body = body or {}
+        new_login = str(body.get("login", "") or "").strip()
+        # Parol uchun `strip()` QILINMAYDI (parolda bo'shliq bo'lishi mumkin),
+        # lekin FAQAT bo'shliqdan iborat qiymat "kiritilmagan" hisoblanadi —
+        # aks holda `"   "` kuchsiz parol sifatida rad etilardi, holbuki
+        # foydalanuvchi shunchaki maydonga tegmagan.
+        new_pass = str(body.get("password", "") or "")
+        if not new_pass.strip():
+            new_pass = ""
+        # "generate" — parol maydoniga shu so'z yozilsa, avtomatik generatsiya.
+        if new_pass.lower() in ("generate", "auto", "auto-generate"):
+            new_pass = ""
+            wants_gen = True
+        else:
+            wants_gen = bool(body.get("generate_password"))
+
+        if not new_login and not new_pass and not wants_gen:
+            # Hech narsa o'zgartirilmadi — BU NORMAL. "Agar admin o'zi
+            # almashtirsa, o'zgarishsiz yangi bazaga saqlansin" talabi:
+            # bo'sh so'rov hech qanday yozuv QILMAYDI (faqat o'zgarish
+            # bo'lmagani bildiriladi) — eski qiymat buzilmaydi.
+            return OK, {"ok": True, "changed": False, "login": u["login"],
+                        "password_changed": False,
+                        "note": "nothing_changed"}
+
+        sets, params, changed = [], [], []
+
+        if new_login and new_login != u["login"]:
+            if not is_valid_login(new_login):
+                return BAD, err("profile.login_format")
+            # Arxivlangan login ham qayta ishlatilmasin (`deleted_at` filtrisiz).
+            if self.db.q1("SELECT id FROM users WHERE login=? AND id!=?", (new_login, uid)):
+                return BAD, err("profile.login_taken")
+            sets.append("login=?")
+            params.append(new_login)
+            changed.append("login")
+
+        if new_pass or wants_gen:
+            # Parol BIR O'ZGARMI yoki yo'qmi — avval aniqlanadi. Bu belgi
+            # orqali "faqat login o'zgardi" holati ham, "forma o'zgartirilmay
+            # yuborilgan" holat ham to'g'ri ishlaydi.
+            pw_unchanged = False
+            if not new_pass:
+                new_pass = self.db.transaction(lambda c: generate_credentials(c)[1])
+            else:
+                strength = password_strength_errors(new_pass)
+                if strength:
+                    return BAD, err("auth.password_weak", {"errors": strength})
+                # MODUL 5: eski foydalanuvchining parolini BIRIKTIRISH.
+                # `password_enc` yo'q bo'lgan (eski model) foydalanuvchida
+                # admin parolni KO'RA OLMAYDI. Bu yerda admin o'z bilgan
+                # parolni tasdiqlaydi -> u tekshiriladi va SHIFRLANGAN nusxasi
+                # biriktiriladi. `password_hash` O'ZGARMAYDI, sessiyalar
+                # bekor qilinMAYdi (parol o'zgarmagan).
+                if verify_password(new_pass, u["password_hash"]):
+                    if not (u["password_enc"] or "").strip():
+                        self.db.upd("UPDATE users SET password_enc=?, updated_at=? WHERE id=?",
+                                    (encrypt_par(new_pass), now(), uid))
+                        audit(self.db, self.user["id"], action_type="user_credentials_attached",
+                              target_type="users", target_id=uid,
+                              description="%s: %s uchun parol shifrlangan nusxaga biriktirildi"
+                                          % (user_name(self.user), u["login"]))
+                        return OK, {"ok": True, "changed": False, "attached": True,
+                                    "login": u["login"], "password_changed": False,
+                                    "note": "attached"}
+                    # Parol allaqachon SHUNDAY va shifrlangan nusxa ham bor.
+                    # Bu XATO EMAS: forma o'zgartirilmay qayta yuborilgan
+                    # bo'lishi mumkin ("agar admin o'zi almashtirsa,
+                    # o'zgarishsiz saqlansin" talabi). Parolga tegilMAYdi.
+                    pw_unchanged = True
+
+            if not pw_unchanged:
+                # `used_credentials`: ilgari ishlatilgan parol qaytarilmaydi.
+                # Faqat ADMIN qo'lda belgilagan parol uchun tekshiriladi
+                # (avtomatik generatsiya allaqachon unique).
+                if not wants_gen:
+                    pd = credential_digest(new_pass)
+                    if self.db.q1("SELECT 1 FROM used_credentials WHERE password_digest=?", (pd,)):
+                        return BAD, err("auth.password_used")
+                    self.db.transaction(lambda c: c.execute(
+                        "INSERT INTO used_credentials(login_digest, password_digest, created_at)"
+                        " VALUES(?,?,?)",
+                        (credential_digest("admin_set:%d:%s" % (uid, new_pass)), pd, now())))
+                sets += ["password_hash=?", "password_enc=?", "must_change_password=0"]
+                params.append(hash_password(new_pass))
+                params.append(encrypt_par(new_pass))
+                changed.append("password")
+
+        if not changed:
+            # Hech narsa O'ZGARMADI (forma o'zgartirilmay yuborilgan yoki
+            # parol shundayligi aniqlandi). Yozuv QILINMAYDI: hash,
+            # `must_change_password`, sessiyalar va `updated_at` o'zgarmaydi.
+            return OK, {"ok": True, "changed": False, "password_changed": False,
+                        "login": u["login"], "what": [], "note": "nothing_changed"}
+
+        sets.append("updated_at=?")
+        params.append(now())
+        params.append(uid)
+        self.db.upd("UPDATE users SET " + ", ".join(sets) + " WHERE id=?", params)
+
+        # Parol o'zgarsa — barcha sessiyalar bekor qilinadi.
+        if "password" in changed:
+            self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (uid,))
+
+        audit(self.db, self.user["id"], action_type="user_credentials_changed",
+              target_type="users", target_id=uid,
+              description="%s: %s uchun o'zgartirildi [%s]" % (
+                  user_name(self.user), u["login"], "+".join(changed)))
+        return OK, {"ok": True, "changed": True, "what": changed,
+                    "login": new_login if "login" in changed else u["login"],
+                    "password_changed": "password" in changed,
+                    # Yangi parol admin o'ziga qaytariladi — shunda u uni
+                    # foydalanuvchiga berishi mumkin.
+                    "password": new_pass if "password" in changed else None}
 
     # ---- BAND 3: jami mashg'ulotlar sonini o'zgartirish ----
     def _student_progress(self, student_id: int) -> dict:
@@ -1894,9 +2109,13 @@ class Api:
         if not u:
             return NOTFOUND, err("user.not_found")
         out = user_public(u)
-        # Parol HECH QACHON qaytarilmaydi — admin uni ko'ra olmaydi (BAND 6).
+        # Parol HECH QACHON shu yerda qaytarilmaydi (BAND 6). MODUL 5: admin
+        # faqat `GET .../credentials` orqali ko'radi — bu alohida so'rov va
+        # auditga yoziladi. `can_view_password` faqat "ko'rsatish mumkinmi"
+        # degan OCHIQ boolean (parolning O'zi EMAS).
         out.pop("must_change_password", None)
         out["has_password"] = bool(u["password_hash"])
+        out["can_view_password"] = bool(decrypt_secret(u["password_enc"]))
         progress = None
         if u["role"] == "student":
             st = self.db.q1("SELECT * FROM students WHERE user_id=?", (uid,))
@@ -3686,6 +3905,10 @@ class Api:
                 if method == "DELETE": return self.admin_user_delete(uid)
             if len(seg) == 3 and seg[2] == "status": return self.admin_users_status(body, seg[1])
             if len(seg) == 3 and seg[2] == "reset-password": return self.admin_user_reset_password(seg[1], body)
+            # MODUL 5: login + parolni KO'RISH va BIRGA o'zgartirish
+            if len(seg) == 3 and seg[2] == "credentials":
+                if method == "GET": return self.admin_user_credentials_get(seg[1])
+                if method == "PUT": return self.admin_user_credentials_set(seg[1], body)
         if seg[0] == "students" and len(seg) >= 2 and seg[1] == "import" and method == "POST":
             return self.admin_import_students(body)
         if seg[0] == "cars":
@@ -3898,7 +4121,11 @@ def _new_totp_secret() -> str:
 
 
 def user_public(u) -> dict:
-    out = {k: v for k, v in dict(u).items() if k not in ("password_hash", "totp_secret")}
+    # `password_enc` — shifrlangan parol. Hech qanday ro'yxat/profil
+    # javobida chiqmaydi: faqat `admin_user_credentials_get` orqali,
+    # va o'shanda `admin` roli bilan, onaylangan holda.
+    out = {k: v for k, v in dict(u).items()
+           if k not in ("password_hash", "password_enc", "totp_secret")}
     return out
 
 

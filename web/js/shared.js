@@ -46,9 +46,10 @@ const Shared = (function () {
   }
 
   /* ---------- hisob ma'lumotlari (login/parol) ----------
-     BAND 6: parol DB'da PLAIN TEXT emas (scrypt hash) va admin uni
-     hech qachon qaytara olmaydi. Shu sababli yangi parol faqat SHUNING
-     o'zida yaratilgan paytdin — bir marta ko'rsatiladi. `hint` — ogohlantirish. */
+     MODUL 5: parol endi `password_enc` (AES-256-GCM) sifatida ham
+     saqlanadi — admin uni 🔑 orqali ko'ra va o'zgartira oladi. Bu yordamchi
+     funksiya YARATILGAN paytdagi credential'larni ko'rsatadi (ular bir
+     martalik chiqish natijasi). `hint` — ixtiyoriy ogohlantirish. */
   function credBox(login, password, hint) {
     function row(label, value) {
       const inp = el("input", { class: "input", value: value || "", readonly: "" });
@@ -998,7 +999,7 @@ const Shared = (function () {
     if (!isEdit) credArea = el("div", { class: "mt muted", icon: "key", text: "" + t("student.credentials") + " — saqlangach ko'rinadi" });
 
     /* MODUL 3: yangi ADMIN — roli faqat admin, login/parol AVTOMATIK
-       generatsiya qilinadi va faqat bir marta ko'rsatiladi. */
+       generatsiya qilinadi va 🔑 orqali keyin ham ko'riladi. */
     const addTitle = role === "student" ? t("student.add")
       : role === "instructor" ? t("instructor.add")
       : t("users.add_admin");
@@ -1035,11 +1036,12 @@ const Shared = (function () {
               } else {
                 const res = await API.post("admin/users", payload);
                 m.close();
-                // MODUL 3: yangi admin yaratildi — login/parol BIR MARTA
-                // ko'rsatiladi, keyin faqat hash saqlanadi.
+                // MODUL 3/5: yangi foydalanuvchi yaratildi. Credential'lar
+                // shu yerda ko'rsatiladi, va 🔑 orqali keyin HAM ko'riladi
+                // hamda o'zgartiriladi (parol shifrlangan holda saqlanadi).
                 openUserCredentials(res.credentials, role === "admin"
-                  ? { title: t("users.add_admin") }
-                  : {});
+                  ? { title: t("users.add_admin"), hint: t("users.cred_visible_note") }
+                  : { hint: t("users.cred_visible_note") });
                 App.refreshView();
               }
             } catch (e) { errToast(e); }
@@ -1048,10 +1050,157 @@ const Shared = (function () {
     ], { wide: true });
   }
 
+  /* ============================================================
+     MODUL 5 — ADMIN: LOGIN VA PAROLNI KO'RISH + BIRGA O'ZGARTIRISH
+     ============================================================
+     Talab: admin har bir foydalanuvchining login va parolini ko'ra olsin va
+     xohlagancha o'zgartira olsin. Backend parolni AES-256-GCM bilan
+     shifrlab saqlaydi (`users.password_enc`) — bu oynada ochiladi.
+
+     Xavfsizlik: har bir ko'rish va o'zgartirish AUDIT jurnaliga yoziladi
+     (`user_credentials_viewed` / `user_credentials_changed`).
+
+     `can_view: false` bo'lsa (eski foydalanuvchi yoki kalit yo'q) —
+     parol maydoni bo'sh qoladi va sabab ko'rsatiladi. Admin o'z bilgan
+     parolni maydonga kiritib "biriktirish" orqali uni ko'rinadigan qila
+     oladi (parol o'zgartirmaydi). */
+  const LOGIN_RE_JS = /^usrL_[A-Za-z0-9]{14,32}$/;
+
+  function credReasonText(reason) {
+    if (reason === "crypto") return t("users.cred_no_crypto");
+    return t("users.cred_legacy");
+  }
+
+  function openUserCredentialsManager(user, onDone) {
+    const loginI = input({ class: "input", value: "", autocapitalize: "off",
+      autocomplete: "off", spellcheck: false });
+    const pwWrap = UI.passwordInput({ placeholder: "••••••", autocomplete: "off" });
+    const pwI = pwWrap.input;
+    const box = el("div", { class: "cred-box" });
+    const note = el("p", { class: "cred-warn", icon: "warn" });
+    const boxKids = [
+      el("div", { class: "field-label", icon: "key", text: "" + t("student.credentials") }),
+      el("div", { class: "row" }, [
+        el("div", { class: "f1" }, [
+          el("div", { class: "field-label", text: "" + t("auth.login") }), loginI,
+        ]),
+        el("button", { class: "btn btn-light btn-sm", icon: "copy", text: "" + t("common.copy"),
+          onclick: () => { navigator.clipboard.writeText(loginI.value || "").then(() => toast(t("misc.saved"))); } }),
+      ]),
+      el("div", { class: "row" }, [
+        el("div", { class: "f1" }, [
+          el("div", { class: "field-label", text: "" + t("auth.password") }), pwWrap,
+        ]),
+        el("button", { class: "btn btn-light btn-sm", icon: "copy", text: "" + t("common.copy"),
+          onclick: () => { navigator.clipboard.writeText(pwI.value || "").then(() => toast(t("misc.saved"))); } }),
+      ]),
+      el("div", { class: "field-hint" }, [
+        el("span", { text: "" + t("users.cred_format") }),
+        el("code", { text: " " + t("users.cred_format_hint") }),
+      ]),
+      note,
+    ];
+    box.append(el("div", {}, boxKids));
+
+    let origLogin = user.login || "";
+    let origPass = "";
+    const saveBtn = el("button", { class: "btn btn-primary", icon: "save", text: "" + t("common.save") });
+    const genBtn = el("button", { class: "btn btn-light", icon: "refresh", text: "" + t("users.cred_generate") });
+
+    const m = modal("🔑 " + t("users.cred_title") + " — " + (user.first_name ? user.first_name + " " + user.last_name : user.login), [
+      box,
+      el("p", { class: "field-hint mt", icon: "alert", text: "" + t("users.cred_audit_note") }),
+      el("div", { class: "row end mt" }, [
+        genBtn,
+        el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
+        saveBtn,
+      ]),
+    ], { wide: true });
+
+    function refresh() {
+      const newLogin = loginI.value.trim();
+      const newPass = pwI.value;
+      const dirty = (newLogin && newLogin !== origLogin) || (newPass && newPass !== origPass);
+      saveBtn.disabled = !dirty;
+    }
+    loginI.addEventListener("input", refresh);
+    pwI.addEventListener("input", refresh);
+
+    /* Parol generatsiyasi — foydalanuvchiga berish uchun. Maydonga
+       yoziladi (birdan saqlanmaydi), shuning uchun admin avval ko'radi. */
+    genBtn.addEventListener("click", () => {
+      genBtn.disabled = true;
+      API.post(`admin/users/${user.id}/credentials`, { generate_password: true })
+        .then((r) => {
+          pwI.value = r.password || "";
+          origPass = "";              // endi "o'zgartirilgan" hisoblanadi
+          note.textContent = "";
+          note.className = "cred-warn";
+          note.append(el("span", { text: "" + t("users.cred_generated") }));
+          toast(t("misc.saved"));
+          refresh();
+        })
+        .catch(errToast)
+        .finally(() => { genBtn.disabled = false; });
+    });
+
+    /* O'zgartirish — tasdiqsiz bajarilMAYDI (parol/login = maxfiy amal). */
+    saveBtn.addEventListener("click", () => {
+      const newLogin = loginI.value.trim();
+      const newPass = pwI.value;
+      const what = [];
+      if (newLogin && newLogin !== origLogin) what.push(t("auth.login"));
+      if (newPass && newPass !== origPass) what.push(t("auth.password"));
+      if (!what.length) { m.close(); return; }
+      confirmDialog("" + t("users.cred_save_confirm", { what: what.join(" + ") }), () => {
+        API.put(`admin/users/${user.id}/credentials`, { login: newLogin, password: newPass })
+          .then((r) => {
+            if (r.attached) {
+              toast("" + t("users.cred_attached"));
+            } else if (!r.changed) {
+              /* "Agar admin o'zi almashtirsa, o'zgarishsiz saqlansin":
+                 hech narsa o'zgarmadi — xato EMAS, oddiy xabar. */
+              toast("" + t("users.cred_unchanged"));
+            } else {
+              const labels = (r.what || []).map((w) =>
+                w === "login" ? t("auth.login") : t("auth.password"));
+              toast("" + t("users.cred_saved", { what: labels.join(" + ") }));
+            }
+            m.close();
+            if (typeof onDone === "function") onDone();
+          })
+          .catch(errToast);
+      }, { danger: true });
+    });
+
+    /* Dastlabki yuklash — joriy login va parolni olamiz. */
+    box.append(UI.spinner(""));
+    API.get(`admin/users/${user.id}/credentials`).then((r) => {
+      box.lastChild.remove();
+      origLogin = r.login || "";
+      origPass = r.password || "";
+      loginI.value = origLogin;
+      pwI.value = origPass;
+      if (r.can_view) {
+        note.className = "field-hint";
+        note.append(el("span", { text: "" + t("users.cred_visible_note") }));
+      } else {
+        note.className = "cred-warn";
+        note.append(el("span", { text: "" + credReasonText(r.reason) }));
+      }
+      refresh();
+    }).catch((e) => {
+      box.lastChild.remove();
+      errToast(e);
+      m.close();
+    });
+    return m;
+  }
+
   function openUserCredentials(creds, opts = {}) {
     const title = opts.title || t("student.credentials");
     const m = modal("🔑 " + title, [
-      credBox(creds.login, creds.password, opts.hint || t("users.password_shown_once")),
+      credBox(creds.login, creds.password, opts.hint || t("users.cred_visible_note")),
       el("p", { class: "field-hint mt", icon: "alert", text: "" + t("auth.no_registration") }),
       el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.close"), onclick: () => m.close() })]),
     ]);
@@ -1721,7 +1870,7 @@ const Shared = (function () {
 
   return {
     openSession, openMessage, openChangeCredentials, credBox, rulesList,
-    openUserForm, openUserCredentials, openRequest, openThread, openNotif,
+    openUserForm, openUserCredentials, openUserCredentialsManager, openRequest, openThread, openNotif,
     renderProfile, profileFullName, pickAvatar, editProfileModal,
     settingsPage, applyTheme, notificationsPage, notifCategory,
     todayISO, timeNowHM, weekdayShort, fmtDate, fmtDateTime,

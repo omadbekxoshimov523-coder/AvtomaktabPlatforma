@@ -20,6 +20,7 @@ endpoint orqali chiqmaydi.
 """
 import os
 import sys
+import threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(ROOT, ".env")
@@ -153,6 +154,78 @@ def map_center() -> dict:
 def maps_enabled() -> bool:
     """Xarita umuman yoqilganmi va kaliti bormi."""
     return map_provider() != "none" and bool(yandex_api_key())
+
+
+# ======================================================================
+# MODUL 5 — PAROLLARNI QAYTARIB OCHISH KALITI
+#
+# Talab: admin foydalanuvchining PAROLINI koʻra va oʻzgartira olishi
+# kerak. Parollar `scrypt` bilan BIR TOMONLAMA hash qilingan —
+# qaytarib olish MUMKIN EMAS. Shuning uchun qoʻshimcha ravishda parol
+# AES-256-GCM bilan SHIFRLANGAN koʻrinishda ham saqlanadi
+# (`users.password_enc`), kalit esa shu yerda — `.env` da.
+#
+# QOID'A: kalit KODGA YOZILMAYDI. `.env` `.gitignore` da, shuning uchun
+# GitHub'ga HECH QACHON tushmaydi.
+#
+# XAVF (bu maxsus talab tufayli qabul qilingan):
+#   `.env` + bazaga kirish huqufi bo'lgan kishi BARCHA parollarni ochadi.
+#   Bu endi "hash — bir yo'nalishli" model emas. `.env` faylni
+#   zaxira nusxa bilan birga saqlash SHART.
+# ======================================================================
+CREDENTIALS_KEY_ENV = "CREDENTIALS_KEY"
+
+# Kalitni yaratish "check-then-write" — bitta lock bilan himoya qilinadi.
+# XAVFSIZLIK UCHUN SHART: agar ikki so'rov parallel ravishda kalit yaratsa,
+# `.env` ga IKKITA turli kalit yoziladi va keyingi ishga tushirishda
+# boshqa kalit yuklanadi -> eski parollar QAYTARIB OCHILMAYDI.
+_CRED_KEY_LOCK = threading.Lock()
+
+
+def credentials_key() -> str:
+    """`.env` dan maxfiy shifrlash kaliti (base64, 32 bayt) — boʻlmasa ""."""
+    return _env(CREDENTIALS_KEY_ENV)
+
+
+def ensure_credentials_key() -> str:
+    """Kalitni `.env` faylga BIR MARTA yozadi (yoʻq boʻlsa) va qaytaradi.
+
+    Kalit `os.urandom(32)` dan olinadi — tasodifiy va taxmin qilinmaydi.
+    `.env` yoʻq boʻlsa yoki yozib boʻlmaydigan boʻlsa — "" qaytariladi
+    (shu holda parol koʻrsatish funksiyasi oʻchirilgan boʻladi, qolgan
+    hammasi ishlayveradi).
+
+    Idempotent: kalit mavjud boʻlsa hech narsa yozilmaydi.
+    """
+    k = credentials_key()
+    if k:
+        return k
+    import base64 as _b64
+    import secrets as _secrets
+    with _CRED_KEY_LOCK:
+        # Lock ichida QAYTA tekshiramiz — boshqa so'rov shu yerda
+        # kalitni yozib bo'lgan bo'lishi mumkin.
+        k = credentials_key()
+        if k:
+            return k
+        k = _b64.urlsafe_b64encode(_secrets.token_bytes(32)).decode().strip()
+        line = ("%s=%s\n" % (CREDENTIALS_KEY_ENV, k))
+        try:
+            new_file = not os.path.isfile(ENV_PATH)
+            with open(ENV_PATH, "a", encoding="utf-8") as f:
+                if not new_file:
+                    f.write("\n")
+                f.write("# MODUL 5: parollarni qaytarib ochish kaliti. "
+                        "BU FAYLNI YO'QOTMANG!\n")
+                f.write(line)
+            os.environ[CREDENTIALS_KEY_ENV] = k
+            return k
+        except OSError as e:
+            try:
+                sys.stderr.write("[config] CREDENTIALS_KEY yozilmadi: %s\n" % e)
+            except Exception:
+                pass
+            return ""
 
 
 def public_map_config() -> dict:

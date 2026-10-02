@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
     secondary_phone TEXT DEFAULT '',
     login TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    password_enc TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL CHECK (role IN ('admin','student','instructor')),
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','blocked','archived')),
     profile_image TEXT DEFAULT '',
@@ -432,6 +433,13 @@ def migrate(db: Db) -> None:
         db.upd("ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT ''")
     if "totp_enabled" not in cols:
         db.upd("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0")
+    # MODUL 5: parolning QAYTARIB OCHILADIGAN nusxasi (AES-256-GCM).
+    # `password_hash` (scrypt) ASOSIY saqlash bo'lib qoladi — u o'zgartirilmaydi.
+    # Eski qatorlarda `password_enc` bo'sh qoladi: kirish ishlayveradi, faqat
+    # admin u foydalanuvchining parolini KO'RA OLMAYDI (parolni qayta
+    # o'rnatish yoki foydalanuvchi o'zgartirishi kerak bo'ladi).
+    if "password_enc" not in cols:
+        db.upd("ALTER TABLE users ADD COLUMN password_enc TEXT NOT NULL DEFAULT ''")
     # M1: bildirishnoma jo'natuvchisi (eski bazalar uchun ham xavfsiz)
     ncols = {r["name"] for r in db.q("PRAGMA table_info(notifications)")}
     if "sender_id" not in ncols:

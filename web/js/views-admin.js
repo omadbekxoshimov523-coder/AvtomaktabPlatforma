@@ -212,8 +212,8 @@ window.AdminViews = (function () {
               el("button", { class: "btn btn-light btn-sm", text: "👤", title: "" + t("users.view_profile"),
                 onclick: () => openUserProfile(u.id, load) }),
               el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => editUser(u) }),
-              el("button", { class: "btn btn-light btn-sm", text: "🔑", title: "" + t("users.new_password"),
-                onclick: () => resetPass(u) }),
+              el("button", { class: "btn btn-light btn-sm", text: "🔑", title: "" + t("users.cred_title"),
+                onclick: () => Shared.openUserCredentialsManager(u, load) }),
               u.role === "instructor" && u.instructor ? el("button", { class: "btn btn-light btn-sm", text: "🚗", onclick: () => Shared.openUserForm("instructor", u) }) : null,
               /* MODUL 2/3: bloklash/blokdan chiqarish + arxivlash/arxivdan
                  chiqarish — talaba, instruktor va admin uchun BIR XIL. */
@@ -229,14 +229,10 @@ window.AdminViews = (function () {
       return badge(u.status, u.status === "active" ? t("student.status.active") : u.status === "blocked" ? t("stat.blocked") : t("stat.archived"));
     }
     function editUser(u) { Shared.openUserForm(u.role, u); }
-    async function resetPass(u) {
-      confirmDialog("" + t("users.new_password_confirm"), async () => {
-        try {
-          const res = await API.post(`admin/users/${u.id}/reset-password`);
-          Shared.openUserCredentials({ login: res.login, password: res.password });
-        } catch (e) { errToast(e); }
-      }, { danger: true });
-    }
+    /* MODUL 5: 🔑 enda "Yangi parol o'rnatish" emas, balki LOGIN+PAROLNI
+       KO'RISH va birga o'zgartirish oynasi (`openUserCredentialsManager`).
+       Parol avtomatik generatsiya qilish esa oyna ichidagi
+       "Yangi parol" tugmasi orqali bajariladi. */
     [searchI, roleSel, statusSel].forEach((c) => c.addEventListener("change", load));
     let timer;
     searchI.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(load, 350); });
@@ -294,6 +290,10 @@ window.AdminViews = (function () {
                 box.append(el("h4", { class: "card-title mt", text: "🔑 Login/Parol" }));
                 r.credentials.slice(0, 20).forEach((cr, i) => box.append(el("div", { class: "kv" }, [
                   el("span", { class: "k", text: `#${i + 1}` }), el("span", { class: "v", text: cr.login + " / " + cr.password })])));
+                /* MODUL 5: "bir marta ko'rsatish" cheklovi yo'q — har bir
+                   foydalanuvchining 🔑 tugmasi orqali paroli keyin ham
+                   ko'riladi va o'zgartiriladi. */
+                box.append(el("p", { class: "field-hint", icon: "info", text: "" + t("users.cred_visible_note") }));
               }
               // xatolar
               modal("📥 " + t("student.import"), [box,
@@ -806,18 +806,12 @@ window.AdminViews = (function () {
         } }) : null,
       el("button", { class: "btn btn-light", icon: "edit", text: "" + t("users.edit_btn"),
         onclick: () => { m.close(); Shared.openUserForm(u.role, u); } }),
-      el("button", { class: "btn btn-primary", icon: "key", text: "" + t("users.new_password"),
-        onclick: async () => {
-          confirmDialog(t("users.new_password_confirm"), async () => {
-            try {
-              const r = await API.post(`admin/users/${u.id}/reset-password`);
-              /* Parol BIR MARTA ko'rsatiladi — admin uni keyin ko'ra OLMAYDI. */
-              const m2 = modal(t("student.credentials"), [
-                Shared.credBox(r.login, r.password, t("users.password_shown_once")),
-                el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.close"), onclick: () => m2.close() })]),
-              ]);
-            } catch (e) { errToast(e); }
-          }, { danger: true });
+      el("button", { class: "btn btn-primary", icon: "key", text: "" + t("users.cred_title"),
+        onclick: () => {
+          m.close();
+          Shared.openUserCredentialsManager(u, () => {
+            openUserProfile(u.id, onDone);
+          });
         } }),
     ]);
     /* MODUL 2/3: bloklash/blokdan chiqarish + arxivlash/arxivdan chiqarish
@@ -980,6 +974,9 @@ window.AdminViews = (function () {
             el("button", { class: "btn btn-cyan btn-sm", title: t("users.total_btn"), text: "🎯",
               onclick: () => totalLessonsModal(u, pr, load) }),
             el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("student", u) }),
+            /* MODUL 5: login+parolni ko'rish va birga o'zgartirish */
+            el("button", { class: "btn btn-light btn-sm", text: "🔑", title: t("users.cred_title"),
+              onclick: () => Shared.openUserCredentialsManager(u, load) }),
             /* MODUL 2: bloklash/blokdan chiqarish + arxivlash/arxivdan chiqarish */
             ...userStatusActions(u, load),
           ])]),
@@ -1049,6 +1046,9 @@ window.AdminViews = (function () {
           el("td", {}, [el("div", { class: "actions" }, [
             el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("instructor", u) }),
             el("button", { class: "btn btn-cyan btn-sm", icon: "car", text: "" + t("car.reassign"), onclick: () => assignCarModal(u) }),
+            /* MODUL 5: login+parolni ko'rish va birga o'zgartirish */
+            el("button", { class: "btn btn-light btn-sm", text: "🔑", title: t("users.cred_title"),
+              onclick: () => Shared.openUserCredentialsManager(u, load) }),
             /* MODUL 2: instruktor ham xuddi shunday boshqariladi. */
             ...userStatusActions(u, load),
           ])]),
@@ -1117,13 +1117,8 @@ window.AdminViews = (function () {
             onclick: () => openUserProfile(u.id, load) }),
           el("button", { class: "btn btn-light btn-sm", icon: "edit", text: "", title: t("common.edit"),
             onclick: () => Shared.openUserForm("admin", u) }),
-          el("button", { class: "btn btn-light btn-sm", icon: "key", text: "", title: t("users.new_password"),
-            onclick: () => confirmDialog(t("users.new_password_confirm"), async () => {
-              try {
-                const r = await API.post(`admin/users/${u.id}/reset-password`);
-                Shared.openUserCredentials({ login: r.login, password: r.password });
-              } catch (e) { errToast(e); }
-            }, { danger: true }) }),
+          el("button", { class: "btn btn-light btn-sm", icon: "key", text: "", title: t("users.cred_title"),
+            onclick: () => Shared.openUserCredentialsManager(u, load) }),
           /* MODUL 3: admin ham xuddi shunday bloklanadi/arxivlanadi
              (o'zini va oxirgi faol adminni — backend qat'iy tekshiradi). */
           ...userStatusActions(u, load),

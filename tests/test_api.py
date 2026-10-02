@@ -6746,5 +6746,562 @@ class TestModul1ConditionalFields(_MixinAdmin, Base):
             self._cleanup_user(uid)
 
 
+class TestModul5AdminCredentialVisibility(_MixinAdmin, Base):
+    """MODUL 5 — admin foydalanuvchi LOGIN va PAROLINI ko'radi hamda
+    xohlagancha o'zgartiradi.
+
+    Talab (foydalanuvchidan): "admin har bir foydalanuvchining login va
+    parolini ko'ra olsin va xohlagancha o'zgartirish huquqiga ega bo'lsin";
+    "bir marta ko'rsatish" cheklovi olib tashlandi; yangi foydalanuvchiga
+    login/parol avtomatik beriladi; "agar admin o'zi almashtirsa, o'zgarishsiz
+    yangi bazaga saqlansin".
+
+    Buning uchun parol `password_enc` (AES-256-GCM) sifatida ham saqlanadi.
+    Testlar shu qatlamni ham tekshiradi.
+    """
+
+    def _read(self, rel):
+        p = Path(__file__).resolve().parent.parent / rel
+        return p.read_text(encoding="utf-8")
+
+    # ------------------------------------------------------------------
+    # Shifrlash qatlami
+    # ------------------------------------------------------------------
+    def test_M5_01_encrypt_roundtrip(self):
+        from app.auth import encrypt_secret, decrypt_secret
+        pw = "usrP_TestRoundtrip77!"
+        blob = encrypt_secret(pw)
+        self.assertTrue(blob.startswith("enc:v1:"), "prefiks noto'g'ri: %r" % blob[:12])
+        self.assertNotIn(pw, blob, "ochiq matn shifrlangan blob ichida qoldi")
+        self.assertEqual(decrypt_secret(blob), pw)
+
+    def test_M5_02_decrypt_rejects_tampering(self):
+        from app.auth import encrypt_secret, decrypt_secret
+        blob = encrypt_secret("usrP_ABC12345x")
+        # 1 ta belgi o'zgartiriladi -> GCM authenticate muvaffaqiyatsiz
+        broken = blob[:-4] + ("AAAA" if not blob.endswith("AAAA") else "BBBB")
+        self.assertIsNone(decrypt_secret(broken), "buzilgan ma'lumot qabul qilindi")
+        self.assertIsNone(decrypt_secret(""), "bo'sh qiymat parol qaytaradi")
+        self.assertIsNone(decrypt_secret("sha1$olma$1$2$aa$bb"),
+                          "noto'g'ri prefiks parol qaytaradi")
+        # Boshqa kalit bilan ochib bo'lmaydi (kalit tekshiruvi)
+        self.assertNotEqual(decrypt_secret(blob), decrypt_secret(encrypt_secret("boshqa")))
+
+    def test_M5_03_encrypt_par_never_raises(self):
+        """Kalit/kutubxona yo'q bo'lsa `encrypt_par` xato OTARMASIZ —
+        platforma ishlashda davom etishi kerak (bo'sh satr qaytaradi)."""
+        from app import api as apimod
+        from app.auth import decrypt_secret
+        r = apimod.encrypt_par("qandaydir_parol")
+        self.assertIsInstance(r, str, "natija satr bo'lishi SHART")
+        if _crypto_ready():
+            self.assertTrue(r.startswith("enc:v1:"), "shifrlanmagan: %r" % r)
+            self.assertEqual(decrypt_secret(r), "qandaydir_parol")
+        else:
+            self.assertEqual(r, "", "kalit yo'q bo'lsa bo'sh satr qaytariladi")
+
+    # ------------------------------------------------------------------
+    # Saqlash: hash ham, shifrlangan nusxa ham
+    # ------------------------------------------------------------------
+    def test_M5_04_new_user_password_is_viewable(self):
+        r = self._mkuser("student", "Ko'rin", "Parol")
+        uid = r["user"]["id"]
+        try:
+            pw = r["credentials"]["password"]
+            st, res = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(st, 200, res)
+            self.assertTrue(res["can_view"], "yangi foydalanuvchi paroli ko'rinmadi: %s" % res.get("reason"))
+            self.assertEqual(res["login"], r["credentials"]["login"])
+            self.assertEqual(res["password"], pw, "qaytarilgan parol boshqacha")
+            # Parol DB'da ochiq matn holda EMAS
+            row = _json_db().q1("SELECT password_hash,password_enc FROM users WHERE id=?", (uid,))
+            self.assertTrue(row["password_hash"].startswith("scrypt$"), "hash yo'q")
+            self.assertTrue(row["password_enc"].startswith("enc:v1:"), "shifrlangan nusxa yo'q")
+            self.assertNotIn(pw, row["password_hash"])
+            self.assertNotIn(pw, row["password_enc"])
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M5_05_password_enc_hidden_from_public_payloads(self):
+        """`password_enc` hech qanday ro'yxat/profil javobida chiqmasligi SHART."""
+        r = self._mkuser("student", "Yashir", "Kerak")
+        uid = r["user"]["id"]
+        try:
+            for label, st, res in (
+                ("admin/users", *self.admin.get("/api/admin/users?role=student")),
+                ("admin/user_profile", *self.admin.get("/api/admin/users/%d" % uid)),
+            ):
+                with self.subTest(endpoint=label):
+                    self.assertEqual(st, 200, res)
+                    blob = repr(res)
+                    self.assertNotIn("password_enc", blob, "%s password_enc ni chiqaryapti" % label)
+                    self.assertNotIn("password_hash", blob, "%s password_hash ni chiqaryapti" % label)
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M5_06_view_is_written_to_audit(self):
+        """Parolni KO'RISH maxfiy amal — auditga yozilishi shart."""
+        r = self._mkuser("student", "Audit", "Ko'rish")
+        uid = r["user"]["id"]
+        try:
+            self.admin.get("/api/admin/users/%d/credentials" % uid)
+            row = _json_db().q1(
+                "SELECT action_type FROM audit_log WHERE target_id=? AND action_type=?",
+                (str(uid), "user_credentials_viewed"))
+            self.assertIsNotNone(row, "user_credentials_viewed audit yozuvi yo'q")
+        finally:
+            self._cleanup_user(uid)
+
+    # ------------------------------------------------------------------
+    # RBAC
+    # ------------------------------------------------------------------
+    def test_M5_07_student_cannot_read_or_write_credentials(self):
+        r = self._mkuser("student", "Talaba", "Hujjat")
+        uid = r["user"]["id"]
+        try:
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertEqual(st, 200)
+            st1, res1 = c.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(st1, 403, res1)
+            st2, res2 = c.put("/api/admin/users/%d/credentials" % uid,
+                               {"password": "usrP_HackerTry1!"})
+            self.assertEqual(st2, 403, res2)
+            # Parol hamon o'zgarilmagan
+            st3, res3 = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(res3["password"], r["credentials"]["password"])
+        finally:
+            self._cleanup_user(uid)
+
+    # ------------------------------------------------------------------
+    # BIRGA o'zgartirish (login + parol)
+    # ------------------------------------------------------------------
+    def test_M5_08_change_login_and_password_together(self):
+        r = self._mkuser("student", "Birga", "O'zgar")
+        uid = r["user"]["id"]
+        try:
+            new_login = "usrL_BirgaOzgaris01"
+            new_pw = "usrP_BirgaOzgar9!"
+            st, res = self.admin.put("/api/admin/users/%d/credentials" % uid,
+                                     {"login": new_login, "password": new_pw})
+            self.assertEqual(st, 200, res)
+            self.assertTrue(res["changed"])
+            self.assertEqual(sorted(res["what"]), ["login", "password"])
+            # Saqlanganini tekshirish
+            st2, res2 = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(res2["login"], new_login)
+            self.assertEqual(res2["password"], new_pw)
+            # YANGI login/parol bilan kirish ishlaydi
+            c, st3, res3 = self._login(new_login, new_pw, "student")
+            self.assertEqual(st3, 200, res3)
+            # Eski login bilan KIRIB BO'LMAYDI
+            from app.auth import reset_login_attempts
+            reset_login_attempts("login:" + r["credentials"]["login"])
+            c2 = Client()
+            st4, _ = c2.post("/api/auth/login", {"role": "student",
+                                                "login": r["credentials"]["login"],
+                                                "password": r["credentials"]["password"]})
+            self.assertNotEqual(st4, 200, "eski login bilan kirish mumkin bo'ldi")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M5_09_password_change_kills_sessions(self):
+        """Parol o'zgarganda barcha sessiyalar bekor qilinadi."""
+        r = self._mkuser("student", "Sessiya", "Bekor")
+        uid = r["user"]["id"]
+        try:
+            lg, pw = r["credentials"]["login"], r["credentials"]["password"]
+            c, st, _ = self._login(lg, pw, "student")
+            self.assertEqual(st, 200)
+            st2, res2 = self.admin.put("/api/admin/users/%d/credentials" % uid,
+                                        {"password": "usrP_YangiSessiya5!"})
+            self.assertEqual(st2, 200, res2)
+            st3, res3 = c.get("/api/auth/me")
+            self.assertNotEqual(st3, 200, "eski sessiya yashirib qoldi")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M5_10_login_change_only_keeps_password(self):
+        """FAQAT login o'zgaradi — parolga tegilmaydi, sessiya ham saqlanadi."""
+        r = self._mkuser("student", "FaqatLogin", "O'zgar")
+        uid = r["user"]["id"]
+        try:
+            lg, pw = r["credentials"]["login"], r["credentials"]["password"]
+            c, st, _ = self._login(lg, pw, "student")
+            self.assertEqual(st, 200)
+            st2, res2 = self.admin.put("/api/admin/users/%d/credentials" % uid,
+                                        {"login": "usrL_FaqatLoginOzgar01"})
+            self.assertEqual(st2, 200, res2)
+            self.assertEqual(res2["what"], ["login"])
+            self.assertFalse(res2["password_changed"])
+            st3, res3 = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(res3["password"], pw, "parol o'zgari ketdi")
+            # Sessiya saqlanadi (parol o'zgarmagan)
+            st4, res4 = c.get("/api/auth/me")
+            self.assertEqual(st4, 200, res4)
+            self.assertEqual(res4["user"]["login"], "usrL_FaqatLoginOzgar01")
+        finally:
+            self._cleanup_user(uid)
+
+    # ------------------------------------------------------------------
+    # "O'zgartirmasam — o'zgarishsiz saqlansin"
+    # ------------------------------------------------------------------
+    def test_M5_11_empty_body_changes_nothing(self):
+        """"Agar admin o'zi almashtirsa, o'zgarishsiz saqlansin": bo'sh
+        so'rov HECH QANDAY yozuv QILMASIZ (joriy qiymat buzilmaydi)."""
+        r = self._mkuser("student", "Hich", "Narsa")
+        uid = r["user"]["id"]
+        try:
+            lg, pw = r["credentials"]["login"], r["credentials"]["password"]
+            before = _json_db().q1("SELECT login,password_hash,updated_at FROM users WHERE id=?", (uid,))
+            for payload in ({}, {"login": ""}, {"password": ""}, {"login": lg, "password": pw},
+                            {"login": "  ", "password": "  "}):
+                with self.subTest(payload=payload):
+                    st, res = self.admin.put("/api/admin/users/%d/credentials" % uid, payload)
+                    self.assertEqual(st, 200, res)
+                    self.assertFalse(res["changed"], "bo'sh so'rov yozuv qildi: %s" % res)
+                    self.assertEqual(res["login"], lg)
+            after = _json_db().q1("SELECT login,password_hash,updated_at FROM users WHERE id=?", (uid,))
+            self.assertEqual(after["login"], before["login"])
+            self.assertEqual(after["password_hash"], before["password_hash"],
+                             "parol hash'i o'zgardi")
+            self.assertEqual(after["updated_at"], before["updated_at"], "updated_at o'zgardi")
+            # Parol hali ham ko'rinadi
+            st, res = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(res["password"], pw)
+        finally:
+            self._cleanup_user(uid)
+
+    # ------------------------------------------------------------------
+    # Validatsiya
+    # ------------------------------------------------------------------
+    def test_M5_12_weak_password_rejected(self):
+        r = self._mkuser("student", "Zaif", "Parol")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.put("/api/admin/users/%d/credentials" % uid,
+                                     {"password": "abc"})
+            self.assertEqual(st, 400, res)
+            self.assertEqual(res["error"], "auth.password_weak")
+            self.assertIn("errors", res["params"])
+            # Parol o'zgarmadi
+            st2, res2 = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(res2["password"], r["credentials"]["password"])
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M5_13_taken_login_rejected(self):
+        r1 = self._mkuser("student", "Birinchi", "Foydalanuvchi")
+        r2 = self._mkuser("student", "Ikkinchi", "Foydalanuvchi")
+        try:
+            taken = r1["credentials"]["login"]
+            st, res = self.admin.put("/api/admin/users/%d/credentials" % r2["user"]["id"],
+                                     {"login": taken})
+            self.assertEqual(st, 400, res)
+            self.assertEqual(res["error"], "profile.login_taken")
+            # Oxirgi qiymat buzilmadi
+            st2, res2 = self.admin.get("/api/admin/users/%d/credentials" % r2["user"]["id"])
+            self.assertEqual(res2["login"], r2["credentials"]["login"])
+        finally:
+            self._cleanup_user(r1["user"]["id"])
+            self._cleanup_user(r2["user"]["id"])
+
+    def test_M5_14_bad_login_format_rejected(self):
+        r = self._mkuser("student", "Format", "Noto'g'ri")
+        uid = r["user"]["id"]
+        try:
+            for bad in ("admin", "usrL_qisqa", "usrL_" + "a" * 40, "x" * 20):
+                with self.subTest(login=bad):
+                    st, res = self.admin.put("/api/admin/users/%d/credentials" % uid,
+                                             {"login": bad})
+                    self.assertEqual(st, 400, res)
+                    self.assertEqual(res["error"], "profile.login_format")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M5_15_same_password_is_not_an_error(self):
+        """Aynan bir xil parolni yuborish XATO EMAS — forma o'zgartirilmay
+        qayta yuborilgan bo'lishi mumkin. Yozuv QILINMAYDI."""
+        r = self._mkuser("student", "O'zi", "Biri")
+        uid = r["user"]["id"]
+        try:
+            before = _json_db().q1("SELECT password_hash,updated_at FROM users WHERE id=?", (uid,))
+            st, res = self.admin.put("/api/admin/users/%d/credentials" % uid,
+                                     {"password": r["credentials"]["password"]})
+            self.assertEqual(st, 200, res)
+            self.assertFalse(res["changed"], "o'zgarmagan parol 'o'zgargan' deb hisoblandi")
+            self.assertFalse(res["password_changed"])
+            self.assertEqual(res["note"], "nothing_changed")
+            after = _json_db().q1("SELECT password_hash,updated_at FROM users WHERE id=?", (uid,))
+            self.assertEqual(after["password_hash"], before["password_hash"])
+            self.assertEqual(after["updated_at"], before["updated_at"])
+        finally:
+            self._cleanup_user(uid)
+
+    # ------------------------------------------------------------------
+    # Avtomatik generatsiya + eski (legacy) foydalanuvchilar
+    # ------------------------------------------------------------------
+    def test_M5_16_generate_password(self):
+        r = self._mkuser("student", "Avto", "Parol")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.put("/api/admin/users/%d/credentials" % uid,
+                                     {"generate_password": True})
+            self.assertEqual(st, 200, res)
+            gen = res["password"]
+            self.assertTrue(gen.startswith("usrP_"), "generatsiya formati noto'g'ri: %r" % gen)
+            self.assertNotEqual(gen, r["credentials"]["password"])
+            from app.auth import password_strength_errors
+            self.assertEqual(password_strength_errors(gen), [], "generatsiya kuchsiz chiqdi")
+            # Yangi parol bilan kirish
+            c, st2, res2 = self._login(res["login"], gen, "student")
+            self.assertEqual(st2, 200, res2)
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M5_17_legacy_user_not_viewable_and_can_be_attached(self):
+        """Eski modelda yaratilgan foydalanuvchi (`password_enc` yo'q):
+        parol KO'RINMAYDI (`reason: legacy`), lekin admin o'z bilgan parolni
+        tasdiqlab uni BIRIKTIRA oladi — parol O'ZGARMAGAN holda."""
+        from app.auth import hash_password
+        db = _json_db()
+        pw = "usrP_LegacyTest42!"
+        db.ex("INSERT INTO users(first_name,last_name,login,password_hash,password_enc,role,status,"
+              "created_at,updated_at) VALUES(?,?,?,?,'', 'student','active',?,?)",
+              ("Eski", "Foydalanuvchi", "usrL_legacyTest1234", hash_password(pw), now(), now()))
+        uid = db.q1("SELECT id FROM users WHERE login=?", ("usrL_legacyTest1234",))["id"]
+        try:
+            st, res = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(st, 200, res)
+            self.assertFalse(res["can_view"], "eski foydalanuvchi paroli ko'rindi")
+            self.assertEqual(res["reason"], "legacy")
+            self.assertIsNone(res["password"])
+            self.assertEqual(res["login"], "usrL_legacyTest1234", "login ko'rinishi kerak edi")
+
+            before_hash = _json_db().q1("SELECT password_hash FROM users WHERE id=?", (uid,))["password_hash"]
+            # 1) To'g'ri parolni BIRIKTIRISH — parol O'ZGARMASDI
+            st2, res2 = self.admin.put("/api/admin/users/%d/credentials" % uid, {"password": pw})
+            self.assertEqual(st2, 200, res2)
+            self.assertTrue(res2["attached"])
+            self.assertFalse(res2["password_changed"])
+            after_hash = _json_db().q1("SELECT password_hash FROM users WHERE id=?", (uid,))["password_hash"]
+            self.assertEqual(after_hash, before_hash, "parol hash'i o'zgardi (u o'zgarmasligi kerak edi)")
+            st3, res3 = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertTrue(res3["can_view"])
+            self.assertEqual(res3["password"], pw)
+            # 2) Endi biriktirilgan parolni qayta kiritish -> "o'zgarmadi"
+            st4, res4 = self.admin.put("/api/admin/users/%d/credentials" % uid, {"password": pw})
+            self.assertEqual(st4, 200, res4)
+            self.assertFalse(res4["changed"])
+        finally:
+            _json_db().ex("DELETE FROM users WHERE id=?", (uid,))
+
+    def test_M5_17b_login_change_keeps_unchanged_password(self):
+        """ENG MUHIM REGRESYA: parol maydonida O'ZGARMAGAN parol turib, admin
+        FAQAT LOGIN ni o'zgartirsa — login SAQLANISHI kerak. Parolga tegilmasligi
+        va eski parol bilan kirish ham saqlanishiga ishonchli."""
+        r = self._mkuser("student", "Login", "Faqat")
+        uid = r["user"]["id"]
+        try:
+            lg, pw = r["credentials"]["login"], r["credentials"]["password"]
+            new_login = "usrL_FaqatLoginOzg02"
+            # Parol maydoniga O'ZGARMAGAN qiymat yuboriladi (frontend shunday
+            # yuboradi: maydon to'ldirilgan holda turibdi).
+            st, res = self.admin.put("/api/admin/users/%d/credentials" % uid,
+                                     {"login": new_login, "password": pw})
+            self.assertEqual(st, 200, res)
+            self.assertTrue(res["changed"], "faqat login o'zgarganda ham saqlanishi kerak")
+            self.assertEqual(res["what"], ["login"])
+            self.assertFalse(res["password_changed"])
+            st2, res2 = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(res2["login"], new_login, "login saqlanmadi")
+            self.assertEqual(res2["password"], pw, "parol o'zgari ketdi")
+            # Yangi login + ESKI parol bilan kirish ishlaydi
+            c, st3, res3 = self._login(new_login, pw, "student")
+            self.assertEqual(st3, 200, res3)
+        finally:
+            self._cleanup_user(uid)
+
+    # ------------------------------------------------------------------
+    # Foydalanuvchining O'Z parolini o'zgartirishi ham nusxani yangilaydi
+    # ------------------------------------------------------------------
+    def test_M5_18_self_password_change_updates_encrypted_copy(self):
+        r = self._mkuser("student", "O'zi", "Almashtir")
+        uid = r["user"]["id"]
+        try:
+            lg, old_pw = r["credentials"]["login"], r["credentials"]["password"]
+            c, st, _ = self._login(lg, old_pw, "student")
+            self.assertEqual(st, 200)
+            new_pw = "usrP_OziAlmashtir8!"
+            st2, res2 = c.post("/api/auth/change-password", {
+                "old_password": old_pw, "new_login": "", "new_password": new_pw,
+                "confirm_password": new_pw,
+            })
+            self.assertEqual(st2, 200, res2)
+            # Admin endi YANGI parolni ko'radi (eskisini emas)
+            st3, res3 = self.admin.get("/api/admin/users/%d/credentials" % uid)
+            self.assertEqual(res3["password"], new_pw, "shifrlangan nusxa yangilanmagan")
+            # Parol "olingan" bo'lib qolmaydi — ikkinchi marta berilsa rad etiladi
+            st4, res4 = self.admin.put("/api/admin/users/%d/credentials" % uid,
+                                       {"password": old_pw})
+            self.assertEqual(st4, 400, res4)
+            self.assertEqual(res4["error"], "auth.password_used")
+        finally:
+            self._cleanup_user(uid)
+
+    # ------------------------------------------------------------------
+    # Frontend + i18n
+    # ------------------------------------------------------------------
+    def test_M5_19_manager_modal_present(self):
+        src = self._read("web/js/shared.js")
+        self.assertIn("function openUserCredentialsManager(", src,
+                      "openUserCredentialsManager topilmadi")
+        start = src.index("function openUserCredentialsManager(")
+        body = src[start:start + 5000]
+        # Ko'zcha (parolni ko'rsatish/yashirish)
+        self.assertIn("UI.passwordInput", body, "parol maydonida ko'zcha yo'q")
+        # Joriy qiymatlarni yuklash
+        self.assertIn("credentials", body, "joriy login/parol yuklanmaydi")
+        # Ko'rish va o'zgartirish
+        self.assertIn("API.get(`admin/users/", body, "GET chaqiruvi yo'q")
+        self.assertIn("API.put(`admin/users/", body, "PUT chaqiruvi yo'q")
+        # Saqlash faqat o'zgarish bo'lganda
+        self.assertIn("saveBtn.disabled", body, "Saqlash validatsiyaga bog'lanmagan")
+        # Xavfli amal — tasdiqsiz bajarilmaydi
+        self.assertIn("confirmDialog", body, "o'zgartirish tasdiqsiz bajarilmoqda")
+        # Audit eslatmasi ko'rsatiladi
+        self.assertIn("users.cred_audit_note", body, "audit eslatmasi yo'q")
+
+    def test_M5_20_eye_button_in_manager(self):
+        """🔑 ko'zcha barcha modallarda: credential boshqaruv oynasida."""
+        src = self._read("web/js/shared.js")
+        start = src.index("function openUserCredentialsManager(")
+        body = src[start:start + 5000]
+        self.assertIn('text: "" + t("auth.password")', body, "parol maydoni yo'q")
+
+    def test_M5_21_buttons_wired_in_admin_views(self):
+        """🔑 tugmasi barcha admin ro'yxatlarida (talaba, instruktor, admin,
+        arxiv) va profil kartasida bor."""
+        src = self._read("web/js/views-admin.js")
+        self.assertEqual(src.count("openUserCredentialsManager"), 6,
+                         "🔑 tugmalari 6 joyda bo'lishi kerak "
+                         "(admin/talaba/instruktor jadval + profil + import)")
+        # Eskirgan "bir marta ko'rsatish" tugmasi qolmagan
+        self.assertNotIn("reset-password", src,
+                         "eskirgan reset-password chaqiruvi qoldi")
+        self.assertNotIn("users.new_password_confirm", src,
+                         "eskirgan tasdiqlash matni qoldi")
+
+    def test_M5_22_shown_once_text_replaced(self):
+        """'Bir marta ko'rsatish' ogohlantirishi endi noto'g'ri —
+        parol DOIMIY saqlanadi va qayta ko'rinadi."""
+        i18n = self._read("web/js/i18n.js")
+        self.assertIn('"users.cred_visible_note"', i18n)
+        self.assertIn('"users.cred_legacy"', i18n)
+        self.assertIn('"users.cred_no_crypto"', i18n)
+        self.assertIn('"users.cred_save_confirm"', i18n)
+        self.assertIn('"users.cred_title"', i18n)
+        # Eski matn endi ishlatilmaydi
+        shared = self._read("web/js/shared.js")
+        start = shared.index("function openUserCredentials(")
+        body = shared[start:start + 1200]
+        self.assertNotIn("users.password_shown_once", body,
+                         "openUserCredentials hali 'bir marta' ogohlantirishini ko'rsatmoqda")
+
+    def test_M5_23_profile_reports_visibility(self):
+        """Profil javobida `can_view_password` bor (frontend 🔑 ni
+        boshidan boshlab to'g'ri ochishi uchun)."""
+        r = self._mkuser("student", "Profil", "Belgi")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.get("/api/admin/users/%d" % uid)
+            self.assertEqual(st, 200, res)
+            prof = res.get("user", res)
+            self.assertIn("can_view_password", prof)
+            self.assertTrue(prof["can_view_password"])
+        finally:
+            self._cleanup_user(uid)
+
+    # ------------------------------------------------------------------
+    # Maxfiy kalit (.env) bilan bog'liqlik
+    # ------------------------------------------------------------------
+    def test_M5_24_key_helper_persists(self):
+        """`ensure_credentials_key()` kalitni `.env` da BIR MARTA yaratadi."""
+        from app.config import credentials_key, ensure_credentials_key, CREDENTIALS_KEY_ENV
+        k = credentials_key()
+        self.assertTrue(k, "%s .env da yo'q va yaratilmadi" % CREDENTIALS_KEY_ENV)
+        self.assertEqual(ensure_credentials_key(), k, "kalit o'zgardi (idempotent emas)")
+        import base64
+        self.assertEqual(len(base64.urlsafe_b64decode(k.encode())), 32,
+                         "kalit 32 bayt bo'lishi kerak")
+
+    def test_M5_25_key_creation_is_thread_safe(self):
+        """Kalit YO'Q holatida parallel so'rovlar `.env` ga IKKITA turli kalit
+        yozmasligi kerak — aks holda qayta ishga tushirganda eski parollar
+        ochilmay qoladi."""
+        import base64
+        import threading as _th
+        from app import config as cfgmod
+        real_env = os.environ.pop(cfgmod.CREDENTIALS_KEY_ENV, None)
+        real_path = cfgmod.ENV_PATH
+        tmp = Path(__file__).resolve().parent.parent / ".env.m5_test"
+        try:
+            cfgmod.ENV_PATH = str(tmp)
+            if tmp.exists():
+                tmp.unlink()
+            results = []
+            barrier = _th.Barrier(8)
+
+            def worker():
+                barrier.wait()
+                results.append(cfgmod.ensure_credentials_key())
+
+            ts = [_th.Thread(target=worker) for _ in range(8)]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+            # Barcha so'rovlar BIR XIL kalitni olishi SHART
+            self.assertEqual(len(results), 8)
+            self.assertEqual(len(set(results)), 1,
+                             "parallel so'rovlar turli kalit yaratdi: %s" % set(results))
+            # `.env` ga faqat BIR marta yozilishi SHART
+            txt = tmp.read_text(encoding="utf-8")
+            self.assertEqual(txt.count(cfgmod.CREDENTIALS_KEY_ENV + "="), 1,
+                             "kalit `.env` ga bir necha marta yozildi")
+            self.assertEqual(len(base64.urlsafe_b64decode(results[0].encode())), 32)
+        finally:
+            cfgmod.ENV_PATH = real_path
+            if tmp.exists():
+                tmp.unlink()
+            if real_env is not None:
+                os.environ[cfgmod.CREDENTIALS_KEY_ENV] = real_env
+            else:
+                os.environ.pop(cfgmod.CREDENTIALS_KEY_ENV, None)
+
+    def test_M5_26_env_example_documents_key(self):
+        """`.env.example` kalitni hujjatlashi kerak (maxfiy qiymat EMAS)."""
+        ex = self._read(".env.example")
+        self.assertIn("CREDENTIALS_KEY", ex)
+        # Hech qanday HAQIQIY kalit faylda bo'lmasligi shart
+        import base64
+        import re as _re
+        for line in ex.splitlines():
+            if line.strip().startswith("CREDENTIALS_KEY="):
+                val = line.split("=", 1)[1].strip()
+                if val:
+                    with self.subTest(value=val[:8]):
+                        self.assertNotRegex(val, _re.escape(val) + "$")
+                        self.assertGreaterEqual(len(base64.urlsafe_b64decode(val)), 32)
+
+
+def _crypto_ready():
+    """Test muhitida shifrlash ishlaydimi (kalit + kutubxona)."""
+    try:
+        from app.auth import credentials_crypto_available
+        return credentials_crypto_available()
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
