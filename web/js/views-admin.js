@@ -190,7 +190,7 @@ window.AdminViews = (function () {
       if (!users.length) { host.append(emptyState("\u{1f465}", t("instructor.students_empty"))); return; }
       const tbl = el("table", { class: "tbl" }, [
         el("thead", {}, [el("tr", {}, [
-          el("th", { text: t("common.name") }), el("th", { text: "Rol" }),
+          el("th", { text: t("common.name") }), el("th", { text: t("common.role") }),
           el("th", { text: t("common.phone") }), el("th", { text: t("common.filter") }),
           el("th", { text: t("common.status") }), el("th", { text: t("common.actions") }),
         ])]),
@@ -204,7 +204,7 @@ window.AdminViews = (function () {
             el("td", {}, [el("div", { class: "user-cell" }, [avatar(u, 34), el("div", {}, [
               el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
               el("div", { class: "muted", text: u.login })])])]),
-            el("td", { text: u.role }),
+            el("td", { text: roleName(u.role) }),
             el("td", { text: u.phone || "\u2014" }),
             el("td", { text: info.join(", ") || "\u2014" }),
             el("td", {}, [statusBadge(u)]),
@@ -225,8 +225,10 @@ window.AdminViews = (function () {
       host.append(tbl);
     }
     function statusBadge(u) {
-      if (u.deleted_at) return badge("archived", statusText("archived"));
-      return badge(u.status, u.status === "active" ? t("student.status.active") : u.status === "blocked" ? t("stat.blocked") : t("stat.archived"));
+      /* `statusText("archived")` tarjima jadvalida YO'Q edi — nishon
+         "archived" (inglizcha so'z) deb chiqardi. Umumiy yordamchiga
+         ko'chirildi: uchala rol jadvali ham bir xil nishonni ishlatadi. */
+      return userStatusBadge(u);
     }
     function editUser(u) { Shared.openUserForm(u.role, u); }
     /* MODUL 5: 🔑 enda "Yangi parol o'rnatish" emas, balki LOGIN+PAROLNI
@@ -765,6 +767,10 @@ window.AdminViews = (function () {
       kv(t("users.field_name"), `${u.first_name || ""} ${u.last_name || ""}`.trim() || "\u2014"),
       kv(t("common.login"), u.login || "\u2014"),
       kv(t("common.phone"), u.phone || "\u2014"),
+      /* Holat: arxivlangan foydalanuvchi "bloklangan" deb ko'rinmasin —
+         ayniqsa "Arxivdan chiqarish" tugmasini izlashda yordam beradi. */
+      kv(t("common.status"), isArchived(u) ? t("stat.archived")
+        : (u.status === "active" ? t("student.status.active") : t("stat.blocked"))),
       u.role === "student" ? kv(t("student.group"), stu.group_name || "\u2014") : null,
       u.role === "student" ? kv(t("student.category"), stu.license_category || "\u2014") : null,
       u.role === "instructor" && u.car ? kv(t("users.car"), `${u.car.brand || ""} ${u.car.model || ""} \u00b7 ${u.car.plate_number || ""}`.trim() || "\u2014") : null,
@@ -898,6 +904,45 @@ window.AdminViews = (function () {
     return () => { clearTimeout(tm); tm = setTimeout(fn, ms || 300); };
   }
 
+  /* MODUL 2.2/3.2 — arxivlangan foydalanuvchi rolda ham KO'RINISHI kerak.
+     Oldin royxat `deleted_at` bo'lganlarni JS da to'liq YASHIRARDI va
+     "Arxivlash" tugmasi esa hech qanday filtr ham bo'lmagan joyda yo'q edi —
+     natijada arxivlangan admin/talaba/instruktorni qaytarib (arxivdan
+     chiqarib) BO'LMAY qolardi. Endi uchala rol jadvalida ham bitta xil
+     holat filtri bor: Barchasi / Faol / Bloklangan / Arxivlanganlar. */
+  function userStatusFilter(onChange) {
+    const sel = select({
+      "": t("common.all"),
+      active: t("student.status.active"),
+      blocked: t("stat.blocked"),
+      archived: t("stat.archived"),
+    });
+    sel.addEventListener("change", onChange);
+    return sel;
+  }
+
+  function userListQuery(role, q, status) {
+    return "admin/users?role=" + encodeURIComponent(role)
+      + "&status=" + encodeURIComponent(status || "")
+      + "&q=" + encodeURIComponent(q || "");
+  }
+
+  /* `status=archived` — backend `deleted_at IS NULL` shartini ataylab
+     OLMAYDI (arxivlangan + bloklangan foydalanuvchi ham ko'rinishi uchun),
+     shuning uchun JS da qayta filtrlashMAYmiz. Boshqa holatlarda
+     `deleted_at` bo'lgan yozuvlar arxivlangan hisoblanadi va yashiriladi. */
+  function visibleUsers(res, status) {
+    const list = (res && res.users) || [];
+    return status === "archived" ? list : list.filter((u) => !u.deleted_at);
+  }
+
+  /* Holat nishoni — arxivlangan foydalanuvchi "Bloklangan" deb
+     ko'rinmasligi kerak (eskida students/instructors jadvalidagi xato). */
+  function userStatusBadge(u) {
+    if (isArchived(u)) return badge("archived", t("stat.archived"));
+    return badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"));
+  }
+
   /* ------------------------------ TALABALAR ------------------------------ */
   /* BAND 22: jami / bajarilgan / qolgan — ustunlar aniq ko'rsatiladi. */
   function studentsTable(host) {
@@ -917,16 +962,21 @@ window.AdminViews = (function () {
     /* VAZIFA 2: yangi store — immutabil state + avtomatik DOM yangilanishi */
     const bulk = createBulkStore("student", load);
     const bulkBar = bulk.actionsNode();
+    /* MODUL 2.2: arxivlangan talabalarni ko'rish / qaytarish uchun filtr. */
+    const statusSel = userStatusFilter(() => load());
 
     async function load() {
       host.innerHTML = "";
       host.append(spinner());
-      const res = await API.get("admin/users?role=student&q=" + encodeURIComponent(searchI.value));
-      const list = res.users.filter((u) => !u.deleted_at);
+      const res = await API.get(userListQuery("student", searchI.value, statusSel.value));
+      const list = visibleUsers(res, statusSel.value);
       host.innerHTML = "";
       /* MODUL 2: "Jami: N ta talaba" — filtrga mos yangilanadi. */
       host.append(countBar(res, "student", "base.unit.student"));
-      host.append(el("div", { class: "row between mb" }, [searchI, el("div", { class: "row gap-sm" }, [repB, addB])]));
+      host.append(el("div", { class: "row between mb wrap gap-sm" }, [
+        el("div", { class: "row wrap gap-sm" }, [searchI, statusSel]),
+        el("div", { class: "row gap-sm" }, [repB, addB]),
+      ]));
       host.append(bulkBar);
       if (!list.length) { host.append(emptyState("\u{1f468}\u200d\u{1f393}", t("users.empty_student"))); return; }
       /* MODUL 6: panelga joriy ro'yxatni beramiz (modal topish uchun). */
@@ -965,7 +1015,7 @@ window.AdminViews = (function () {
             el("span", { class: "muted sm", text: `${pr.done}/${pr.target} \u00b7 ${t("week.remaining_lessons")} ${pr.remaining}` }),
           ])]),
           el("td", { text: u.phone || "\u2014" }),
-          el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
+          el("td", {}, [userStatusBadge(u)]),
           el("td", {}, [el("div", { class: "actions" }, [
             /* BAND 22: profil kartasi (ma'lumot + 3 amal) */
             el("button", { class: "btn btn-light btn-sm", title: t("users.profile_title"), text: "\u{1f464}",
@@ -1003,15 +1053,20 @@ window.AdminViews = (function () {
     /* VAZIFA 2: yangi store — immutabil state + avtomatik DOM yangilanishi */
     const bulk = createBulkStore("instructor", load);
     const bulkBar = bulk.actionsNode();
+    /* MODUL 2.2: arxivlangan instruktorlarni ko'rish / qaytarish uchun filtr. */
+    const statusSel = userStatusFilter(() => load());
 
     async function load() {
       host.innerHTML = "";
       host.append(spinner());
-      const res = await API.get("admin/users?role=instructor&q=" + encodeURIComponent(searchI.value));
-      const list = res.users.filter((u) => !u.deleted_at);
+      const res = await API.get(userListQuery("instructor", searchI.value, statusSel.value));
+      const list = visibleUsers(res, statusSel.value);
       host.innerHTML = "";
       host.append(countBar(res, "instructor", "base.unit.instructor"));
-      host.append(el("div", { class: "row between mb" }, [searchI, el("div", { class: "row gap-sm" }, [repB, addB])]));
+      host.append(el("div", { class: "row between mb wrap gap-sm" }, [
+        el("div", { class: "row wrap gap-sm" }, [searchI, statusSel]),
+        el("div", { class: "row gap-sm" }, [repB, addB]),
+      ]));
       host.append(bulkBar);
       if (!list.length) { host.append(emptyState("\u{1f697}", t("users.empty_instructor"))); return; }
       bulk.attach(list, res.total);
@@ -1042,7 +1097,7 @@ window.AdminViews = (function () {
             : el("span", { class: "muted", text: t("err.car_not_assigned") })]),
           el("td", { text: (inst.work_start ? `${inst.work_start}\u2013${inst.work_end}` : "\u2014") }),
           el("td", { text: u.phone || "\u2014" }),
-          el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
+          el("td", {}, [userStatusBadge(u)]),
           el("td", {}, [el("div", { class: "actions" }, [
             el("button", { class: "btn btn-light btn-sm", text: "\u270f\ufe0f", onclick: () => Shared.openUserForm("instructor", u) }),
             el("button", { class: "btn btn-cyan btn-sm", icon: "car", text: "" + t("car.reassign"), onclick: () => assignCarModal(u) }),
@@ -1075,9 +1130,13 @@ window.AdminViews = (function () {
       class: "btn btn-primary", icon: "plus", text: "" + t("users.add_admin"),
       onclick: () => Shared.openUserForm("admin"),
     });
-    const bar = el("div", { class: "row between mb" }, [
-      searchI,
-      el("div", { class: "row gap-sm" }, [
+    /* MODUL 2.2/3.2: arxivlangan adminni ko'rish / qaytarish uchun filtr.
+       Aks holda arxivlashdan keyin admin ro'yxatdan BUTUNLAY yo'qolib
+       qolardi va "Arxivdan chiqarish" tugmasi hech qaerda chiqmasdi. */
+    const statusSel = userStatusFilter(() => load());
+    const bar = el("div", { class: "row between mb wrap gap-sm" }, [
+      el("div", { class: "row wrap gap-sm" }, [searchI, statusSel]),
+      el("div", { class: "row wrap gap-sm" }, [
         addA,
         repB,
         el("span", { class: "muted sm", text: t("users.admins_hint") }),
@@ -1087,8 +1146,8 @@ window.AdminViews = (function () {
     async function load() {
       host.innerHTML = "";
       host.append(spinner());
-      const res = await API.get("admin/users?role=admin&q=" + encodeURIComponent(searchI.value));
-      const list = res.users.filter((u) => !u.deleted_at);
+      const res = await API.get(userListQuery("admin", searchI.value, statusSel.value));
+      const list = visibleUsers(res, statusSel.value);
       host.innerHTML = "";
       host.append(countBar(res, "admin", "base.unit.admin"));
       host.append(bar);
@@ -1103,15 +1162,18 @@ window.AdminViews = (function () {
         el("th", { text: t("users.last_login") }),
         el("th", { text: t("common.phone") }),
         el("th", { text: t("common.status") }),
+        /* Amallar ustuni — `<tbody>` da 7 ta `<td>` bor, sarlavha esa 6 ta
+           edi (jadval ustunlari qator bilan mos kelmasdi). */
+        el("th", { text: t("common.actions") }),
       ])]), el("tbody", {}, list.map((u) => el("tr", { "data-uid": String(u.id) }, [
         el("td", { class: "bulk-td" }, [bulk.rowNode(u)]),
-        el("td", {}, [el("div", { class: "user-cell" }, [avatar(u, 34), el("div", {}, [
+        el("td", {}, [el("div", { class: "user-cell row-click", onclick: () => openUserProfile(u.id, load) }, [avatar(u, 34), el("div", {}, [
           el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
           el("div", { class: "muted", text: u.login })])])]),
         el("td", {}, [el("span", { class: "badge badge-cyan", text: t("auth.role_admin") })]),
         el("td", { text: u.last_login_at || "\u2014" }),
         el("td", { text: u.phone || "\u2014" }),
-        el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : u.status === "blocked" ? t("stat.blocked") : t("stat.archived"))]),
+        el("td", {}, [userStatusBadge(u)]),
         el("td", {}, [el("div", { class: "actions" }, [
           el("button", { class: "btn btn-light btn-sm", icon: "eye", text: "", title: t("users.view_profile"),
             onclick: () => openUserProfile(u.id, load) }),
