@@ -136,6 +136,23 @@ textarea.input { resize: vertical; min-height: 70px; }
 .pw-match.bad { color: #c53030; }
 .pw-match.hidden, .pw-rules.hidden { display: none; }
 
+/* ---- MODUL 1.2: ko'zcha bilan parol maydoni (UI.passwordInput) ----
+   `.eye-btn` login sahifasi uchun oq rangda yozilgan; ilova ichida
+   (oq fon) u qayta kengaytiriladi — shu sababli rang faqat
+   `.input-wrap` ichida qayta belgilanadi. */
+.input-wrap { position: relative; display: block; }
+.input-wrap > .input { padding-right: 44px; }
+.input-wrap > .eye-btn {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px; border: none; border-radius: 8px;
+  background: transparent; color: var(--muted);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: color .2s, background .2s;
+}
+.input-wrap > .eye-btn:hover { color: var(--text); background: rgba(127, 127, 127, .12); }
+.input-wrap > .eye-btn svg { width: 19px; height: 19px; }
+.input-wrap > .eye-btn .ico-eye-off { position: absolute; }
+
 /* ---- MODUL 4: xarita (Yandex Maps JS API) ---- */
 .map-picker { margin: 4px 0 2px; }
 /* Ikki holat bir xil balandlikda: xarita yoki xato/xabar bloki */

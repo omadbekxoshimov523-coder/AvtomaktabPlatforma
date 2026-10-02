@@ -242,10 +242,44 @@ window.addEventListener("unhandledrejection", function (e) {
         <div class="fl-field">
           <input type="password" id="reset-pass" placeholder=" " autocomplete="new-password">
           <label for="reset-pass" data-i18n="auth.new_password">Yangi parol</label>
+          <svg class="fl-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/>
+            <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>
+            <circle cx="12" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>
+          </svg>
+          <button type="button" class="eye-btn" data-eye-for="reset-pass" aria-label="Parolni ko'rsatish">
+            <svg class="ico-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/>
+              <circle cx="12" cy="12" r="2.8"/>
+            </svg>
+            <svg class="ico-eye-off hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 3l18 18"/>
+              <path d="M10.6 5.2A10.6 10.6 0 0 1 12 5c6.4 0 10 6 10 6a17.6 17.6 0 0 1-2.4 3.1"/>
+              <path d="M6.6 6.7A17 17 0 0 0 2 11s3.6 6 10 6a10.4 10.4 0 0 0 4.2-.9"/>
+              <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>
+            </svg>
+          </button>
         </div>
         <div class="fl-field">
           <input type="password" id="reset-pass2" placeholder=" " autocomplete="new-password">
           <label for="reset-pass2" data-i18n="auth.confirm_password">Parolni tasdiqlash</label>
+          <svg class="fl-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/>
+            <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>
+            <circle cx="12" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>
+          </svg>
+          <button type="button" class="eye-btn" data-eye-for="reset-pass2" aria-label="Parolni ko'rsatish">
+            <svg class="ico-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/>
+              <circle cx="12" cy="12" r="2.8"/>
+            </svg>
+            <svg class="ico-eye-off hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 3l18 18"/>
+              <path d="M10.6 5.2A10.6 10.6 0 0 1 12 5c6.4 0 10 6 10 6a17.6 17.6 0 0 1-2.4 3.1"/>
+              <path d="M6.6 6.7A17 17 0 0 0 2 11s3.6 6 10 6a10.4 10.4 0 0 0 4.2-.9"/>
+              <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>
+            </svg>
+          </button>
         </div>
         <button type="button" class="btn-login" id="reset-apply" data-i18n="auth.save">Saqlash</button>
       </div>

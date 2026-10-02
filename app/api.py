@@ -1250,14 +1250,28 @@ class Api:
     # ---- users
     def admin_users(self, query):
         self._require("admin")
-        where = ["deleted_at IS NULL"]
-        params = []
+        # MODUL 2.2/3.2: "Arxiv" — arxivlangan foydalanuvchilar ro'yxatdan
+        # BUTUNLAY yo'qolmasligi kerak (ularni keyin qaytarib bo'ladi).
+        # Shu sababli `status=archived` filtrida `deleted_at IS NULL` sharti
+        # qo'llanmaydi. Boshqa holatlar (active/blocked) yoki filtrsiz
+        # chaqiruvda avvalgi xatti-harakat saqlanadi.
+        _status = query.get("status")
+        if _status == "archived":
+            # "Arxiv" — bitta `status` qiymati ikkita holatni (bloklash +
+            # arxivlash) birga saqlay olmagani uchun asosiy belgi `deleted_at`.
+            # Aks holda "arxivlangan va bloklangan" foydalanuvchi hech
+            # qanday filtrda ham ko'rinmasdi.
+            where = ["(status='archived' OR deleted_at IS NOT NULL)"]
+            params = []
+        elif _status:
+            where = ["status=?", "deleted_at IS NULL"]
+            params = [_status]
+        else:
+            where = ["deleted_at IS NULL"]
+            params = []
         if query.get("role"):
             where.append("role=?")
             params.append(query["role"])
-        if query.get("status"):
-            where.append("status=?")
-            params.append(query["status"])
         if query.get("q"):
             where.append("(first_name LIKE ? OR last_name LIKE ? OR login LIKE ? OR phone LIKE ?)")
             p = "%" + query["q"] + "%"
@@ -1372,11 +1386,19 @@ class Api:
     def admin_user_create(self, body):
         self._require("admin")
         role = body.get("role")
-        if role not in ("student", "instructor"):
+        if role not in ("student", "instructor", "admin"):
             return BAD, err("user.invalid_role")
         db = self.db
         created = db.transaction(lambda c: self._create_user_tx(c, body, role))
-        audit(db, self.user["id"], "user created", "users", created["user"]["id"], {"login": created["user"]["login"], "role": role})
+        # MODUL 3: yangi admin yaratilganda aniq audit yozuvi — kim yaratdi,
+        # kimga yaratildi. Parolning O'ZI yozilmaydi (faqat login).
+        if role == "admin":
+            audit(db, self.user["id"], action_type="admin_created", target_type="users",
+                  target_id=created["user"]["id"],
+                  description="%s -> yangi admin %s yaratildi" % (user_name(self.user), created["user"]["login"]))
+        else:
+            audit(db, self.user["id"], "user created", "users", created["user"]["id"],
+                  {"login": created["user"]["login"], "role": role})
         return OK, {"ok": True, "credentials": created["credentials"], "user": created["user"]}
 
     def _create_user_tx(self, c, body, role):
@@ -1415,7 +1437,7 @@ class Api:
                  "active", str(body.get("enrolled_at") or _now()[:10]).strip(),
                  str(body.get("address", "")).strip(), str(body.get("notes", "")).strip(), _tgt, "active"),
             )
-        else:
+        elif role == "instructor":
             c.execute(
                 """INSERT INTO instructors(user_id, license_categories, experience_years, bio, work_days,
                                            work_start, work_end, break_start, break_end, assigned_car_id, status)
@@ -1427,6 +1449,9 @@ class Api:
                  str(body.get("break_start", "13:00")).strip(), str(body.get("break_end", "14:00")).strip(),
                  int(body["assigned_car_id"]) if body.get("assigned_car_id") else None, "active"),
             )
+        # MODUL 3: `role == "admin"` uchun alohida profil jadvali (students /
+        # instructors kabi) YO'Q — admin ma'lumotlari to'liq `users` da turadi,
+        # shuning uchun qo'shimcha INSERT bajarilmaydi.
         u = dict(c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone())
         return {"user": u, "credentials": {"login": login, "password": password}}
 
@@ -1624,19 +1649,50 @@ class Api:
     def admin_users_status(self, body, uid):
         self._require("admin")
         st = body.get("status")
-        if st not in ("block", "unblock", "archive"):
+        if st not in ("block", "unblock", "archive", "unarchive"):
             return BAD, err("user.bad_status")
-        new_status = {"block": "blocked", "unblock": "active", "archive": "archived"}[st]
+        map_st = {"block": "blocked", "unblock": "active",
+                  "archive": "archived", "unarchive": "active"}
+        new_status = map_st.get(st)
+        if not new_status:
+            return BAD, err("user.bad_status")
         u = self.db.q1("SELECT * FROM users WHERE id=?", (int(uid),))
         if not u:
             return NOTFOUND, err("user.not_found")
-        if u["role"] == "admin":
-            return BAD, err("user.cannot_modify_admin")
-        self.db.upd("UPDATE users SET status=?, updated_at=? WHERE id=?", (new_status, now(), int(uid)))
-        if new_status == "blocked":
+        # MODUL 3: adminga nisbatan bloklash/arxivlash mumkin, lekin
+        # 1) o'zini o'zi bloklay/arxivlay OLMAYDI (tizimga kirishdan qoliladi),
+        # 2) oxirgi faol adminni bloklash/arxivlashga ruxsat YO'Q — aks holda
+        #    hech kim panelga kira olmay qoladi.
+        if u["role"] == "admin" and new_status in ("blocked", "archived"):
+            if int(uid) == int(self.user["id"]):
+                return BAD, err("user.cannot_block_self")
+            left = self.db.q1(
+                "SELECT COUNT(*) AS c FROM users WHERE role='admin' AND status='active'"
+                " AND deleted_at IS NULL AND id<>?",
+                (int(uid),),
+            )
+            if int(left["c"] or 0) == 0:
+                return BAD, err("user.last_admin_protected")
+        sets = ["status=?", "updated_at=?"]
+        params = [new_status, now()]
+        # `deleted_at` faqat ARXIV bilan bog'liq: bloklash uni tegmamasligi
+        # kerak (aks holda arxivlangan foydalanuvchini bloklash uni "arxivdan
+        # chiqarib" yuborardi).
+        if st == "archive":
+            sets.append("deleted_at=?")
+            params.append(now())
+        elif st == "unarchive":
+            sets.append("deleted_at=NULL")
+        params.append(int(uid))
+        self.db.upd("UPDATE users SET " + ", ".join(sets) + " WHERE id=?", params)
+        if new_status == "blocked" or new_status == "archived":
             self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (int(uid),))
-        audit(self.db, self.user["id"], f"user {new_status}", "users", int(uid))
-        return OK, {"ok": True}
+        act = {"blocked": "user_blocked", "active": "user_activated",
+               "archived": "user_archived"}[new_status]
+        audit(self.db, self.user["id"], action_type=act, target_type="users",
+              target_id=int(uid),
+              description="%s: %s (%s) -> %s" % (act, user_name(self.user), u["login"], new_status))
+        return OK, {"ok": True, "status": new_status}
 
     def admin_user_reset_password(self, uid, body=None):
         """`POST /api/admin/users/{id}/reset-password` — parolni tiklash.
@@ -1677,7 +1733,9 @@ class Api:
         )
         # Xavfsizlik: parol almashtirilgandan keyin barcha sessiyalar bekor qilinadi.
         self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (int(uid),))
-        audit(self.db, self.user["id"], "password reset", "users", int(uid))
+        audit(self.db, self.user["id"], action_type="user_password_reset", target_type="users",
+              target_id=int(uid),
+              description="%s: %s uchun yangi parol o'rnatildi" % (user_name(self.user), u["login"]))
         return OK, {"ok": True, "login": u["login"], "password": newpass,
                     "password_format": "usrP_<14 random>" if not custom else "custom",
                     "shown_once": True}
@@ -1829,7 +1887,10 @@ class Api:
         """
         self._require("admin")
         uid = int(uid)
-        u = self.db.q1("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (uid,))
+        # MODUL 2.3/3.3: arxivlangan foydalanuvchi profili ham ko'rinishi
+        # kerak (ma'lumotlari saqlangan) — faqat jadvaldan "o'chirilgan"
+        # deb qarilganlar (`deleted_at` to'ldirilgan va arxivlanmagan) chiqariladi.
+        u = self.db.q1("SELECT * FROM users WHERE id=?", (uid,))
         if not u:
             return NOTFOUND, err("user.not_found")
         out = user_public(u)

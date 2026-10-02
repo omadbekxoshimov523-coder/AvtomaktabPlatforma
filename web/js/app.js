@@ -38,7 +38,6 @@
       ["schedule", "calendar", "nav.schedule"],
       ["students", "student", "nav.my_students"],
       ["car", "car", "nav.my_car"],
-      ["messages", "message", "nav.messages"],
       ["profile", "user", "nav.profile"],
       ["settings", "settings", "nav.settings"],
     ],
@@ -146,12 +145,24 @@
     screen.classList.remove("hidden");
     initParallax();
 
-    document.getElementById("eye-btn").addEventListener("click", () => {
-      const p = document.getElementById("login-password");
-      const show = p.type === "password";
-      p.type = show ? "text" : "password";
-      document.querySelector("#eye-btn .ico-eye").classList.toggle("hidden", show);
-      document.querySelector("#eye-btn .ico-eye-off").classList.toggle("hidden", !show);
+    /* MODUL 1.2 — ko'zcha: bitta umumiy mexanizm. Login maydoni (`#eye-btn`
+       -> `#login-password`) va parol tiklash maydonlari (`data-eye-for="..."`)
+       SHU qoidaga ishlaydi — yangi maydonga faqat `data-eye-for` qo'shish
+       yetarli. Dinamik (JS yaratilgan) maydonlar uchun `UI.passwordInput`. */
+    function bindEye(btn, input) {
+      if (!btn || !input) return;
+      btn.addEventListener("click", () => {
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        const on = btn.querySelector(".ico-eye");
+        const off = btn.querySelector(".ico-eye-off");
+        if (on) on.classList.toggle("hidden", show);
+        if (off) off.classList.toggle("hidden", !show);
+      });
+    }
+    bindEye(document.getElementById("eye-btn"), document.getElementById("login-password"));
+    document.querySelectorAll(".eye-btn[data-eye-for]").forEach((btn) => {
+      bindEye(btn, document.getElementById(btn.dataset.eyeFor));
     });
 
     // Rol tanlash (MODUL 2): rol MAJBURIY. Avval "hech biri tanlanmagan" holati

@@ -540,7 +540,33 @@ const UI = (function () {
     return list;
   }
 
-  return { el, toast, errToast, modal, confirmDialog, spinner, emptyState, skeleton, badge, statusText, avatar, carPhoto, field, input, select, mapLink, callLink, timeline, checklist, quickLinks, notifMini, toggleSwitch, toggleRow, combobox };
+  function passwordInput(attrs = {}) {
+    const inp = input({ type: "password", class: "input", ...attrs });
+    const btn = el("button", { type: "button", class: "eye-btn", "aria-label": "Parolni ko'rsatish/yashirish" }, [
+      el("svg", { class: "ico-eye", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round" }, [
+        el("path", { d: "M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z" }),
+        el("circle", { cx: "12", cy: "12", r: "2.8" }),
+      ]),
+      el("svg", { class: "ico-eye-off hidden", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round" }, [
+        el("path", { d: "M3 3l18 18" }),
+        el("path", { d: "M10.6 5.2A10.6 10.6 0 0 1 12 5c6.4 0 10 6 10 6a17.6 17.6 0 0 1-2.4 3.1" }),
+        el("path", { d: "M6.6 6.7A17 17 0 0 0 2 11s3.6 6 10 6a10.4 10.4 0 0 0 4.2-.9" }),
+        el("path", { d: "M9.9 9.9a3 3 0 0 0 4.2 4.2" }),
+      ]),
+    ]);
+    let show = false;
+    btn.addEventListener("click", () => {
+      show = !show;
+      inp.type = show ? "text" : "password";
+      btn.querySelector(".ico-eye").classList.toggle("hidden", show);
+      btn.querySelector(".ico-eye-off").classList.toggle("hidden", !show);
+    });
+    const wrap = el("div", { class: "input-wrap password-wrap" }, [inp, btn]);
+    wrap.input = inp;
+    return wrap;
+  }
+
+  return { el, toast, errToast, modal, confirmDialog, spinner, emptyState, skeleton, badge, statusText, avatar, carPhoto, field, input, select, mapLink, callLink, timeline, checklist, quickLinks, notifMini, toggleSwitch, toggleRow, combobox, passwordInput };
 })();
 
 /* `const UI` global leksik o'zgaruvchi bo'lgani uchun window.UI da ko'rinmaydi.

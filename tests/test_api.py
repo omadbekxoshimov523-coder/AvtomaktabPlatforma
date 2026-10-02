@@ -4321,7 +4321,14 @@ class TestNotificationsBAND24(_MixinAdmin, Base):
         self.assertEqual(self.db.q1(
             "SELECT COUNT(*) c FROM notifications WHERE related_lesson_id=? "
             "AND user_id=? AND source='LESSON_REMINDER'", (sid, self.uid))["c"], 1)
-        new_day = (datetime.now() + timedelta(days=9)).strftime("%Y-%m-%d")
+        # Sana HAQIQIY ish kuni bo'lishi shart (instruktor mon..sat ishlaydi) —
+        # `now + 9 kun` ba'zi haftalarda yakshanbaga tushib, "not_work_day"
+        # bilan 409 qaytardi (test haftaning qaysi kuni bajarilishiga bog'liq
+        # edi). Endi eng yaqin ish kuni topiladi.
+        new_d = datetime.now() + timedelta(days=3)
+        while new_d.strftime("%a").lower() == "sun":
+            new_d += timedelta(days=1)
+        new_day = new_d.strftime("%Y-%m-%d")
         st, r = self.admin.post(f"/api/admin/sessions/{sid}/reschedule",
                                 {"date": new_day, "start_time": "14:00",
                                  "end_time": "15:00", "reason": "ko'chirildi"})
@@ -4606,7 +4613,11 @@ class TestProfileBAND24(_MixinAdmin, Base):
         # alohida oqim mavjudligi: joriy parol + yangi login/parol/takrorlash
         j = txt.find("function openChangeCredentials")
         self.assertGreater(j, 0, "openChangeCredentials topilmadi")
-        cred = txt[j:j + 3000]
+        # Funksiya TUZILISHI o'zgarganda chegarali kesim (3000 belgi) yetarli
+        # bo'lmasligi mumkin — keyingi yuqori darajali `function` deklaratsiyasi
+        # yoki oxirigacha.
+        nxt = txt.find("\n  function ", j + 10)
+        cred = txt[j:nxt if nxt > 0 else j + 20000]
         for key in ("profile.current_password", "profile.new_login",
                     "profile.new_password", "profile.confirm_new_password"):
             self.assertIn(key, cred, f"parol/login modalida {key} yo'q")
@@ -6193,6 +6204,546 @@ class TestModul5Requests(_MixinAdmin, Base):
         self.assertEqual(n, 1, "eski ma'lumot YO'QOLMASIN")
         c.close()
         shutil.rmtree(d, ignore_errors=True)
+
+
+class TestModul2UserManagement(_MixinAdmin, Base):
+    """MODUL 2/3 — TALABA va ADMIN boshqaruvi.
+
+    Talabalar (Modul 2) uchun:
+      * bloklash / blokdan chiqarish,
+      * arxivlash / arxivdan chiqarish (ma'lumotlar SAQLANADI),
+      * to'liq profil ko'rish (progress, mashg'ulotlar),
+      * login ko'rish + parolni TIKLASH (eski parol ko'rinMAYDI — hash).
+
+    Adminlar (Modul 3) uchun:
+      * xuddi shu amallar admin roliga ham qo'llanadi,
+      * "Yangi admin" yaratish (login/parol AVTOMATIK, bir marta ko'rsatiladi),
+      * talaba/instruktor admin yaratish huquqiga kirish olmaydi,
+      * har bir amal AUDIT jurnalida qayd etiladi.
+    """
+
+    def _mk_admin(self, first="Adm", last="Qosh"):
+        st, r = self.admin.post("/api/admin/users", {
+            "role": "admin", "first_name": first, "last_name": last,
+            "phone": "+998900000001",
+        })
+        self.assertEqual(st, 200, r)
+        return r
+
+    # ---------------------------------------------------------- MODUL 2: talaba
+    def test_M2_01_student_block_unblock(self):
+        r = self._mkuser("student", "Blok", "Test", group_name="BLK")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "block"})
+            self.assertEqual(st, 200, res)
+            row = self.db.q1("SELECT status FROM users WHERE id=?", (uid,))
+            self.assertEqual(row["status"], "blocked")
+            # Bloklangan foydalanuvchi KIRA OLMAYDI.
+            c, st2, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertNotEqual(st2, 200, "bloklangan talaba kirdi")
+            # Blokdan chiqarish -> yana kira oladi.
+            st3, res3 = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "unblock"})
+            self.assertEqual(st3, 200, res3)
+            c, st4, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertEqual(st4, 200, "faollashtirilgandan keyin kirmadi")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M2_02_student_archive_unarchive_keeps_data(self):
+        r = self._mkuser("student", "Arxiv", "Test", group_name="ARV")
+        uid = r["user"]["id"]
+        sid = self.db.q1("SELECT id FROM students WHERE user_id=?", (uid,))["id"]
+        try:
+            st, res = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "archive"})
+            self.assertEqual(st, 200, res)
+            row = self.db.q1("SELECT status, deleted_at FROM users WHERE id=?", (uid,))
+            self.assertEqual(row["status"], "archived")
+            self.assertTrue(row["deleted_at"], "arxivlashda deleted_at to'ldirilmadi")
+            # MA'LUMOT SAQLANADI (o'chirilmaydi).
+            self.assertIsNotNone(
+                self.db.q1("SELECT id FROM students WHERE id=?", (sid,)),
+                "arxivlashda talaba qatori o'chirildi")
+            # Arxivlangan login qila olmaydi.
+            c, st2, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertNotEqual(st2, 200, "arxivlangan talaba kirdi")
+            # Arxivdan chiqarish.
+            st3, res3 = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "unarchive"})
+            self.assertEqual(st3, 200, res3)
+            row2 = self.db.q1("SELECT status, deleted_at FROM users WHERE id=?", (uid,))
+            self.assertEqual(row2["status"], "active")
+            self.assertIsNone(row2["deleted_at"], "unarchive da deleted_at tozalanmadi")
+            c, st4, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertEqual(st4, 200, "arxivdan chiqarilgandan keyin kirmadi")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M2_03_student_profile_full_and_no_password(self):
+        r = self._mkuser("student", "Profil", "Test", group_name="PRF",
+                         license_category="B", phone="+998901234567")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.get(f"/api/admin/users/{uid}")
+            self.assertEqual(st, 200, res)
+            u = res["user"]
+            self.assertEqual(u["first_name"], "Profil")
+            self.assertEqual(u["login"], r["credentials"]["login"])
+            self.assertEqual(u["student"]["group_name"], "PRF")
+            self.assertIn("progress", u)
+            for k in ("progress",):
+                self.assertIsNotNone(u[k], f"{k} yo'q")
+            # Parol HECH QACHON qaytarilmaydi (xavfsizlik standarti).
+            self.assertNotIn("password_hash", u)
+            self.assertNotIn("password", u)
+            self.assertNotIn("totp_secret", u)
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M2_04_password_reset_shown_once(self):
+        r = self._mkuser("student", "Tikla", "Test")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.post(f"/api/admin/users/{uid}/reset-password")
+            self.assertEqual(st, 200, res)
+            new_pw = res["password"]
+            self.assertTrue(new_pw.startswith("usrP_"), "parol formati usrP_ bo'lishi kerak")
+            # Yangi parol bilan kirish ishlaydi.
+            c, st2, _ = self._login(res["login"], new_pw, "student")
+            self.assertEqual(st2, 200, "yangi parol bilan kirmadi")
+            # Eski parol endi ISHLAMAYDI (parol haqiqiyda o'zgartirildi).
+            c3, st3, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertNotEqual(st3, 200, "eski parol hali ham ishlaydi")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M2_05_audit_written_for_block_and_archive(self):
+        r = self._mkuser("student", "Audit", "Test")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "block"})
+            self.assertEqual(st, 200, res)
+            st2, res2 = self.admin.get("/api/admin/audit?action=user")
+            self.assertEqual(st2, 200, res2)
+            rows = [x for x in res2["logs"] if str(x.get("target_id")) == str(uid)]
+            self.assertTrue(rows, "audit jurnalida bloklash yozuvi yo'q")
+            self.assertTrue(any(x.get("action_type") == "user_blocked" for x in rows),
+                            "action_type=user_blocked yo'q")
+            st3, _ = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "unblock"})
+            self.assertEqual(st3, 200)
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M2_06_archived_visible_through_filter(self):
+        r = self._mkuser("student", "Ko", "Rinadi", group_name="KRN")
+        uid = r["user"]["id"]
+        try:
+            st, _ = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "archive"})
+            self.assertEqual(st, 200)
+            # Arxiv filtri bilan KO'RINADI (ro'yxatdan yo'qolmasin).
+            st2, res2 = self.admin.get("/api/admin/users?role=student&status=archived")
+            self.assertEqual(st2, 200, res2)
+            self.assertTrue([u for u in res2["users"] if u["id"] == uid],
+                            "arxivlangan talaba arxiv filtrida ko'rinmadi")
+            # Arxiv profilini ko'rish mumkin (ma'lumot saqlangan).
+            st3, res3 = self.admin.get(f"/api/admin/users/{uid}")
+            self.assertEqual(st3, 200, res3)
+            self.assertEqual(res3["user"]["status"], "archived")
+            # Faol ro'yxatda YO'Q.
+            st4, res4 = self.admin.get("/api/admin/users?role=student&status=active")
+            self.assertFalse([u for u in res4["users"] if u["id"] == uid],
+                             "arxivlangan talaba faol ro'yxatda qoldi")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M2_07_status_change_returns_new_status(self):
+        r = self._mkuser("student", "Holat", "Qaytar")
+        uid = r["user"]["id"]
+        try:
+            for act, want in (("archive", "archived"), ("unarchive", "active"),
+                              ("block", "blocked"), ("unblock", "active")):
+                st, res = self.admin.post(f"/api/admin/users/{uid}/status", {"status": act})
+                self.assertEqual(st, 200, res)
+                self.assertEqual(res["status"], want)
+                self.assertEqual(
+                    self.db.q1("SELECT status FROM users WHERE id=?", (uid,))["status"], want)
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M2_08_block_does_not_unarchive(self):
+        """Bloklash arxiv belgisini TOZALAMASLIGI kerak.
+
+        Aks holda "arxivlangan talabani bloklash" uni yashirincha faol
+        ro'yxatga qaytarib yuborardi (u login qila olmas edi, lekin holat
+        "active" ko'rinardi).
+        """
+        r = self._mkuser("student", "Arxiv", "Blok")
+        uid = r["user"]["id"]
+        try:
+            st, _ = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "archive"})
+            self.assertEqual(st, 200)
+            st2, res2 = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "block"})
+            self.assertEqual(st2, 200, res2)
+            row = self.db.q1("SELECT status, deleted_at FROM users WHERE id=?", (uid,))
+            self.assertEqual(row["status"], "blocked")
+            self.assertIsNotNone(row["deleted_at"], "bloklash arxivni bekor qildi")
+            # Arxiv filtrida hali ham ko'rinadi.
+            st3, res3 = self.admin.get("/api/admin/users?role=student&status=archived")
+            self.assertTrue([u for u in res3["users"] if u["id"] == uid],
+                            "bloklangan arxiv foydalanuvchi arxiv ro'yxatidan qoldi")
+        finally:
+            self._cleanup_user(uid)
+
+    # ---------------------------------------------------------- MODUL 3: admin
+    def test_M3_01_create_admin_auto_credentials(self):
+        r = self._mk_admin()
+        uid = r["user"]["id"]
+        try:
+            self.assertEqual(r["user"]["role"], "admin")
+            self.assertTrue(r["credentials"]["login"].startswith("usrL_"),
+                            "admin login formati usrL_ bo'lishi kerak")
+            self.assertTrue(r["credentials"]["password"].startswith("usrP_"),
+                            "admin parol formati usrP_ bo'lishi kerak")
+            # Yaratilgan admin login qila oladi.
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "admin")
+            self.assertEqual(st, 200, "yangi admin kira olmadi")
+            # Audit: "admin_created".
+            st2, res2 = self.admin.get("/api/admin/audit?action=admin_created")
+            self.assertEqual(st2, 200, res2)
+            self.assertTrue([x for x in res2["logs"] if str(x.get("target_id")) == str(uid)],
+                            "admin_created audit yozuvi yo'q")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M3_02_admin_block_archive_unarchive(self):
+        r = self._mk_admin("BlokAdm")
+        uid = r["user"]["id"]
+        try:
+            st, _ = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "block"})
+            self.assertEqual(st, 200, "admin bloklanmadi")
+            self.assertEqual(self.db.q1("SELECT status FROM users WHERE id=?", (uid,))["status"],
+                             "blocked")
+            c, st2, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "admin")
+            self.assertNotEqual(st2, 200, "bloklangan admin kirdi")
+            st3, _ = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "unblock"})
+            self.assertEqual(st3, 200)
+            c, st4, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "admin")
+            self.assertEqual(st4, 200, "blokdan chiqarilgandan keyin admin kirmadi")
+            st5, _ = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "archive"})
+            self.assertEqual(st5, 200, "admin arxivlanmadi")
+            c, st6, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "admin")
+            self.assertNotEqual(st6, 200, "arxivlangan admin kirdi")
+            st7, _ = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "unarchive"})
+            self.assertEqual(st7, 200)
+            c, st8, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "admin")
+            self.assertEqual(st8, 200, "arxivdan chiqarilgandan keyin admin kirmadi")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M3_03_admin_password_reset(self):
+        r = self._mk_admin("TiklaAdm")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.post(f"/api/admin/users/{uid}/reset-password")
+            self.assertEqual(st, 200, res)
+            c, st2, _ = self._login(res["login"], res["password"], "admin")
+            self.assertEqual(st2, 200, "tiklangan parol bilan admin kirmadi")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M3_04_student_cannot_create_admin(self):
+        r = self._mkuser("student", "Talaba", "Test")
+        uid = r["user"]["id"]
+        try:
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertEqual(st, 200)
+            st2, res2 = c.post("/api/admin/users", {
+                "role": "admin", "first_name": "Hu", "last_name": "Akinchi",
+            })
+            self.assertIn(st2, (401, 403), f"talaba admin yarata oldi: {st2} {res2}")
+            self.assertEqual(
+                self.db.q1("SELECT COUNT(*) c FROM users WHERE last_name='Akinchi'")["c"], 0,
+                "talaba orqali admin yaratilgan")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M3_05_instructor_cannot_create_admin(self):
+        r = self._mkuser("instructor", "Instr", "Test")
+        uid = r["user"]["id"]
+        try:
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "instructor")
+            self.assertEqual(st, 200)
+            st2, res2 = c.post("/api/admin/users", {
+                "role": "admin", "first_name": "Hu", "last_name": "InstruktorA",
+            })
+            self.assertIn(st2, (401, 403), f"instruktor admin yarata oldi: {st2} {res2}")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M3_06_admin_invalid_role_rejected(self):
+        st, res = self.admin.post("/api/admin/users", {
+            "role": "superadmin", "first_name": "X", "last_name": "Y",
+        })
+        self.assertEqual(st, 400, res)
+        self.assertEqual(res["error"], "user.invalid_role")
+
+    def test_M3_07_bad_status_rejected(self):
+        r = self._mkuser("student", "Holat", "Test")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "nonsense"})
+            self.assertEqual(st, 400, res)
+            self.assertEqual(res["error"], "user.bad_status")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M3_08_status_block_kills_sessions(self):
+        r = self._mkuser("student", "Sess", "Test")
+        uid = r["user"]["id"]
+        try:
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertEqual(st, 200)
+            st2, _ = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "block"})
+            self.assertEqual(st2, 200)
+            st3, res3 = c.get("/api/auth/me")
+            self.assertEqual(st3, 401, "bloklangandan keyin sessiya yashirin qoldi")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M3_09_admin_cannot_block_self(self):
+        st0, me = self.admin.get("/api/auth/me")
+        self.assertEqual(st0, 200, me)
+        me_id = me["user"]["id"]
+        for act in ("block", "archive"):
+            with self.subTest(act=act):
+                st, res = self.admin.post(f"/api/admin/users/{me_id}/status", {"status": act})
+                self.assertEqual(st, 400, res)
+                self.assertEqual(res["error"], "user.cannot_block_self")
+                self.assertEqual(
+                    self.db.q1("SELECT status FROM users WHERE id=?", (me_id,))["status"],
+                    "active", "o'zini bloklagan holda holati o'zgardi")
+
+    def test_M3_10_last_active_admin_protected(self):
+        """Tizimda faqat BIR faol admin qolsa, uni bloklashga ruxsat yo'q.
+
+        Test uchun holat "qo'lda" yaratiladi: boshqa admin `status` maydoni
+        to'g'ridan-to'g'ri DB da arxivlanadi (sessiya saqlanib qoladi).
+        Shu bilan himoya qoidasi real yo'l bilan tekshiriladi.
+        """
+        r = self._mk_admin("OxirgiAdmin")
+        uid = r["user"]["id"]
+        st0, me = self.admin.get("/api/auth/me")
+        me_id = me["user"]["id"]
+        try:
+            self.db.upd("UPDATE users SET status='archived' WHERE id=?", (me_id,))
+            try:
+                st, res = self.admin.post(f"/api/admin/users/{uid}/status", {"status": "block"})
+                self.assertEqual(st, 400, res)
+                self.assertEqual(res["error"], "user.last_admin_protected")
+                self.assertEqual(
+                    self.db.q1("SELECT status FROM users WHERE id=?", (uid,))["status"], "active")
+            finally:
+                self.db.upd("UPDATE users SET status='active' WHERE id=?", (me_id,))
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M3_11_admin_delete_still_forbidden(self):
+        r = self._mk_admin("Ochirilmaydi")
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.delete(f"/api/admin/users/{uid}")
+            self.assertEqual(st, 400, res)
+            self.assertEqual(res["error"], "user.cannot_modify_admin")
+            self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (uid,)))
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M3_12_admin_profile_visible(self):
+        r = self._mk_admin("Ko", "Rsat", )
+        uid = r["user"]["id"]
+        try:
+            st, res = self.admin.get(f"/api/admin/users/{uid}")
+            self.assertEqual(st, 200, res)
+            self.assertEqual(res["user"]["role"], "admin")
+            self.assertEqual(res["user"]["login"], r["credentials"]["login"])
+            self.assertNotIn("password_hash", res["user"])
+            # Talaba/instruktor kabi alohida profil jadvali yaratilMAGAN.
+            self.assertIsNone(self.db.q1("SELECT id FROM students WHERE user_id=?", (uid,)))
+            self.assertIsNone(self.db.q1("SELECT id FROM instructors WHERE user_id=?", (uid,)))
+        finally:
+            self._cleanup_user(uid)
+
+
+class TestModul4NoInstructorMessages(_MixinAdmin, Base):
+    """MODUL 4 — Instruktor "Xabarlar" bo'limi BUTUNLAY olib tashlandi.
+
+    Tekshiriladi:
+      * sidebar (NAV_KEYS) da "messages" yo'q,
+      * `InstructorViews.messages` export qilinmaydi,
+      * `App.go('messages')` instruktor uchun bo'sh sahifaga olib ketmaydi
+        (route alias bilan "notifications" ga boradi yoki bo'sh qaytariladi).
+    """
+
+    def _read(self, rel):
+        p = Path(__file__).resolve().parent.parent / rel
+        return p.read_text(encoding="utf-8")
+
+    def test_M4_01_instructor_nav_has_no_messages(self):
+        app_js = self._read("web/js/app.js")
+        m = __import__("re").search(
+            r"instructor:\s*\[(.*?)\n    \]", app_js, __import__("re").S)
+        self.assertIsNotNone(m, "NAV_KEYS.instructor topilmadi")
+        block = m.group(1)
+        self.assertNotIn('"messages"', block,
+                         "instruktor sidebar'ida 'messages' hali ham bor")
+        # Boshqa bo'limlar o'z o'rnida qolishi SHART (regressiya tekshiruvi).
+        for key in ('"schedule"', '"students"', '"car"', '"profile"'):
+            self.assertIn(key, block, f"instruktor nav'ida {key} yo'qoldi")
+
+    def test_M4_02_instructor_views_have_no_messages_fn(self):
+        src = self._read("web/js/views-instructor.js")
+        self.assertNotIn("function messages(", src,
+                         "InstructorViews.messages hali ham mavjud")
+        exp = __import__("re").search(r"return\s*\{([^}]*)\}\s*;\s*\}\)\(\)\s*;?\s*$", src,
+                                     __import__("re").S)
+        self.assertIsNotNone(exp, "views-instructor.js eksporti topilmadi")
+        self.assertNotIn("messages", exp.group(1), "eksportda messages qoldi")
+
+    def test_M4_03_instructor_messages_page_not_reachable(self):
+        # Eski view kaliti bo'lmasa, `App.go("messages")` instruktor uchun
+        # `views[App.view] || views.dashboard` -> dashboard ga tushadi.
+        r = self._mkuser("instructor", "InstrM", "Test")
+        uid = r["user"]["id"]
+        try:
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "instructor")
+            self.assertEqual(st, 200)
+            # Eski endpoint hali ishlashi mumkin (ma'lumot uchun), lekin
+            # FRONTEND da bo'lim yo'q — bu test shuni tasdiqlaydi:
+            # `NAV_KEYS` da yo'q (yuqoridagi test) va view eksportida yo'q.
+            st2, res2 = c.get("/api/instructor/context")
+            self.assertEqual(st2, 200, res2)
+        finally:
+            self._cleanup_user(uid)
+
+
+class TestModul1ConditionalFields(_MixinAdmin, Base):
+    """MODUL 1 — "Parol va login o'zgartirish" formasi.
+
+    Frontend tekshiruvlari (shartli maydonlar, ko'zcha, live validatsiya)
+    va backend qismi (joriy parol har doim majburiy, ixtiyoriy login/parol).
+    """
+
+    def _read(self, rel):
+        p = Path(__file__).resolve().parent.parent / rel
+        return p.read_text(encoding="utf-8")
+
+    def test_M1_01_password_input_helper_exists(self):
+        ui = self._read("web/js/ui.js")
+        self.assertIn("function passwordInput(", ui,
+                      "UI.passwordInput (ko'zcha bilan parol maydoni) mavjud emas")
+        self.assertIn("passwordInput", ui.split("return {")[-1],
+                      "passwordInput eksport qilinmagan")
+        # Komponent haqiqiy `type` almashtirishni amalga oshiradi.
+        self.assertIn('inp.type = show ? "text" : "password"', ui,
+                      "ko'zcha type=password ni text ga almashtirmaydi")
+        self.assertIn("ico-eye-off", ui, "ko'zcha ikonkasi yo'q")
+
+    def test_M1_02_change_credentials_uses_eye(self):
+        src = self._read("web/js/shared.js")
+        start = src.index("function openChangeCredentials()")
+        body = src[start:start + 4000]
+        self.assertEqual(body.count("UI.passwordInput"), 3,
+                         "joriy/yangi/takrorlash maydonlarida ko'zcha bo'lishi kerak")
+
+    def test_M1_03_conditional_indicators_present(self):
+        src = self._read("web/js/shared.js")
+        start = src.index("function openChangeCredentials()")
+        body = src[start:start + 4000]
+        self.assertIn("profile.login_changing", body, "login o'zgarishi indikatori yo'q")
+        self.assertIn("profile.pw_changing", body, "parol o'zgarishi indikatori yo'q")
+        self.assertIn("pwChecklist", body, "real vaqtli kuchli parol ro'yxati yo'q")
+
+    def test_M1_04_save_button_gated_by_validation(self):
+        src = self._read("web/js/shared.js")
+        start = src.index("function openChangeCredentials()")
+        body = src[start:start + 4000]
+        self.assertIn("saveBtn.disabled", body, "saqlash tugmasi validatsiyaga bog'lanmagan")
+        self.assertIn("updateSave", body, "updateSave (validatsiya) ishlatilmagan")
+
+    def test_M1_05_i18n_keys_exist(self):
+        i18n = self._read("web/js/i18n.js")
+        for key in ("profile.login_changing", "profile.pw_changing",
+                    "users.add_admin", "users.block", "users.unblock",
+                    "users.archive", "users.unarchive", "users.view_profile",
+                    "users.admin_role_hint", "users.block_confirm",
+                    "users.unblock_confirm", "users.archive_confirm",
+                    "users.unarchive_confirm"):
+            with self.subTest(key=key):
+                self.assertIn('"%s"' % key, i18n, f"i18n kaliti yo'q: {key}")
+
+    def test_M1_06_login_only_change_backend(self):
+        # FAQAT login o'zgarishi: parolsiz.
+        r = self._mkuser("student", "Login", "Faqat")
+        uid = r["user"]["id"]
+        try:
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertEqual(st, 200)
+            new_login = "usrL_TestFaqatLogin01"
+            st2, res2 = c.post("/api/auth/change-password", {
+                "old_password": r["credentials"]["password"],
+                "new_login": new_login, "new_password": "", "confirm_password": "",
+            })
+            self.assertEqual(st2, 200, res2)
+            self.assertTrue(res2["login_changed"])
+            self.assertFalse(res2["password_changed"])
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M1_07_password_only_change_backend(self):
+        r = self._mkuser("student", "Parol", "Faqat")
+        uid = r["user"]["id"]
+        try:
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertEqual(st, 200)
+            new_pw = "FaqatParol2026Xy"
+            st2, res2 = c.post("/api/auth/change-password", {
+                "old_password": r["credentials"]["password"],
+                "new_login": "", "new_password": new_pw, "confirm_password": new_pw,
+            })
+            self.assertEqual(st2, 200, res2)
+            self.assertTrue(res2["password_changed"])
+            self.assertFalse(res2["login_changed"])
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M1_08_old_password_still_required(self):
+        r = self._mkuser("student", "Joriy", "Kerak")
+        uid = r["user"]["id"]
+        try:
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertEqual(st, 200)
+            st2, res2 = c.post("/api/auth/change-password", {
+                "old_password": "",
+                "new_login": "", "new_password": "YangiParol2026Xy", "confirm_password": "YangiParol2026Xy",
+            })
+            self.assertEqual(st2, 400, res2)
+            self.assertEqual(res2["error"], "auth.wrong_old_password")
+        finally:
+            self._cleanup_user(uid)
+
+    def test_M1_09_nothing_to_change(self):
+        r = self._mkuser("student", "Hich", "Narsa")
+        uid = r["user"]["id"]
+        try:
+            c, st, _ = self._login(r["credentials"]["login"], r["credentials"]["password"], "student")
+            self.assertEqual(st, 200)
+            st2, res2 = c.post("/api/auth/change-password", {
+                "old_password": r["credentials"]["password"],
+                "new_login": "", "new_password": "", "confirm_password": "",
+            })
+            self.assertEqual(st2, 400, res2)
+            self.assertEqual(res2["error"], "auth.nothing_to_change")
+        finally:
+            self._cleanup_user(uid)
 
 
 if __name__ == "__main__":

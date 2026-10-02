@@ -205,20 +205,7 @@ window.InstructorViews = (function () {
     ]);
   }
 
-  async function messages() {
-    const res = await API.get("me/messages");
-    const wrap = el("div", {}, [el("h3", { class: "mb", icon: "message", text: "" + t("nav.messages") })]);
-    if (!res.messages.length) { wrap.append(emptyState("💬", t("instructor.students_empty"))); return wrap; }
-    const list = el("div", { class: "card" });
-    res.messages.forEach((msg) => {
-      list.append(el("div", { class: "kv" }, [
-        el("span", { class: "k", text: (msg.first_name || "?") + " " + (msg.last_name || "") + " · " + (msg.created_at || "").slice(0, 16) }),
-        el("span", { class: "v", text: msg.text }),
-      ]));
-    });
-    wrap.append(list);
-    return wrap;
-  }
+
 
   async function profile() {
     const u = App.me.user;
@@ -237,5 +224,5 @@ window.InstructorViews = (function () {
     return Shared.settingsPage({ isAdmin: false });
   }
 
-  return { dashboard, schedule, students, car, messages, profile, settings, notifications: () => Shared.notificationsPage() };
+  return { dashboard, schedule, students, car, profile, settings, notifications: () => Shared.notificationsPage() };
 })();

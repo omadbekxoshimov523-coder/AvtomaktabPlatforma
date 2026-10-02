@@ -209,16 +209,15 @@ window.AdminViews = (function () {
             el("td", { text: info.join(", ") || "—" }),
             el("td", {}, [statusBadge(u)]),
             el("td", {}, [el("div", { class: "actions" }, [
+              el("button", { class: "btn btn-light btn-sm", text: "👤", title: "" + t("users.view_profile"),
+                onclick: () => openUserProfile(u.id, load) }),
               el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => editUser(u) }),
-              u.role !== "admin" ? el("button", { class: "btn btn-light btn-sm", text: "🔑", onclick: () => resetPass(u) }) : null,
+              el("button", { class: "btn btn-light btn-sm", text: "🔑", title: "" + t("users.new_password"),
+                onclick: () => resetPass(u) }),
               u.role === "instructor" && u.instructor ? el("button", { class: "btn btn-light btn-sm", text: "🚗", onclick: () => Shared.openUserForm("instructor", u) }) : null,
-              u.role !== "admin" ? el("button", { class: "btn btn-light btn-sm", text: u.status === "blocked" ? "🔓" : "🔒",
-                onclick: () => toggleBlock(u) }) : null,
-              u.role !== "admin" ? el("button", { class: "btn btn-danger btn-sm", text: "🗑",
-                onclick: () => confirmDialog(t("common.delete") + "?", async () => {
-                  try { await API.del(`admin/users/${u.id}`); toast(t("misc.saved")); load(); }
-                  catch (e) { errToast(e); }
-                }, { danger: true }) }) : null,
+              /* MODUL 2/3: bloklash/blokdan chiqarish + arxivlash/arxivdan
+                 chiqarish — talaba, instruktor va admin uchun BIR XIL. */
+              ...userStatusActions(u, load),
             ])]),
           ]);
         })),
@@ -231,16 +230,12 @@ window.AdminViews = (function () {
     }
     function editUser(u) { Shared.openUserForm(u.role, u); }
     async function resetPass(u) {
-      try {
-        const res = await API.post(`admin/users/${u.id}/reset-password`);
-        Shared.openUserCredentials({ login: res.login, password: res.password });
-      } catch (e) { errToast(e); }
-    }
-    async function toggleBlock(u) {
-      try {
-        await API.post(`admin/users/${u.id}/status`, { status: u.status === "blocked" ? "unblock" : "block" });
-        toast(t("misc.saved")); load();
-      } catch (e) { errToast(e); }
+      confirmDialog("" + t("users.new_password_confirm"), async () => {
+        try {
+          const res = await API.post(`admin/users/${u.id}/reset-password`);
+          Shared.openUserCredentials({ login: res.login, password: res.password });
+        } catch (e) { errToast(e); }
+      }, { danger: true });
     }
     [searchI, roleSel, statusSel].forEach((c) => c.addEventListener("change", load));
     let timer;
@@ -800,14 +795,15 @@ window.AdminViews = (function () {
 
     /* --- Amallar --- */
     const acts = el("div", { class: "row wrap gap-sm mt" }, [
-      el("button", { class: "btn btn-cyan", icon: "target", text: "" + t("users.total_btn"),
+      /* "Jami mashg'ulotlar" — faqat talabaga tegishli (progress talabada). */
+      pr ? el("button", { class: "btn btn-cyan", icon: "target", text: "" + t("users.total_btn"),
         onclick: () => {
           /* Progress endi "jami" sifatida individual maqsad bo'lib ketadi. */
           totalLessonsModal(u, pr, async () => {
             m.close();
             if (typeof onDone === "function") onDone();
           });
-        } }),
+        } }) : null,
       el("button", { class: "btn btn-light", icon: "edit", text: "" + t("users.edit_btn"),
         onclick: () => { m.close(); Shared.openUserForm(u.role, u); } }),
       el("button", { class: "btn btn-primary", icon: "key", text: "" + t("users.new_password"),
@@ -816,11 +812,20 @@ window.AdminViews = (function () {
             try {
               const r = await API.post(`admin/users/${u.id}/reset-password`);
               /* Parol BIR MARTA ko'rsatiladi — admin uni keyin ko'ra OLMAYDI. */
-              Shared.credBox(r.login, r.password, t("users.password_shown_once"));
+              const m2 = modal(t("student.credentials"), [
+                Shared.credBox(r.login, r.password, t("users.password_shown_once")),
+                el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.close"), onclick: () => m2.close() })]),
+              ]);
             } catch (e) { errToast(e); }
-          });
+          }, { danger: true });
         } }),
     ]);
+    /* MODUL 2/3: bloklash/blokdan chiqarish + arxivlash/arxivdan chiqarish
+       — profil oynasida ham, jadval qatorida ham bir xil ishlaydi. */
+    acts.append(el("div", { class: "row wrap gap-sm mt" }, userStatusActions(u, () => {
+      m.close();
+      if (typeof onDone === "function") onDone();
+    })));
     body.append(acts);
     /* "Jami mashg'ulotlar sonini o'zgartirish" — barcha talabalar uchun
        (tanlov modal ichida ham bor). */
@@ -847,6 +852,52 @@ window.AdminViews = (function () {
 
   function userSearchBox(placeholder) {
     return input({ type: "search", placeholder: placeholder || (t("common.search") + "...") });
+  }
+
+  /* MODUL 2/3 — foydalanuvchi holati amallari (bitta manba).
+     Talaba, instruktor va admin — uchala rolda ham XUDDI SHUNDAY
+     ishlaydi: bloklash/blokdan chiqarish + arxivlash/arxivdan chiqarish.
+     Har biri TASDIQLANISHI shart (xavfli amal). */
+  function isArchived(u) {
+    return u.status === "archived" || !!u.deleted_at;
+  }
+
+  async function setUserStatus(u, act, onDone) {
+    try {
+      await API.post(`admin/users/${u.id}/status`, { status: act });
+      toast(t("misc.saved"));
+      if (typeof onDone === "function") onDone();
+      return true;
+    } catch (e) { errToast(e); return false; }
+  }
+
+  function userStatusActions(u, onDone) {
+    const aAct = isArchived(u) ? "unarchive" : "archive";
+    const aKey = aAct === "archive" ? "users.archive" : "users.unarchive";
+    /* MODUL 2.2: arxivlangan foydalanuvchida faqat "arxivdan chiqarish"
+       ko'rinadi — bloklash arxiv ma'lumotiga tegmasligi kerak. */
+    if (aAct === "unarchive") {
+      return [el("button", {
+        class: "btn btn-light btn-sm", icon: "refresh", title: "" + t(aKey), text: "" + t(aKey),
+        onclick: () => confirmDialog("" + t("users.unarchive_confirm"),
+          () => setUserStatus(u, aAct, onDone)),
+      })];
+    }
+    const bAct = u.status === "blocked" ? "unblock" : "block";
+    const bKey = bAct === "unblock" ? "users.unblock" : "users.block";
+    return [
+      el("button", {
+        class: "btn btn-light btn-sm", icon: bAct === "block" ? "shield" : "unlock",
+        title: "" + t(bKey), text: "" + t(bKey),
+        onclick: () => confirmDialog("" + t(bAct === "block" ? "users.block_confirm" : "users.unblock_confirm"),
+          () => setUserStatus(u, bAct, onDone), { danger: bAct === "block" }),
+      }),
+      el("button", {
+        class: "btn btn-light btn-sm", icon: "archive", title: "" + t(aKey), text: "" + t(aKey),
+        onclick: () => confirmDialog("" + t("users.archive_confirm"),
+          () => setUserStatus(u, aAct, onDone), { danger: true }),
+      }),
+    ];
   }
   function debounce(fn, ms) {
     let tm;
@@ -929,9 +980,8 @@ window.AdminViews = (function () {
             el("button", { class: "btn btn-cyan btn-sm", title: t("users.total_btn"), text: "🎯",
               onclick: () => totalLessonsModal(u, pr, load) }),
             el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("student", u) }),
-            el("button", { class: "btn btn-danger btn-sm", text: "🗑", onclick: () => confirmDialog(t("users.delete_confirm", { name: `${u.first_name} ${u.last_name}` }), async () => {
-              try { await API.del(`admin/users/${u.id}`); toast(t("misc.saved")); load(); } catch (e) { errToast(e); }
-            }, { danger: true }) }),
+            /* MODUL 2: bloklash/blokdan chiqarish + arxivlash/arxivdan chiqarish */
+            ...userStatusActions(u, load),
           ])]),
         ]);
       }))]);
@@ -999,9 +1049,8 @@ window.AdminViews = (function () {
           el("td", {}, [el("div", { class: "actions" }, [
             el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("instructor", u) }),
             el("button", { class: "btn btn-cyan btn-sm", icon: "car", text: "" + t("car.reassign"), onclick: () => assignCarModal(u) }),
-            el("button", { class: "btn btn-danger btn-sm", text: "🗑", onclick: () => confirmDialog(t("users.delete_confirm", { name: `${u.first_name} ${u.last_name}` }), async () => {
-              try { await API.del(`admin/users/${u.id}`); toast(t("misc.saved")); load(); } catch (e) { errToast(e); }
-            }, { danger: true }) }),
+            /* MODUL 2: instruktor ham xuddi shunday boshqariladi. */
+            ...userStatusActions(u, load),
           ])]),
         ]);
       }))]);
@@ -1022,9 +1071,14 @@ window.AdminViews = (function () {
     /* VAZIFA 2: yangi store — immutabil state + avtomatik DOM yangilanishi */
     const bulk = createBulkStore("admin", load);
     const bulkBar = bulk.actionsNode();
+    const addA = el("button", {
+      class: "btn btn-primary", icon: "plus", text: "" + t("users.add_admin"),
+      onclick: () => Shared.openUserForm("admin"),
+    });
     const bar = el("div", { class: "row between mb" }, [
       searchI,
       el("div", { class: "row gap-sm" }, [
+        addA,
         repB,
         el("span", { class: "muted sm", text: t("users.admins_hint") }),
       ]),
@@ -1057,7 +1111,23 @@ window.AdminViews = (function () {
         el("td", {}, [el("span", { class: "badge badge-cyan", text: t("auth.role_admin") })]),
         el("td", { text: u.last_login_at || "—" }),
         el("td", { text: u.phone || "—" }),
-        el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
+        el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : u.status === "blocked" ? t("stat.blocked") : t("stat.archived"))]),
+        el("td", {}, [el("div", { class: "actions" }, [
+          el("button", { class: "btn btn-light btn-sm", icon: "eye", text: "", title: t("users.view_profile"),
+            onclick: () => openUserProfile(u.id, load) }),
+          el("button", { class: "btn btn-light btn-sm", icon: "edit", text: "", title: t("common.edit"),
+            onclick: () => Shared.openUserForm("admin", u) }),
+          el("button", { class: "btn btn-light btn-sm", icon: "key", text: "", title: t("users.new_password"),
+            onclick: () => confirmDialog(t("users.new_password_confirm"), async () => {
+              try {
+                const r = await API.post(`admin/users/${u.id}/reset-password`);
+                Shared.openUserCredentials({ login: r.login, password: r.password });
+              } catch (e) { errToast(e); }
+            }, { danger: true }) }),
+          /* MODUL 3: admin ham xuddi shunday bloklanadi/arxivlanadi
+             (o'zini va oxirgi faol adminni — backend qat'iy tekshiradi). */
+          ...userStatusActions(u, load),
+        ])]),
       ])))]);
       host.append(tbl);
     }
