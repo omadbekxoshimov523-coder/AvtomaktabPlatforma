@@ -1,4 +1,4 @@
-﻿"""Avtomatik testlar (Python stdlib unittest):
+"""Avtomatik testlar (Python stdlib unittest):
     py -m tests.test_api
 Server alohida jarayonda emas — shu jarayonda, temp bazada ishga tushiriladi.
 Qamrab oladi: LOGIN, USERS, CARS, SESSIONS, CAPACITY, INSTRUCTOR BANDLIGI,

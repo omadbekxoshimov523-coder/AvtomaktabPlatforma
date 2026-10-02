@@ -461,8 +461,8 @@
     if (loggingOut) return;
     UI.confirmDialog(t("logout.confirm_text"), () => App.logout(), {
       danger: true,
-      title: "🚪 " + t("logout.confirm_title"),
-      yesText: "🚪 " + t("logout.confirm_yes"),
+      title: "\u{1f6aa} " + t("logout.confirm_title"),
+      yesText: "\u{1f6aa} " + t("logout.confirm_yes"),
       noText: t("common.cancel"),
     });
   };
@@ -592,7 +592,7 @@
     } catch (e) {
       if (!App.me || !App.me.user) return;
       viewEl.innerHTML = "";
-      viewEl.append(UI.emptyState("⚠️", I18N.errorText(e && e.code), String(e && e.message || "")));
+      viewEl.append(UI.emptyState("\u26a0\ufe0f", I18N.errorText(e && e.code), String(e && e.message || "")));
     }
     markNav();
   }

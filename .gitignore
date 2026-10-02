@@ -37,6 +37,10 @@ bot/data/
 # qat'iy qoida, agar kodingiz boshqa papkada ham bo'lsa)
 bot/.env
 
+# ---- Foydalanuvchilar yuklagan fayllar (avatar, mashina rasmlari) ----
+# Bu mahalliy ma'lumot: fayllar serverda saqlanadi, Git da emas.
+web/uploads/
+
 # ---- IDE / tahrirlovchilar ----
 .idea/
 .vscode/

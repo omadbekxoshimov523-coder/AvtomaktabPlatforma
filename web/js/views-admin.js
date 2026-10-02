@@ -1,4 +1,4 @@
-﻿/* ADMIN ko'rinishlari: Dashboard, Yangi baza, Talabalar, Instruktorlar,
+/* ADMIN ko'rinishlari: Dashboard, Yangi baza, Talabalar, Instruktorlar,
    Avtomobillar, Mashg'ulotlar, Kalendar, So'rovlar, Hisobotlar, Audit,
    Bildirishnomalar, Sozlamalar, Backup */
 window.AdminViews = (function () {
@@ -92,7 +92,7 @@ window.AdminViews = (function () {
     const wdShort = ["week.day_mon", "week.day_tue", "week.day_wed", "week.day_thu", "week.day_fri", "week.day_sat", "week.day_sun"];
     const chartCard = el("div", { class: "card" }, [
       el("div", { class: "row between mb" }, [
-        el("h3", { class: "card-title", text: "📊 " + t("week.chart_title") }),
+        el("h3", { class: "card-title", text: "\u{1f4ca} " + t("week.chart_title") }),
         el("span", { class: "muted sm", text: String(data.week_sessions) + " " + t("week.sessions").toLowerCase() }),
       ]),
       el("div", { class: "bar-chart" }, byDay.map((b, i) => {
@@ -111,20 +111,20 @@ window.AdminViews = (function () {
     // M8: bugungi mashg'ulotlar jadvali (matn aniq o'qilishi uchun .tbl)
     const sessList = data.today_sessions_list || [];
     const sessCard = el("div", { class: "card" }, [
-      el("h3", { class: "card-title", text: "📅 " + t("dash.today_sessions_title") }),
+      el("h3", { class: "card-title", text: "\u{1f4c5} " + t("dash.today_sessions_title") }),
     ]);
     if (!sessList.length) {
-      sessCard.append(emptyState("📭", t("today.no_sessions")));
+      sessCard.append(emptyState("\u{1f4ed}", t("today.no_sessions")));
     } else {
       const tbl = el("table", { class: "tbl" }, [
         el("thead", {}, [el("tr", {}, [
-          el("th", { text: "🕒" }), el("th", { text: t("lesson.instructor") }),
-          el("th", { text: "🚗 " + t("lesson.car") }), el("th", { text: "👥 " + t("car.capacity") }), el("th", { text: t("common.status") }),
+          el("th", { text: "\u{1f552}" }), el("th", { text: t("lesson.instructor") }),
+          el("th", { text: "\u{1f697} " + t("lesson.car") }), el("th", { text: "\u{1f465} " + t("car.capacity") }), el("th", { text: t("common.status") }),
         ])]),
         el("tbody", {}, sessList.map((s) => el("tr", { class: "row-click", onclick: () => Shared.openSession(s.id, "admin") }, [
-          el("td", { text: `${s.start_time}–${s.end_time}` }),
-          el("td", { text: s.instructor_name || "—" }),
-          el("td", { class: "muted", text: (s.car_name_snapshot || "—") + (s.car_plate_snapshot ? " · " + s.car_plate_snapshot : "") }),
+          el("td", { text: `${s.start_time}\u2013${s.end_time}` }),
+          el("td", { text: s.instructor_name || "\u2014" }),
+          el("td", { class: "muted", text: (s.car_name_snapshot || "\u2014") + (s.car_plate_snapshot ? " \u00b7 " + s.car_plate_snapshot : "") }),
           el("td", { text: (s.student_count || 0) + "/" + (s.capacity_snapshot || 0) }),
           el("td", {}, [badge(s.status, statusText(s.status))]),
         ]))),
@@ -141,12 +141,12 @@ window.AdminViews = (function () {
       onclick: () => Shared.openSession(s.id, "admin"),
     }, [
       el("div", { class: "row between" }, [
-        el("div", { class: "session-time", text: `${s.start_time}–${s.end_time}` }),
+        el("div", { class: "session-time", text: `${s.start_time}\u2013${s.end_time}` }),
         badge(s.status, statusText(s.status)),
       ]),
       el("div", { class: "session-meta" }, [
         el("div", { icon: "instructor", text: "" + (s.instructor_name || "") }),
-        el("div", { icon: "car", text: "" + (s.car_name_snapshot || "—") + " · " + (s.car_plate_snapshot || "") }),
+        el("div", { icon: "car", text: "" + (s.car_name_snapshot || "\u2014") + " \u00b7 " + (s.car_plate_snapshot || "") }),
         el("div", { class: "session-count", icon: "users", text: "" + (s.student_count || 0) + "/" + s.capacity_snapshot }),
       ]),
     ]);
@@ -166,7 +166,7 @@ window.AdminViews = (function () {
           onclick: () => Shared.openUserForm("student") }),
         el("button", { class: "btn btn-cyan", icon: "plus", text: "" + t("nav.instructors"),
           onclick: () => Shared.openUserForm("instructor") }),
-        el("button", { class: "btn btn-light", text: "⚡ " + t("student.bulk"),
+        el("button", { class: "btn btn-light", text: "\u26a1 " + t("student.bulk"),
           onclick: () => bulkModal() }),
         /* MODUL 3: "Import CSV" BUTUNLAY OLIB TASHLANDI — endi faqat
            "Hisobotlar" bo'limida (Hisobotlar > Import tab). */
@@ -187,7 +187,7 @@ window.AdminViews = (function () {
     function fill(users) {
       const host = document.getElementById("users-table");
       host.innerHTML = "";
-      if (!users.length) { host.append(emptyState("👥", t("instructor.students_empty"))); return; }
+      if (!users.length) { host.append(emptyState("\u{1f465}", t("instructor.students_empty"))); return; }
       const tbl = el("table", { class: "tbl" }, [
         el("thead", {}, [el("tr", {}, [
           el("th", { text: t("common.name") }), el("th", { text: "Rol" }),
@@ -205,16 +205,16 @@ window.AdminViews = (function () {
               el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
               el("div", { class: "muted", text: u.login })])])]),
             el("td", { text: u.role }),
-            el("td", { text: u.phone || "—" }),
-            el("td", { text: info.join(", ") || "—" }),
+            el("td", { text: u.phone || "\u2014" }),
+            el("td", { text: info.join(", ") || "\u2014" }),
             el("td", {}, [statusBadge(u)]),
             el("td", {}, [el("div", { class: "actions" }, [
-              el("button", { class: "btn btn-light btn-sm", text: "👤", title: "" + t("users.view_profile"),
+              el("button", { class: "btn btn-light btn-sm", text: "\u{1f464}", title: "" + t("users.view_profile"),
                 onclick: () => openUserProfile(u.id, load) }),
-              el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => editUser(u) }),
-              el("button", { class: "btn btn-light btn-sm", text: "🔑", title: "" + t("users.cred_title"),
+              el("button", { class: "btn btn-light btn-sm", text: "\u270f\ufe0f", onclick: () => editUser(u) }),
+              el("button", { class: "btn btn-light btn-sm", text: "\u{1f511}", title: "" + t("users.cred_title"),
                 onclick: () => Shared.openUserCredentialsManager(u, load) }),
-              u.role === "instructor" && u.instructor ? el("button", { class: "btn btn-light btn-sm", text: "🚗", onclick: () => Shared.openUserForm("instructor", u) }) : null,
+              u.role === "instructor" && u.instructor ? el("button", { class: "btn btn-light btn-sm", text: "\u{1f697}", onclick: () => Shared.openUserForm("instructor", u) }) : null,
               /* MODUL 2/3: bloklash/blokdan chiqarish + arxivlash/arxivdan
                  chiqarish — talaba, instruktor va admin uchun BIR XIL. */
               ...userStatusActions(u, load),
@@ -242,8 +242,8 @@ window.AdminViews = (function () {
 
   function bulkModal() {
     const countI = select({ "10": "10", "50": "50", "100": "100", "500": "500", "1000": "1000" }, "10");
-    const m = modal("⚡ " + t("student.bulk"), [
-      field(t("student.bulk") + " — " + t("common.count"), countI),
+    const m = modal("\u26a1 " + t("student.bulk"), [
+      field(t("student.bulk") + " \u2014 " + t("common.count"), countI),
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
         el("button", { class: "btn btn-primary", text: t("common.create"),
@@ -255,7 +255,7 @@ window.AdminViews = (function () {
               res.created.forEach((cr, i) => list.append(el("div", { class: "kv" }, [
                 el("span", { class: "k", text: `#${i + 1}` }), el("span", { class: "v", text: cr.login + " / " + cr.password }),
               ])));
-              modal("✅ " + t("misc.success") + ` (${res.count})`, [list, el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.close"), onclick: () => App.refreshView() })]), ], { wide: true });
+              modal("\u2705 " + t("misc.success") + ` (${res.count})`, [list, el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.close"), onclick: () => App.refreshView() })]), ], { wide: true });
             } catch (e) { errToast(e); }
           } }),
       ]),
@@ -267,7 +267,7 @@ window.AdminViews = (function () {
       class: "input", style: "min-height:190px;font-family:monospace;font-size:13px",
       text: "first_name;last_name;middle_name;birth_date;phone;group_name;license_category;address;notes\nBekzod;Raimov;Akmalovich;2005-03-12;+998901112233;B-24;B;Farg'ona shahar;import",
     });
-    const m = modal("📥 " + t("student.import"), [
+    const m = modal("\u{1f4e5} " + t("student.import"), [
       el("p", { class: "field-hint", text: "CSV: first_name;last_name;middle_name;birth_date;phone;group_name;license_category;address;notes" }),
       ta,
       el("div", { class: "row end mt" }, [
@@ -279,15 +279,15 @@ window.AdminViews = (function () {
               const res = await API.post("admin/students/import", { csv: ta.value });
               const r = res.results;
               const rows = [
-                ["📄", t("common.all") + ":", r.total],
-                ["✅", t("import.created"), r.created],
-                ["⚠️", t("import.duplicates"), r.duplicates],
-                ["❌", t("import.errors"), r.errors.length],
+                ["\u{1f4c4}", t("common.all") + ":", r.total],
+                ["\u2705", t("import.created"), r.created],
+                ["\u26a0\ufe0f", t("import.duplicates"), r.duplicates],
+                ["\u274c", t("import.errors"), r.errors.length],
               ];
               const box = el("div", {});
               rows.forEach(([a, b, c]) => box.append(el("div", { class: "kv" }, [el("span", { class: "k", text: a + " " + b }), el("span", { class: "v", text: String(c) })])));
               if (r.credentials.length) {
-                box.append(el("h4", { class: "card-title mt", text: "🔑 Login/Parol" }));
+                box.append(el("h4", { class: "card-title mt", text: "\u{1f511} Login/Parol" }));
                 r.credentials.slice(0, 20).forEach((cr, i) => box.append(el("div", { class: "kv" }, [
                   el("span", { class: "k", text: `#${i + 1}` }), el("span", { class: "v", text: cr.login + " / " + cr.password })])));
                 /* MODUL 5: "bir marta ko'rsatish" cheklovi yo'q — har bir
@@ -296,7 +296,7 @@ window.AdminViews = (function () {
                 box.append(el("p", { class: "field-hint", icon: "info", text: "" + t("users.cred_visible_note") }));
               }
               // xatolar
-              modal("📥 " + t("student.import"), [box,
+              modal("\u{1f4e5} " + t("student.import"), [box,
                 el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.close"), onclick: (ev) => ev.target.closest(".modal-overlay").close() })]),
               ], { wide: true });
             } catch (e) { errToast(e); }
@@ -557,7 +557,7 @@ window.AdminViews = (function () {
       notes: input({ placeholder: t("bulk.edit_notes") }),
     };
     const hint = el("p", { class: "field-hint", text: t("bulk.edit_hint") });
-    const m = modal(t("bulk.edit_title") + " — " + t("bulk.count", { n: ids.length }), [
+    const m = modal(t("bulk.edit_title") + " \u2014 " + t("bulk.count", { n: ids.length }), [
       el("p", { class: "muted sm", text: t("bulk.pick") + ": " + t("rep.type." + (role === "student" ? "students" : role === "instructor" ? "instructors" : "admins")) }),
       field(t("bulk.edit_status"), f.status),
       /* Guruh va toifa faqat talaba/instruktor uchun mantiqli. */
@@ -740,7 +740,7 @@ window.AdminViews = (function () {
       data = (await API.get(`admin/users/${userId}`)).user;
     } catch (e) {
       body.innerHTML = "";
-      body.append(emptyState("⚠️", errorText(e && e.code)));
+      body.append(emptyState("\u26a0\ufe0f", errorText(e && e.code)));
       return;
     }
     const u = data || {};
@@ -755,19 +755,19 @@ window.AdminViews = (function () {
     body.append(el("div", { class: "profile-head mb" }, [
       avatar(u, 56),
       el("div", { class: "f1" }, [
-        el("div", { class: "profile-name", text: `${u.first_name || ""} ${u.last_name || ""}`.trim() || "—" }),
-        el("div", { class: "muted", text: roleName(u.role) + " · " + u.login }),
+        el("div", { class: "profile-name", text: `${u.first_name || ""} ${u.last_name || ""}`.trim() || "\u2014" }),
+        el("div", { class: "muted", text: roleName(u.role) + " \u00b7 " + u.login }),
       ]),
     ]));
 
     /* --- Asosiy ma'lumotlar --- */
     body.append(el("div", { class: "card-flat" }, [
-      kv(t("users.field_name"), `${u.first_name || ""} ${u.last_name || ""}`.trim() || "—"),
-      kv(t("common.login"), u.login || "—"),
-      kv(t("common.phone"), u.phone || "—"),
-      u.role === "student" ? kv(t("student.group"), stu.group_name || "—") : null,
-      u.role === "student" ? kv(t("student.category"), stu.license_category || "—") : null,
-      u.role === "instructor" && u.car ? kv(t("users.car"), `${u.car.brand || ""} ${u.car.model || ""} · ${u.car.plate_number || ""}`.trim() || "—") : null,
+      kv(t("users.field_name"), `${u.first_name || ""} ${u.last_name || ""}`.trim() || "\u2014"),
+      kv(t("common.login"), u.login || "\u2014"),
+      kv(t("common.phone"), u.phone || "\u2014"),
+      u.role === "student" ? kv(t("student.group"), stu.group_name || "\u2014") : null,
+      u.role === "student" ? kv(t("student.category"), stu.license_category || "\u2014") : null,
+      u.role === "instructor" && u.car ? kv(t("users.car"), `${u.car.brand || ""} ${u.car.model || ""} \u00b7 ${u.car.plate_number || ""}`.trim() || "\u2014") : null,
       u.role === "instructor" ? kv(t("users.students_count"), String(u.students_count != null ? u.students_count : 0)) : null,
       /* BAND 16: "Ro'yxatga olingan sana" — faqat admin ko'radi. */
       stu.enrolled_at ? kv(t("student.enrolled"), fmtDate(stu.enrolled_at)) : null,
@@ -783,7 +783,7 @@ window.AdminViews = (function () {
         ]),
         el("div", { class: "prog-mini mt" }, [
           el("div", { class: "prog-mini-bar" }, [el("i", { style: `width:${pr.pct}%` })]),
-          el("span", { class: "muted sm", text: `${pr.done}/${pr.target} · ${pr.pct}%` }),
+          el("span", { class: "muted sm", text: `${pr.done}/${pr.target} \u00b7 ${pr.pct}%` }),
         ]),
         el("div", { class: "grid-3 mt" }, [
           el("div", {}, [el("div", { class: "muted sm", text: t("week.total_lessons") }), el("div", { class: "cell-strong", text: String(pr.target) })]),
@@ -928,7 +928,7 @@ window.AdminViews = (function () {
       host.append(countBar(res, "student", "base.unit.student"));
       host.append(el("div", { class: "row between mb" }, [searchI, el("div", { class: "row gap-sm" }, [repB, addB])]));
       host.append(bulkBar);
-      if (!list.length) { host.append(emptyState("👨‍🎓", t("users.empty_student"))); return; }
+      if (!list.length) { host.append(emptyState("\u{1f468}\u200d\u{1f393}", t("users.empty_student"))); return; }
       /* MODUL 6: panelga joriy ro'yxatni beramiz (modal topish uchun). */
       bulk.attach(list, res.total);
 
@@ -954,28 +954,28 @@ window.AdminViews = (function () {
           el("td", {}, [el("div", { class: "user-cell row-click", onclick: () => openUserProfile(u.id, load) }, [avatar(u, 34), el("div", {}, [
             el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
             el("div", { class: "muted", text: u.login })])])]),
-          el("td", { text: (u.student && u.student.group_name) || "—" }),
-          el("td", { text: (u.student && u.student.license_category) || "—" }),
+          el("td", { text: (u.student && u.student.group_name) || "\u2014" }),
+          el("td", { text: (u.student && u.student.license_category) || "\u2014" }),
           el("td", {}, [names.length
             ? el("span", { text: names.length > 2 ? names.slice(0, 2).join(", ") + ` +${names.length - 2}` : names.join(", ") })
-            : el("span", { class: "muted", text: "—" })]),
+            : el("span", { class: "muted", text: "\u2014" })]),
           el("td", {}, [el("div", { class: "prog-mini" }, [
             el("div", { class: "prog-mini-bar" }, [el("i", { style: `width:${pr.pct}%` })]),
             /* BAND 22: "bajarilgan / jami · qolgan" */
-            el("span", { class: "muted sm", text: `${pr.done}/${pr.target} · ${t("week.remaining_lessons")} ${pr.remaining}` }),
+            el("span", { class: "muted sm", text: `${pr.done}/${pr.target} \u00b7 ${t("week.remaining_lessons")} ${pr.remaining}` }),
           ])]),
-          el("td", { text: u.phone || "—" }),
+          el("td", { text: u.phone || "\u2014" }),
           el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
           el("td", {}, [el("div", { class: "actions" }, [
             /* BAND 22: profil kartasi (ma'lumot + 3 amal) */
-            el("button", { class: "btn btn-light btn-sm", title: t("users.profile_title"), text: "👤",
+            el("button", { class: "btn btn-light btn-sm", title: t("users.profile_title"), text: "\u{1f464}",
               onclick: () => openUserProfile(u.id, load) }),
             /* BAND 3: jami mashg'ulotlar sonini o'zgartirish */
-            el("button", { class: "btn btn-cyan btn-sm", title: t("users.total_btn"), text: "🎯",
+            el("button", { class: "btn btn-cyan btn-sm", title: t("users.total_btn"), text: "\u{1f3af}",
               onclick: () => totalLessonsModal(u, pr, load) }),
-            el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("student", u) }),
+            el("button", { class: "btn btn-light btn-sm", text: "\u270f\ufe0f", onclick: () => Shared.openUserForm("student", u) }),
             /* MODUL 5: login+parolni ko'rish va birga o'zgartirish */
-            el("button", { class: "btn btn-light btn-sm", text: "🔑", title: t("users.cred_title"),
+            el("button", { class: "btn btn-light btn-sm", text: "\u{1f511}", title: t("users.cred_title"),
               onclick: () => Shared.openUserCredentialsManager(u, load) }),
             /* MODUL 2: bloklash/blokdan chiqarish + arxivlash/arxivdan chiqarish */
             ...userStatusActions(u, load),
@@ -1013,7 +1013,7 @@ window.AdminViews = (function () {
       host.append(countBar(res, "instructor", "base.unit.instructor"));
       host.append(el("div", { class: "row between mb" }, [searchI, el("div", { class: "row gap-sm" }, [repB, addB])]));
       host.append(bulkBar);
-      if (!list.length) { host.append(emptyState("🚗", t("users.empty_instructor"))); return; }
+      if (!list.length) { host.append(emptyState("\u{1f697}", t("users.empty_instructor"))); return; }
       bulk.attach(list, res.total);
 
       const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
@@ -1040,14 +1040,14 @@ window.AdminViews = (function () {
                 el("div", { class: "muted", text: car.plate_number }),
               ])
             : el("span", { class: "muted", text: t("err.car_not_assigned") })]),
-          el("td", { text: (inst.work_start ? `${inst.work_start}–${inst.work_end}` : "—") }),
-          el("td", { text: u.phone || "—" }),
+          el("td", { text: (inst.work_start ? `${inst.work_start}\u2013${inst.work_end}` : "\u2014") }),
+          el("td", { text: u.phone || "\u2014" }),
           el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : t("stat.blocked"))]),
           el("td", {}, [el("div", { class: "actions" }, [
-            el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => Shared.openUserForm("instructor", u) }),
+            el("button", { class: "btn btn-light btn-sm", text: "\u270f\ufe0f", onclick: () => Shared.openUserForm("instructor", u) }),
             el("button", { class: "btn btn-cyan btn-sm", icon: "car", text: "" + t("car.reassign"), onclick: () => assignCarModal(u) }),
             /* MODUL 5: login+parolni ko'rish va birga o'zgartirish */
-            el("button", { class: "btn btn-light btn-sm", text: "🔑", title: t("users.cred_title"),
+            el("button", { class: "btn btn-light btn-sm", text: "\u{1f511}", title: t("users.cred_title"),
               onclick: () => Shared.openUserCredentialsManager(u, load) }),
             /* MODUL 2: instruktor ham xuddi shunday boshqariladi. */
             ...userStatusActions(u, load),
@@ -1093,7 +1093,7 @@ window.AdminViews = (function () {
       host.append(countBar(res, "admin", "base.unit.admin"));
       host.append(bar);
       host.append(bulkBar);
-      if (!list.length) { host.append(emptyState("🛡️", t("users.empty_admin"))); return; }
+      if (!list.length) { host.append(emptyState("\u{1f6e1}\ufe0f", t("users.empty_admin"))); return; }
       bulk.attach(list, res.total);
 
       const tbl = el("table", { class: "tbl" }, [el("thead", {}, [el("tr", {}, [
@@ -1109,8 +1109,8 @@ window.AdminViews = (function () {
           el("div", { class: "cell-strong", text: `${u.first_name} ${u.last_name}` }),
           el("div", { class: "muted", text: u.login })])])]),
         el("td", {}, [el("span", { class: "badge badge-cyan", text: t("auth.role_admin") })]),
-        el("td", { text: u.last_login_at || "—" }),
-        el("td", { text: u.phone || "—" }),
+        el("td", { text: u.last_login_at || "\u2014" }),
+        el("td", { text: u.phone || "\u2014" }),
         el("td", {}, [badge(u.status, u.status === "active" ? t("student.status.active") : u.status === "blocked" ? t("stat.blocked") : t("stat.archived"))]),
         el("td", {}, [el("div", { class: "actions" }, [
           el("button", { class: "btn btn-light btn-sm", icon: "eye", text: "", title: t("users.view_profile"),
@@ -1138,9 +1138,9 @@ window.AdminViews = (function () {
 
   async function assignCarModal(instructor) {
     const cars = (await API.get("admin/cars")).cars.filter((c) => c.status !== "inactive");
-    const sel = select({ "": "— " + t("car.not_assigned") + " —" }, instructor.assigned_car_id || "", {});
-    cars.forEach((c) => sel.append(el("option", { value: c.id, text: `${c.brand} ${c.model} — ${c.plate_number} (${statusText(c.status)})`, selected: instructor.assigned_car_id === c.id ? "selected" : "" })));
-    const m = modal("🚗 " + t("car.reassign") + " — " + instructor.first_name + " " + instructor.last_name, [
+    const sel = select({ "": "\u2014 " + t("car.not_assigned") + " \u2014" }, instructor.assigned_car_id || "", {});
+    cars.forEach((c) => sel.append(el("option", { value: c.id, text: `${c.brand} ${c.model} \u2014 ${c.plate_number} (${statusText(c.status)})`, selected: instructor.assigned_car_id === c.id ? "selected" : "" })));
+    const m = modal("\u{1f697} " + t("car.reassign") + " \u2014 " + instructor.first_name + " " + instructor.last_name, [
       el("p", { class: "field-hint", text: t("instructor.car_note") }),
       field(t("lesson.car"), sel),
       el("div", { class: "row end mt" }, [
@@ -1175,7 +1175,7 @@ window.AdminViews = (function () {
       const q = new URLSearchParams({ status: statusF.value, q: searchI.value });
       const r2 = await API.get("admin/cars?" + q.toString());
       host.innerHTML = "";
-      if (!r2.cars.length) { host.append(emptyState("🚗", t("car.not_assigned"))); return; }
+      if (!r2.cars.length) { host.append(emptyState("\u{1f697}", t("car.not_assigned"))); return; }
       const grid = el("div", { class: "grid-3 cars-grid" });
       r2.cars.forEach((c) => {
         const photos = r2.photos[c.id] || [];
@@ -1199,20 +1199,20 @@ window.AdminViews = (function () {
             ]),
           ]),
           el("div", { class: "sm card-body-grow" }, [
-            el("div", { text: `📅 ${c.year || "—"} · ${c.color || ""}` }),
-            el("div", { text: `👥 ${t("car.capacity")}: ${c.practice_capacity}` }),
-            el("div", { text: `🩺 ${t("car.inspection")}: ${c.technical_inspection_date || "—"}` }),
-            el("div", { text: `🛡️ ${t("car.insurance")}: ${c.insurance_expiry || "—"}` }),
-            el("div", { text: `${t("car.assigned_to")}: ${r2.assigned_to[c.id] || "—"}` }),
-            el("div", { text: `📷 ${photos.length ? photos.length + " " + t("car.photo_count") : t("car.no_photos")}` }),
+            el("div", { text: `\u{1f4c5} ${c.year || "\u2014"} \u00b7 ${c.color || ""}` }),
+            el("div", { text: `\u{1f465} ${t("car.capacity")}: ${c.practice_capacity}` }),
+            el("div", { text: `\u{1fa7a} ${t("car.inspection")}: ${c.technical_inspection_date || "\u2014"}` }),
+            el("div", { text: `\u{1f6e1}\ufe0f ${t("car.insurance")}: ${c.insurance_expiry || "\u2014"}` }),
+            el("div", { text: `${t("car.assigned_to")}: ${r2.assigned_to[c.id] || "\u2014"}` }),
+            el("div", { text: `\u{1f4f7} ${photos.length ? photos.length + " " + t("car.photo_count") : t("car.no_photos")}` }),
           ]),
           el("div", { class: "row between mt car-actions" }, [
             stSel,
             el("div", { class: "actions" }, [
-              el("button", { class: "btn btn-light btn-sm", title: t("car.photos"), text: "📷",
+              el("button", { class: "btn btn-light btn-sm", title: t("car.photos"), text: "\u{1f4f7}",
                 onclick: () => carPhotosModal(c) }),
-              el("button", { class: "btn btn-light btn-sm", text: "✏️", onclick: () => carModal(c) }),
-              el("button", { class: "btn btn-danger btn-sm", text: "🗑", onclick: () => confirmDialog("Delete?", async () => {
+              el("button", { class: "btn btn-light btn-sm", text: "\u270f\ufe0f", onclick: () => carModal(c) }),
+              el("button", { class: "btn btn-danger btn-sm", text: "\u{1f5d1}", onclick: () => confirmDialog("Delete?", async () => {
                 try { await API.del(`admin/cars/${c.id}`); toast(t("misc.saved")); load(); } catch (e) { errToast(e); }
               }, { danger: true }) }),
             ]),
@@ -1244,9 +1244,9 @@ window.AdminViews = (function () {
     const m = modal(car ? t("common.edit") : t("car.add"), [
       el("div", { class: "grid-2" }, [
         field(t("car.brand"), f.brand), field(t("car.model"), f.model),
-        field("🔢 " + t("car.plate"), f.plate), field(t("car.year"), f.year),
+        field("\u{1f522} " + t("car.plate"), f.plate), field(t("car.year"), f.year),
         field(t("car.color"), f.color), field(t("car.seats"), f.seats),
-        field("👥 " + t("car.capacity"), f.capacity), field(t("car.status"), f.status),
+        field("\u{1f465} " + t("car.capacity"), f.capacity), field(t("car.status"), f.status),
         field(t("car.inspection"), f.inspection), field(t("car.insurance"), f.insurance),
       ]),
       field(t("common.notes"), notes),
@@ -1309,7 +1309,7 @@ window.AdminViews = (function () {
     const grid = el("div", { class: "car-photos-grid" }, []);
     const addBtn = el("button", { class: "btn btn-cyan", icon: "plus", text: "" + t("car.add_photo"),
       onclick: () => pickCarPhoto(car, refresh) });
-    const m = modal("📷 " + car.plate_number + " · " + t("car.photos"), [
+    const m = modal("\u{1f4f7} " + car.plate_number + " \u00b7 " + t("car.photos"), [
       el("p", { class: "field-hint mb", text: "" + t("car.photo_hint") }),
       grid,
       el("div", { class: "row end mt" }, [
@@ -1324,9 +1324,9 @@ window.AdminViews = (function () {
         photos = r.photos[car.id] || [];
       } catch (e) { errToast(e); return; }
       grid.innerHTML = "";
-      if (!photos.length) { grid.append(emptyState("📷", t("car.no_photos"))); return; }
+      if (!photos.length) { grid.append(emptyState("\u{1f4f7}", t("car.no_photos"))); return; }
       photos.forEach((p) => {
-        const del = el("button", { class: "btn btn-danger btn-sm photo-del", text: "✕",
+        const del = el("button", { class: "btn btn-danger btn-sm photo-del", text: "\u2715",
           title: t("car.remove_photo"), onclick: () => confirmDialog(t("car.remove_photo") + "?", async () => {
             try {
               await API.del(`admin/cars/${car.id}/photos/${p.id}`);
@@ -1361,7 +1361,7 @@ window.AdminViews = (function () {
       host.innerHTML = "";
       const list = el("div", { class: "grid-3" });
       res.sessions.forEach((s) => list.append(sessionCard(s)));
-      if (!res.sessions.length) list.append(emptyState("📚", t("lesson.empty_today")));
+      if (!res.sessions.length) list.append(emptyState("\u{1f4da}", t("lesson.empty_today")));
       host.append(list);
     }
     [dateI, instSel, statusSel].forEach((c) => c.addEventListener("change", load));
@@ -1380,8 +1380,8 @@ window.AdminViews = (function () {
     f.start.addEventListener("change", () => { f.end.value = addMinutesTo(f.start.value, dur); });
     f.instructor = select({}, "");
     instructors.forEach((i) => f.instructor.append(el("option", { value: i.id, text: `${i.first_name} ${i.last_name}` })));
-    f.car = el("div", { class: "input readonly", text: "—" });
-    f.cap = el("div", { class: "input readonly", text: "—" });
+    f.car = el("div", { class: "input readonly", text: "\u2014" });
+    f.cap = el("div", { class: "input readonly", text: "\u2014" });
     const studSelWrap = el("div", {});
     const addedList = el("div", { class: "mt" });
     const added = [];
@@ -1401,15 +1401,15 @@ window.AdminViews = (function () {
       studSelWrap.append(el("div", { class: "row" }, [el("div", { class: "f1" }, [combo]), addBtn]));
       addedList.innerHTML = "";
       // f.cap div elementi — sig'im "🔒 N" shaklida textContent'da turadi
-      const capNum = f.cap.textContent !== "—" ? parseInt(String(f.cap.textContent).replace("🔒 ", "") || "0") : 0;
+      const capNum = f.cap.textContent !== "\u2014" ? parseInt(String(f.cap.textContent).replace("\u{1f512} ", "") || "0") : 0;
       if (capNum && added.length > capNum) {
         addedList.append(el("div", { class: "muted mt", icon: "alert", text: "" + t("lesson.capacity_full_warn") }));
       }
       added.forEach((sid) => {
         const u = allStudents.find((x) => String(x.student.id) === String(sid));
         const line = el("div", { class: "kv" }, [
-          el("span", { class: "k", icon: "graduation", text: " 👨" + (u ? `${u.first_name} ${u.last_name}` : sid) }),
-          el("button", { class: "btn btn-ghost", text: "✕", onclick: () => { added.splice(added.indexOf(sid), 1); renderStudents(); } }),
+          el("span", { class: "k", icon: "graduation", text: " \u{1f468}" + (u ? `${u.first_name} ${u.last_name}` : sid) }),
+          el("button", { class: "btn btn-ghost", text: "\u2715", onclick: () => { added.splice(added.indexOf(sid), 1); renderStudents(); } }),
         ]);
         addedList.append(line);
       });
@@ -1418,26 +1418,26 @@ window.AdminViews = (function () {
     async function onInstructor() {
       const inst = instructors.find((i) => String(i.id) === String(f.instructor.value));
       if (inst && inst.car) {
-        f.car.textContent = "🔒 " + inst.car.brand + " " + inst.car.model + " — " + inst.car.plate_number;
-        f.cap.textContent = "🔒 " + inst.car.practice_capacity;
+        f.car.textContent = "\u{1f512} " + inst.car.brand + " " + inst.car.model + " \u2014 " + inst.car.plate_number;
+        f.cap.textContent = "\u{1f512} " + inst.car.practice_capacity;
         renderStudents();
       } else {
-        f.car.textContent = "—";
-        f.cap.textContent = "—";
+        f.car.textContent = "\u2014";
+        f.cap.textContent = "\u2014";
         addedList.innerHTML = "";
       }
     }
 
     const m = modal(t("lesson.create_title"), [
       el("div", { class: "grid-2" }, [
-        field("📅 " + t("lesson.date"), f.date),
-        el("div", { class: "row" }, [field("🕒 " + t("lesson.start"), f.start, { class: "f1" }), field("🕒 " + t("lesson.end"), f.end, { class: "f1" })]),
-        field("👨‍🏫 " + t("lesson.instructor"), f.instructor),
-        field("🚗 " + t("lesson.car"), f.car),
-        field("👥 " + t("lesson.capacity"), f.cap),
+        field("\u{1f4c5} " + t("lesson.date"), f.date),
+        el("div", { class: "row" }, [field("\u{1f552} " + t("lesson.start"), f.start, { class: "f1" }), field("\u{1f552} " + t("lesson.end"), f.end, { class: "f1" })]),
+        field("\u{1f468}\u200d\u{1f3eb} " + t("lesson.instructor"), f.instructor),
+        field("\u{1f697} " + t("lesson.car"), f.car),
+        field("\u{1f465} " + t("lesson.capacity"), f.cap),
       ]),
       el("div", { class: "mt" }, [
-        el("div", { class: "field-label", icon: "graduation", text: " 👨" + t("lesson.students") + " " + (f.cap.textContent !== "—" ? `(${added.length}/${f.cap.textContent.replace("🔒 ", "")})` : "") }),
+        el("div", { class: "field-label", icon: "graduation", text: " \u{1f468}" + t("lesson.students") + " " + (f.cap.textContent !== "\u2014" ? `(${added.length}/${f.cap.textContent.replace("\u{1f512} ", "")})` : "") }),
         studSelWrap, addedList,
       ]),
       el("div", { class: "row end mt" }, [
@@ -1449,7 +1449,7 @@ window.AdminViews = (function () {
                 date: f.date.value, start_time: f.start.value, end_time: f.end.value,
                 instructor_id: parseInt(f.instructor.value), student_ids: added,
               });
-              toast(t("misc.saved") + " 🚗 " + res.auto.car);
+              toast(t("misc.saved") + " \u{1f697} " + res.auto.car);
               m.close(); App.refreshView();
             } catch (e) {
               const errors = e.params && e.params.errors;
@@ -1470,8 +1470,8 @@ window.AdminViews = (function () {
     let view = params && params.view || "week";
     let anchor = params && params.date || Shared.todayISO();
     const navB = el("div", { class: "row gap-sm" }, []);
-    const prevB = el("button", { class: "btn btn-light btn-sm", text: "←", onclick: () => { anchor = shift(anchor, -1); load(); } });
-    const nextB = el("button", { class: "btn btn-light btn-sm", text: "→", onclick: () => { anchor = shift(anchor, 1); load(); } });
+    const prevB = el("button", { class: "btn btn-light btn-sm", text: "\u2190", onclick: () => { anchor = shift(anchor, -1); load(); } });
+    const nextB = el("button", { class: "btn btn-light btn-sm", text: "\u2192", onclick: () => { anchor = shift(anchor, 1); load(); } });
     const todayB = el("button", { class: "btn btn-light btn-sm", text: t("misc.today"), onclick: () => { anchor = Shared.todayISO(); load(); } });
     const viewBtns = el("div", { class: "cal-toolbar" }, []);
     const host = el("div", {});
@@ -1498,7 +1498,7 @@ window.AdminViews = (function () {
     async function load() {
       navB.innerHTML = "";
       navB.append(prevB, todayB, nextB,
-        el("strong", { text: fmtDate(anchor) + (view !== "day" ? ` – ${fmtDate(shift(anchor, 1))}` : "") }));
+        el("strong", { text: fmtDate(anchor) + (view !== "day" ? ` \u2013 ${fmtDate(shift(anchor, 1))}` : "") }));
       host.innerHTML = ""; host.append(spinner());
       const res = await API.get(`admin/calendar?view=${view}&date=${anchor}`);
       host.innerHTML = "";
@@ -1519,17 +1519,17 @@ window.AdminViews = (function () {
       days.forEach((d) => {
         const evts = byDay[d] || [];
         grid.append(el("div", { class: "day-card" }, [
-          el("div", { class: "day-head", text: fmtDate(d) + (evts.length ? ` · ${evts.length}` : "") }),
-          ...(evts.length ? evts.slice(0, 8).map((e) => sessionMini(e)) : [el("div", { class: "muted", text: "—" })]),
+          el("div", { class: "day-head", text: fmtDate(d) + (evts.length ? ` \u00b7 ${evts.length}` : "") }),
+          ...(evts.length ? evts.slice(0, 8).map((e) => sessionMini(e)) : [el("div", { class: "muted", text: "\u2014" })]),
         ]));
       });
       host.append(grid);
     }
     function sessionMini(s) {
       return el("div", { class: "cal-evt " + s.status, dataset: { sid: s.id }, onclick: () => Shared.openSession(s.id, "admin") }, [
-        el("strong", { text: `${s.start_time}–${s.end_time}` }),
+        el("strong", { text: `${s.start_time}\u2013${s.end_time}` }),
         el("div", { icon: "instructor", text: "" + s.instructor_name }),
-        el("div", { class: "muted sm", icon: "car", text: "" + (s.car_name_snapshot || "") + " · 👥 " + s.student_count + "/" + s.capacity_snapshot }),
+        el("div", { class: "muted sm", icon: "car", text: "" + (s.car_name_snapshot || "") + " \u00b7 \u{1f465} " + s.student_count + "/" + s.capacity_snapshot }),
       ]);
     }
     buildViews();
@@ -1560,7 +1560,7 @@ window.AdminViews = (function () {
 
   async function requests() {
     const wrap = el("div", {});
-    const head = el("h3", { class: "mb", text: "📨 " + t("nav.requests") });
+    const head = el("h3", { class: "mb", text: "\u{1f4e8} " + t("nav.requests") });
     const tabsHost = el("div", {});
     const listHost = el("div", {});
     wrap.append(head, el("p", { class: "field-hint mb", text: t("req.auto_hidden") }), tabsHost, listHost);
@@ -1575,7 +1575,7 @@ window.AdminViews = (function () {
       tabsHost.append(requestTabs(mode, counts, load));
       listHost.innerHTML = "";
       const items = res.requests || [];
-      if (!items.length) { listHost.append(emptyState("📨", t("req.title"))); return; }
+      if (!items.length) { listHost.append(emptyState("\u{1f4e8}", t("req.title"))); return; }
       const list = el("div", { class: "grid-2" });
       items.forEach((r) => {
         list.append(el("div", { class: "card" }, [
@@ -1590,8 +1590,8 @@ window.AdminViews = (function () {
             ]),
           ]),
           el("div", { class: "muted sm" }, [
-            el("div", { icon: "calendar", text: "" + t("req.preferred") + ": " + (r.preferred_date ? fmtDate(r.preferred_date) : "—") + " " + (r.preferred_start_time ? r.preferred_start_time + "–" + r.preferred_end_time : "") }),
-            el("div", { icon: "message", text: "" + (r.message || "—") }),
+            el("div", { icon: "calendar", text: "" + t("req.preferred") + ": " + (r.preferred_date ? fmtDate(r.preferred_date) : "\u2014") + " " + (r.preferred_start_time ? r.preferred_start_time + "\u2013" + r.preferred_end_time : "") }),
+            el("div", { icon: "message", text: "" + (r.message || "\u2014") }),
           ]),
           r.is_expired ? el("div", { class: "field-hint", text: t("req.expired_hint") }) : null,
           r.status === "pending" ? el("div", { class: "row mt" }, [
@@ -1625,13 +1625,13 @@ window.AdminViews = (function () {
     if (!hasPrefEnd) {
       f.start.addEventListener("change", () => { f.end.value = addMinutesTo(f.start.value, dur); });
     }
-    instructors.forEach((i) => f.instructor.append(el("option", { value: i.id, text: i.first_name + " " + i.last_name + (i.car ? ` 🚗 ${i.car.brand} ${i.car.model}` : "") })));
+    instructors.forEach((i) => f.instructor.append(el("option", { value: i.id, text: i.first_name + " " + i.last_name + (i.car ? ` \u{1f697} ${i.car.brand} ${i.car.model}` : "") })));
     m.body.append(
-      el("p", { class: "muted mb", text: `📨 ${r.first_name} ${r.last_name} — ${fmtDate(r.preferred_date || "—")} ${r.preferred_start_time || ""}` }),
+      el("p", { class: "muted mb", text: `\u{1f4e8} ${r.first_name} ${r.last_name} \u2014 ${fmtDate(r.preferred_date || "\u2014")} ${r.preferred_start_time || ""}` }),
       el("div", { class: "grid-2" }, [
-        field("📅 " + t("lesson.date"), f.date),
-        el("div", { class: "row" }, [field("🕒 " + t("lesson.start"), f.start, { class: "f1" }), field("🕒 " + t("lesson.end"), f.end, { class: "f1" })]),
-        field("👨‍🏫 " + t("lesson.instructor"), f.instructor),
+        field("\u{1f4c5} " + t("lesson.date"), f.date),
+        el("div", { class: "row" }, [field("\u{1f552} " + t("lesson.start"), f.start, { class: "f1" }), field("\u{1f552} " + t("lesson.end"), f.end, { class: "f1" })]),
+        field("\u{1f468}\u200d\u{1f3eb} " + t("lesson.instructor"), f.instructor),
       ]),
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
@@ -1650,7 +1650,7 @@ window.AdminViews = (function () {
 
   function rejectModal(r) {
     const ta = input({ placeholder: t("common.notes") + "..." });
-    const m = modal("🔴 " + t("req.reject"), [
+    const m = modal("\u{1f534} " + t("req.reject"), [
       field(t("common.notes"), ta),
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
@@ -1768,7 +1768,7 @@ window.AdminViews = (function () {
         el("h3", { icon: "instructor", text: "" + t("report.per_instructor") }), el("div", { class: "mt" }),
       ]);
       res.per_instructor.forEach(([name, v]) => ins.append(
-        el("div", { class: "kv" }, [el("span", { class: "k", text: name }), el("span", { class: "v", text: `${v.sessions} ${t("report.sessions").toLowerCase()} · ${v.completed} ✅` })])));
+        el("div", { class: "kv" }, [el("span", { class: "k", text: name }), el("span", { class: "v", text: `${v.sessions} ${t("report.sessions").toLowerCase()} \u00b7 ${v.completed} \u2705` })])));
       const carR = el("div", { class: "card" }, [
         el("h3", { icon: "car", text: "" + t("report.per_car") }), el("div", { class: "mt" }),
       ]);
@@ -1940,16 +1940,16 @@ window.AdminViews = (function () {
       const res = await API.post("admin/students/import", { csv: csvText });
       const r = res.results;
       const box = el("div", {});
-      [["📄", t("common.all") + ":", r.total], ["✅", t("import.created"), r.created],
-       ["⚠️", t("import.duplicates"), r.duplicates], ["❌", t("import.errors"), r.errors.length],
+      [["\u{1f4c4}", t("common.all") + ":", r.total], ["\u2705", t("import.created"), r.created],
+       ["\u26a0\ufe0f", t("import.duplicates"), r.duplicates], ["\u274c", t("import.errors"), r.errors.length],
       ].forEach(([a, b, c]) => box.append(el("div", { class: "kv" }, [
         el("span", { class: "k", text: a + " " + b }), el("span", { class: "v", text: String(c) })])));
       if (r.credentials && r.credentials.length) {
-        box.append(el("h4", { class: "card-title mt", text: "🔑 " + t("rep.tab.creds") }));
+        box.append(el("h4", { class: "card-title mt", text: "\u{1f511} " + t("rep.tab.creds") }));
         r.credentials.slice(0, 20).forEach((cr, i) => box.append(el("div", { class: "kv" }, [
           el("span", { class: "k", text: "#" + (i + 1) }), el("span", { class: "v", text: cr.login + " / " + cr.password })])));
       }
-      modal("📥 " + t("student.import"), [box,
+      modal("\u{1f4e5} " + t("student.import"), [box,
         el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.close"), onclick: (ev) => ev.target.closest(".modal-overlay").close() })]),
       ], { wide: true });
     } catch (e) { errToast(e); }
@@ -2033,7 +2033,7 @@ window.AdminViews = (function () {
       }
 
       host.innerHTML = "";
-      if (!res.logs.length) { host.append(emptyState("📜", t("audit.empty"))); return; }
+      if (!res.logs.length) { host.append(emptyState("\u{1f4dc}", t("audit.empty"))); return; }
       const tbl = el("table", { class: "tbl" }, [
         el("thead", {}, [el("tr", {}, [
           el("th", { text: t("audit.time") }), el("th", { text: t("audit.who") }),
@@ -2043,7 +2043,7 @@ window.AdminViews = (function () {
           el("td", { text: fmtDateTime(l.timestamp) }),
           el("td", {}, [el("span", { class: "cell-strong", text: l.user_name || t("audit.system") })]),
           el("td", {}, [badge(ACT_COLORS[l.action_type] || "blue", t("audit.act." + l.action_type) !== ("audit.act." + l.action_type) ? t("audit.act." + l.action_type) : l.action_type)]),
-          el("td", { text: (l.description || (l.target_type ? l.target_type + (l.target_id ? " #" + l.target_id : "") : "")) || "—", class: "muted" }),
+          el("td", { text: (l.description || (l.target_type ? l.target_type + (l.target_id ? " #" + l.target_id : "") : "")) || "\u2014", class: "muted" }),
         ]))),
       ]);
       host.append(el("div", { class: "tbl-wrap" }, [tbl]));
@@ -2067,7 +2067,7 @@ window.AdminViews = (function () {
 
   function backupTime(ts) {
     const n = Number(ts) * 1000;
-    if (!n) return "—";
+    if (!n) return "\u2014";
     const d = new Date(n);
     return d.toLocaleString("uz-UZ");
   }
@@ -2076,7 +2076,7 @@ window.AdminViews = (function () {
      "TASDIQLASH" so'zini qo'lda kiritish shart. */
   function restoreConfirm(name, onDone) {
     const inp = input({ class: "input", placeholder: t("backup.restore_word"), autocomplete: "off" });
-    const m = modal("⚠️ " + t("backup.restore_title"), [
+    const m = modal("\u26a0\ufe0f " + t("backup.restore_title"), [
       el("p", { class: "confirm-text", text: t("backup.restore_warn") }),
       el("p", { class: "muted sm", text: name }),
       el("p", { class: "mt sm", text: t("backup.restore_type") }),
@@ -2113,7 +2113,7 @@ window.AdminViews = (function () {
       host.innerHTML = ""; host.append(spinner());
       const r = await API.get("admin/backup");
       host.innerHTML = "";
-      if (!r.backups.length) { host.append(emptyState("🖾", t("backup.empty"))); return; }
+      if (!r.backups.length) { host.append(emptyState("\u{1f5be}", t("backup.empty"))); return; }
       const tbl = el("table", { class: "tbl" }, [
         el("thead", {}, [el("tr", {}, [
           el("th", { text: t("backup.file") }), el("th", { text: t("common.date") }),
@@ -2162,7 +2162,7 @@ window.AdminViews = (function () {
     return Shared.renderProfile({
       roleLabel: t("auth.role_admin"),
       kvs: [
-        [t("common.phone"), u.phone || "—"],
+        [t("common.phone"), u.phone || "\u2014"],
         [t("common.login"), u.login],
       ],
     });
@@ -2185,7 +2185,7 @@ window.AdminViews = (function () {
     const host = el("div", { class: "mt" });
     const wrap = el("div", {}, [el("div", { class: "card" }, [
       el("div", { class: "row between mb" }, [
-        el("h3", { class: "card-title", icon: "search", text: "📈 " + t("nav.analytics") }),
+        el("h3", { class: "card-title", icon: "search", text: "\u{1f4c8} " + t("nav.analytics") }),
         field(t("analytics.month"), monSel, { class: "f2" }),
       ]),
     ]), host]);
@@ -2212,14 +2212,14 @@ window.AdminViews = (function () {
       const maxC = Math.max(1, ...days.map((b) => b.sessions));
       const dCard = el("div", { class: "card" }, [
         el("div", { class: "row between mb" }, [
-          el("h3", { class: "card-title", text: "📊 " + t("analytics.daily_chart") }),
+          el("h3", { class: "card-title", text: "\u{1f4ca} " + t("analytics.daily_chart") }),
           el("span", { class: "muted sm", text: t("analytics.cancel_mark") }),
         ]),
         el("div", { class: "bar-chart" }, days.map((b) => {
           const h = Math.max(4, Math.round((b.sessions / maxC) * 120));
           return el("div", {
             class: "chart-col" + (b.cancelled ? " chart-cancel" : ""),
-            title: b.day + ": " + b.sessions + " / ❌ " + b.cancelled,
+            title: b.day + ": " + b.sessions + " / \u274c " + b.cancelled,
           }, [
             el("div", { class: "chart-val", text: String(b.sessions) }),
             el("div", { class: "chart-bar", style: "height:" + h + "px" }),
@@ -2232,12 +2232,12 @@ window.AdminViews = (function () {
       const mD = a.months || [];
       const maxM = Math.max(1, ...mD.map((b) => b.sessions));
       const mCard = el("div", { class: "card" }, [
-        el("h3", { class: "card-title", text: "📈 " + t("analytics.monthly_chart") }),
+        el("h3", { class: "card-title", text: "\u{1f4c8} " + t("analytics.monthly_chart") }),
         el("div", { class: "bar-chart" }, mD.map((b) => {
           const h = Math.max(4, Math.round((b.sessions / maxM) * 120));
           return el("div", {
             class: "chart-col" + (b.cancelled ? " chart-cancel" : ""),
-            title: b.month + ": " + b.sessions + " / ❌ " + b.cancelled,
+            title: b.month + ": " + b.sessions + " / \u274c " + b.cancelled,
           }, [
             el("div", { class: "chart-val", text: String(b.sessions) }),
             el("div", { class: "chart-bar", style: "height:" + h + "px" }),
@@ -2249,10 +2249,10 @@ window.AdminViews = (function () {
       // Eng band instruktorlar
       const top = a.top_instructors || [];
       const topCard = el("div", { class: "card" }, [
-        el("h3", { class: "card-title", text: "🏆 " + t("analytics.top_instructors") }),
+        el("h3", { class: "card-title", text: "\u{1f3c6} " + t("analytics.top_instructors") }),
       ]);
       if (!top.length) {
-        topCard.append(emptyState("🏆", t("analytics.no_data")));
+        topCard.append(emptyState("\u{1f3c6}", t("analytics.no_data")));
       } else {
         const list = el("div", { class: "mt" });
         top.forEach((it, i) => list.append(el("div", { class: "row between pv" }, [
@@ -2260,7 +2260,7 @@ window.AdminViews = (function () {
             el("span", { class: "rank" + (i < 3 ? " rank-top" : ""), text: String(i + 1) }),
             el("span", { class: "cell-strong", text: it.name }),
           ]),
-          el("div", { class: "muted sm", text: "" + it.sessions + " " + t("week.sessions").toLowerCase() + (it.cancelled ? " · ❌ " + it.cancelled : "") }),
+          el("div", { class: "muted sm", text: "" + it.sessions + " " + t("week.sessions").toLowerCase() + (it.cancelled ? " \u00b7 \u274c " + it.cancelled : "") }),
         ])));
         topCard.append(list);
       }

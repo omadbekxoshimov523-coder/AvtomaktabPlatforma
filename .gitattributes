@@ -1,0 +1,63 @@
+# AVTOMAKTAB Platforma - Git atributlari
+#
+# 1) Matn fayllari sifatida belgilanadi: shunda Git ularni satr oxirida
+#    normalizatsiya qiladi (CRLF <-> LF) va "binary" deb aniqlab,
+#    diffni buzmasligi u'chun majbur qiladi.
+# 2) Ikkilik (binary) fayllar aniq belgilanadi - ular hech qanday
+#    "matn" konversiyasiga uchramaydi.
+# 3) KodIROVKA: .gitattributes UTF-8 ni majburlay OLMAYDI (bu faqat
+#    working-tree-encoding orqali mumkin va xavfli). UTF-8 kafolati
+#    quyidagilarda beriladi:
+#       - .editorconfig  (charset = utf-8, BOM'siz)
+#       - tools_check_encoding.py  (doimiy avtomatik tekshiruv)
+#       - tests/test_encoding.py    (test-suite ichida)
+
+# ------------------------------------------------------------------ matn
+* text=auto
+
+*.py    text diff=python
+*.js    text diff=javascript
+*.mjs   text diff=javascript
+*.css   text
+*.html  text diff=html
+*.md    text
+*.txt   text
+*.sql   text
+*.json  text
+*.yml   text
+*.yaml  text
+*.toml  text
+*.cfg   text
+*.example text
+
+# Maxfiy fayllar (parollar, kalitlar) - hech qachon yuklanmasin
+.env              text export-ignore
+.env.example      text
+*.key             text export-ignore
+
+# ------------------------------------------------------------------ ikkilik
+*.db       binary
+*.sqlite   binary
+*.sqlite3  binary
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.webp     binary
+*.ico      binary
+*.pdf      binary
+*.zip      binary
+*.gz       binary
+*.xlsx     binary
+*.woff     binary
+*.woff2    binary
+*.ttf      binary
+*.eot      binary
+
+# Yuklangan fayllar (rasm/fayl) hech qachon Git ga kirmasin
+web/uploads/**   binary
+data/**          binary
+
+# Zaxira nusxalar
+*.db.bak   binary
+*.bak      binary

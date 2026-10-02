@@ -156,7 +156,7 @@ const UI = (function () {
       const lines = [];
       for (const r of reasons) {
         const d = I18N.errorText(r);
-        if (d) lines.push("• " + d);
+        if (d) lines.push("\u2022 " + d);
       }
       if (lines.length) msg += "\n" + lines.join("\n");
     }
@@ -168,7 +168,7 @@ const UI = (function () {
     const card = el("div", { class: "modal" + (wide ? " modal-wide" : "") });
     const head = el("div", { class: "modal-head" },
       [el("h3", { text: title }),
-       el("button", { class: "btn-ghost", text: "✕", onclick: () => close() })]);
+       el("button", { class: "btn-ghost", text: "\u2715", onclick: () => close() })]);
     const body = el("div", { class: "modal-body" });
     body.append(...(Array.isArray(content) ? content.filter(Boolean) : [content]));
     card.append(head, body);
@@ -187,7 +187,7 @@ const UI = (function () {
   }
 
   function confirmDialog(message, onYes, { danger = false, yesText, title, noText } = {}) {
-    const m = modal("—", [
+    const m = modal("\u2014", [
       el("p", { class: "confirm-text", text: message }),
       el("div", { class: "row gap end" }, [
         el("button", { class: "btn btn-light", text: noText || t("common.cancel"), onclick: () => m.close() }),
@@ -198,7 +198,7 @@ const UI = (function () {
         }),
       ]),
     ]);
-    m.querySelector(".modal-head h3").textContent = title || (danger ? "⚠️" : t("common.confirm"));
+    m.querySelector(".modal-head h3").textContent = title || (danger ? "\u26a0\ufe0f" : t("common.confirm"));
     return m;
   }
 
@@ -268,7 +268,7 @@ const UI = (function () {
   function carPhoto(src, size = 120) {
     // M5: avtomobil fotosurati (yo'q bo'lsa 🚗 belgili fallback)
     const style = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.45)}px`;
-    if (!src) return el("div", { class: "car-photo car-photo-empty", style, text: "🚗" });
+    if (!src) return el("div", { class: "car-photo car-photo-empty", style, text: "\u{1f697}" });
     const wrap = el("div", { class: "car-photo", style: `${style};overflow:hidden` });
     const img = el("img", {
       class: "car-photo-img", src, alt: "",
@@ -277,7 +277,7 @@ const UI = (function () {
     img.addEventListener("error", () => {
       img.remove();
       wrap.classList.add("car-photo-empty");
-      wrap.textContent = "🚗";
+      wrap.textContent = "\u{1f697}";
     });
     wrap.append(img);
     return wrap;
@@ -391,7 +391,7 @@ const UI = (function () {
   function mapLink(lat, lng, label, zoom) {
     const M = (typeof MapView !== "undefined") ? MapView : null;
     if (!M || !M.isNum(lat) || !M.isNum(lng)) {
-      return el("span", { class: "muted", text: label || "—" });
+      return el("span", { class: "muted", text: label || "\u2014" });
     }
     return el("a", {
       class: "link", href: M.linkUrl(lat, lng, zoom),
@@ -400,7 +400,7 @@ const UI = (function () {
   }
 
   function callLink(phone) {
-    if (!phone) return el("span", { class: "muted", text: "—" });
+    if (!phone) return el("span", { class: "muted", text: "\u2014" });
     return el("a", { class: "btn btn-primary btn-sm", href: `tel:${phone.replace(/[^+0-9]/g, "")}`, icon: "phone", text: "" + t("lesson.call") });
   }
 
@@ -448,10 +448,10 @@ const UI = (function () {
         class: "tl-session st-" + (s.status || ""),
         style: "top:" + top + "%;height:" + height + "%",
         onclick: () => onOpen && onOpen(s),
-        title: (s.start_time || "") + "–" + (s.end_time || "") + " " + (meta.join(" · ") || ""),
+        title: (s.start_time || "") + "\u2013" + (s.end_time || "") + " " + (meta.join(" \u00b7 ") || ""),
       }, [
-        el("div", { class: "tl-time", text: (s.start_time || "—") + "–" + (s.end_time || "—") }),
-        el("div", { class: "tl-meta", icon: "car", text: meta.join(" · ") || t("lesson.lesson") }),
+        el("div", { class: "tl-time", text: (s.start_time || "\u2014") + "\u2013" + (s.end_time || "\u2014") }),
+        el("div", { class: "tl-meta", icon: "car", text: meta.join(" \u00b7 ") || t("lesson.lesson") }),
       ]));
     });
     return wrap;
@@ -466,7 +466,7 @@ const UI = (function () {
       any = true;
       const right = it.badge ? badge(it.badge[0], it.badge[1]) : null;
       list.append(el("div", { class: "cl-item" + (it.done ? " done" : ""), onclick: it.onclick }, [
-        el("span", { class: "cl-box", text: it.done ? "✓" : "" }),
+        el("span", { class: "cl-box", text: it.done ? "\u2713" : "" }),
         el("div", { class: "f1" }, [
           el("div", { class: "cl-text", text: it.text }),
           it.sub ? el("div", { class: "cl-sub", text: it.sub }) : null,
@@ -474,7 +474,7 @@ const UI = (function () {
         right,
       ]));
     });
-    if (!any) list.append(emptyState("✅", t("today.nothing"), t("today.nothing_sub")));
+    if (!any) list.append(emptyState("\u2705", t("today.nothing"), t("today.nothing_sub")));
     return list;
   }
 
@@ -499,7 +499,7 @@ const UI = (function () {
     const list = el("div", { class: "notif-mini" });
     const items = (notifs || []).slice(0, limit);
     if (!items.length) {
-      list.append(emptyState("🔔", t("notif.empty")));
+      list.append(emptyState("\u{1f514}", t("notif.empty")));
       return list;
     }
     items.forEach((n) => {
@@ -515,7 +515,7 @@ const UI = (function () {
       const senderAvatar = n.sender_id
         ? avatar({ first_name: n.sender_first_name || "?", last_name: n.sender_last_name || "",
                    profile_image: n.sender_profile_image || "" }, 26)
-        : el("div", { class: "avatar notif-sys-avatar", style: "width:26px;height:26px;font-size:12px", text: "⚙" });
+        : el("div", { class: "avatar notif-sys-avatar", style: "width:26px;height:26px;font-size:12px", text: "\u2699" });
       list.append(el("div", {
         /* BAND 21: barqaror identifikator — DB qatori ID'si, index EMAS. */
         key: "notif-" + n.id,

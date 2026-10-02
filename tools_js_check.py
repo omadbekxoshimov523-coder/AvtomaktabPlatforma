@@ -77,15 +77,18 @@ def tokenize(src):
                     depth -= 1
                     j += 1
                     continue
-                if ch == '"':
+                if ch == '"' or ch == "'":
+                    # satrni `\\` escape'larini HISOBGA OLIB o'tkazish shart,
+                    # aks holda "\u2014" kabi yozilgan belgilar skannerni
+                    # yo'lidan chalg'itadi va "unterminated template" beradi.
+                    q = ch
                     j2 = j + 1
-                    while j2 < n and src[j2] != '"' and src[j2] != "\\":
-                        j2 += 1
-                    j = j2 + 1
-                    continue
-                if ch == "'":
-                    j2 = j + 1
-                    while j2 < n and src[j2] != "'" and src[j2] != "\\":
+                    while j2 < n:
+                        if src[j2] == "\\":
+                            j2 += 2
+                            continue
+                        if src[j2] == q or src[j2] == "\n":
+                            break
                         j2 += 1
                     j = j2 + 1
                     continue

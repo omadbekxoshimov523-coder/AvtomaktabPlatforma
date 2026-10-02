@@ -120,7 +120,7 @@ const MapView = (function () {
   function link(lat, lng, label, zoom) {
     const { el } = UI;
     if (!isNum(lat) || !isNum(lng)) {
-      return el("span", { class: "muted", text: label || "—" });
+      return el("span", { class: "muted", text: label || "\u2014" });
     }
     return el("a", {
       class: "link", href: linkUrl(lat, lng, zoom), target: "_blank", rel: "noopener",

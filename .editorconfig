@@ -1,0 +1,39 @@
+# AVTOMAKTAB Platforma - muharrim sozlamalari
+#
+# ASOSIY MAQSAD: barcha fayllar UTF-8 (BOM'siz) bo'lsin.
+# "charset = utf-8" = UTF-8 va BOM yo'q (editorconfig spec).
+# Bu "mojibake" (double-encoding) xatolarining ASOSIY sababini yo'q qiladi:
+# muharrir faylni Windows-1251/Latin-1 deb saqlaganda belgilar buziladi.
+#
+# Muharrimlar: VS Code, Sublime, JetBrains (barchasi qo'llab-quvvatlaydi).
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 120
+
+# --- Python (4 bo'shliq, standart PEP8) ---
+[*.py]
+indent_size = 4
+max_line_length = 100
+
+# --- Markdown: qator oxirida ikki bo'shliq = qator uzilishi ---
+[*.md]
+trim_trailing_whitespace = false
+
+# --- JSON / YAML / boshqalar ---
+[*.{json,yml,yaml,toml,cfg}]
+indent_size = 2
+
+# --- Rasm / arxiv / DB kabi ikkilik fayllar ---
+[*.{png,jpg,jpeg,gif,webp,ico,svg,pdf,zip,gz,db,sqlite,sqlite3,xlsx,woff,woff2,ttf,eot}]
+charset = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+end_of_line = unset

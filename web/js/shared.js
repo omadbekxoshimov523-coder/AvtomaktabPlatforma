@@ -1,4 +1,4 @@
-﻿/* Umumiy komponentlar: session detallari, foydalanuvchi formasi, xabarlar, yordamchilar */
+/* Umumiy komponentlar: session detallari, foydalanuvchi formasi, xabarlar, yordamchilar */
 const Shared = (function () {
   const { t, fmtDate, fmtDateTime, errorText, notifLabel, notifText } = I18N;
   const UI = window.UI;
@@ -71,7 +71,7 @@ const Shared = (function () {
   /* ---------- XABAR YUBORISH ---------- */
   function openMessage(userId, userName) {
     const ta = el("textarea", { class: "input", placeholder: t("instructor.send_msg") + "..." });
-    const m = modal(t("lesson.message") + " — " + userName, [
+    const m = modal(t("lesson.message") + " \u2014 " + userName, [
       ta,
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
@@ -102,7 +102,7 @@ const Shared = (function () {
       ]));
     });
     if (!(hist.messages || []).length) conv.append(el("div", { class: "muted sm", text: t("messages.empty") }));
-    const m = modal(t("lesson.message") + " — " + userName, [
+    const m = modal(t("lesson.message") + " \u2014 " + userName, [
       conv,
       ta,
       el("div", { class: "row end mt" }, [
@@ -138,7 +138,7 @@ const Shared = (function () {
       req = res.request || null;
     } catch (e) { return errToast(e); }
     if (!req) return toast(t("err.request.not_found"), "error");
-    const m = modal("📨 " + t("nav.requests"), [], { wide: true });
+    const m = modal("\u{1f4e8} " + t("nav.requests"), [], { wide: true });
     const body = [];
     if (role === "admin") {
       body.push(el("div", { class: "user-cell mb" }, [
@@ -152,18 +152,18 @@ const Shared = (function () {
     body.push(el("div", { class: "row between mb" }, [
       el("div", {}, [
         el("div", { class: "muted sm", text: "" + t("req.preferred") }),
-        el("strong", { text: (req.preferred_date ? fmtDate(req.preferred_date) : "—")
-          + (req.preferred_start_time ? " " + req.preferred_start_time + "–" + (req.preferred_end_time || "") : "") }),
+        el("strong", { text: (req.preferred_date ? fmtDate(req.preferred_date) : "\u2014")
+          + (req.preferred_start_time ? " " + req.preferred_start_time + "\u2013" + (req.preferred_end_time || "") : "") }),
       ]),
       badge(req.status, statusText(req.status)),
     ]));
     body.push(el("div", { class: "card" }, [
-      el("div", { class: "muted", icon: "message", text: "" + (req.message || "—") }),
+      el("div", { class: "muted", icon: "message", text: "" + (req.message || "\u2014") }),
     ]));
     /* MODUL 5B: eskirgan so'rovda holat aniq ko'rsatiladi. */
     if (req.is_expired) {
       body.push(el("div", { class: "map-msg map-msg-warn mt" }, [
-        el("div", { class: "map-msg-title", text: "⏳ " + t("req.expired") }),
+        el("div", { class: "map-msg-title", text: "\u23f3 " + t("req.expired") }),
         el("div", { class: "map-msg-sub", text: t("req.expired_hint") }),
       ]));
     }
@@ -187,15 +187,15 @@ const Shared = (function () {
       instructor: select({}, ""),
     };
     instructors.forEach((i) => f.instructor.append(el("option", {
-      value: i.id, text: i.first_name + " " + i.last_name + (i.car ? ` 🚗 ${i.car.brand} ${i.car.model}` : ""),
+      value: i.id, text: i.first_name + " " + i.last_name + (i.car ? ` \u{1f697} ${i.car.brand} ${i.car.model}` : ""),
     })));
     const m = modal(t("req.choose_schedule"), [
-      field("📅 " + t("lesson.date"), f.date),
+      field("\u{1f4c5} " + t("lesson.date"), f.date),
       el("div", { class: "row" }, [
-        field("🕒 " + t("lesson.start"), f.start, { class: "f1" }),
-        field("🕒 " + t("lesson.end"), f.end, { class: "f1" }),
+        field("\u{1f552} " + t("lesson.start"), f.start, { class: "f1" }),
+        field("\u{1f552} " + t("lesson.end"), f.end, { class: "f1" }),
       ]),
-      field("👨🏫 " + t("lesson.instructor"), f.instructor),
+      field("\u{1f468}\u{1f3eb} " + t("lesson.instructor"), f.instructor),
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
         el("button", { class: "btn btn-primary", icon: "check_circle", text: "" + t("req.approve"),
@@ -214,7 +214,7 @@ const Shared = (function () {
 
   async function rejectRequest(requestId) {
     const ta = input({ placeholder: t("common.notes") + "..." });
-    const m = modal("🔴 " + t("req.reject"), [
+    const m = modal("\u{1f534} " + t("req.reject"), [
       field(t("common.notes"), ta),
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
@@ -262,7 +262,7 @@ const Shared = (function () {
     const rows = PW_RULES.map((r) => {
       const ok = r.test(pw);
       const item = el("div", { class: "pw-rule" + (ok ? " ok" : " bad") }, [
-        el("span", { class: "pw-rule-mark", text: ok ? "✓" : "✗" }),
+        el("span", { class: "pw-rule-mark", text: ok ? "\u2713" : "\u2717" }),
         el("span", { class: "pw-rule-text", text: t("auth.pw_rule_" + r.key) }),
       ]);
       return item;
@@ -276,13 +276,13 @@ const Shared = (function () {
 
   function openChangeCredentials() {
     const u = App.me.user;
-    const oldPWrap = UI.passwordInput({ placeholder: "••••••", autocomplete: "current-password" });
+    const oldPWrap = UI.passwordInput({ placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022", autocomplete: "current-password" });
     const oldP = oldPWrap.input;
-    const newLogin = input({ value: u.login || "", placeholder: "usrL_…", autocapitalize: "off",
+    const newLogin = input({ value: u.login || "", placeholder: "usrL_\u2026", autocapitalize: "off",
       autocomplete: "off", spellcheck: false });
-    const newPWrap = UI.passwordInput({ placeholder: "••••••", autocomplete: "new-password" });
+    const newPWrap = UI.passwordInput({ placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022", autocomplete: "new-password" });
     const newP = newPWrap.input;
-    const repPWrap = UI.passwordInput({ placeholder: "••••••", autocomplete: "new-password" });
+    const repPWrap = UI.passwordInput({ placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022", autocomplete: "new-password" });
     const repP = repPWrap.input;
 
     const rulesBox = pwChecklist("");
@@ -305,7 +305,7 @@ const Shared = (function () {
         const ok = r.test(pw);
         row.classList.toggle("ok", ok);
         row.classList.toggle("bad", !ok);
-        row.querySelector(".pw-rule-mark").textContent = ok ? "✓" : "✗";
+        row.querySelector(".pw-rule-mark").textContent = ok ? "\u2713" : "\u2717";
       });
       const rep = String(repP.value || "");
       if (!pw && !rep) {
@@ -314,7 +314,7 @@ const Shared = (function () {
         matchBox.classList.remove("hidden");
         const same = !!rep && pw === rep;
         matchBox.className = "pw-match " + (same ? "ok" : "bad");
-        matchBox.textContent = same ? "✓ " + t("auth.pw_match_ok") : "✗ " + t("auth.pw_match_bad");
+        matchBox.textContent = same ? "\u2713 " + t("auth.pw_match_ok") : "\u2717 " + t("auth.pw_match_bad");
       }
       return allOk;
     }
@@ -335,8 +335,8 @@ const Shared = (function () {
       loginHint.classList.remove("hidden");
       loginHint.className = "pw-match " + (ok ? "ok" : "bad");
       loginHint.textContent = ok
-        ? "✓ " + t("profile.login_format_ok")
-        : "✗ " + t("err.profile.login_format");
+        ? "\u2713 " + t("profile.login_format_ok")
+        : "\u2717 " + t("err.profile.login_format");
       return ok;
     }
 
@@ -371,7 +371,7 @@ const Shared = (function () {
     [oldP, newLogin, newP, repP].forEach((i) => i.addEventListener("input", updateSave));
     updateSave();
 
-    const m = modal("🔐 " + t("profile.change_credentials"), [
+    const m = modal("\u{1f510} " + t("profile.change_credentials"), [
       el("p", { class: "field-hint mb", text: t("profile.change_credentials_hint") }),
       field(t("profile.current_password"), oldPWrap),
       field(t("profile.new_login"), newLogin, { hint: t("profile.login_hint") }),
@@ -427,7 +427,7 @@ const Shared = (function () {
       else if (role === "instructor") data = (await API.get(`instructor/sessions/${id}`)).session;
       else data = (await API.get(`student/sessions/${id}`)).session;
       m.querySelector(".modal-head h3").textContent =
-        (data.date ? fmtDate(data.date) : "") + " · " + data.start_time + "–" + data.end_time;
+        (data.date ? fmtDate(data.date) : "") + " \u00b7 " + data.start_time + "\u2013" + data.end_time;
       m.body.innerHTML = "";
       m.body.append(buildSessionBody(data, role, m));
     } catch (e) {
@@ -441,21 +441,21 @@ const Shared = (function () {
     // Asosiy ma'lumotlar
     const info = el("div", { class: "kv-grid" }, []);
     const kvs = [
-      [t("lesson.instructor"), s.instructor_name || "—"],
+      [t("lesson.instructor"), s.instructor_name || "\u2014"],
       [t("lesson.date"), fmtDate(s.date)],
-      [t("lesson.time"), `${s.start_time}–${s.end_time}`],
-      [t("lesson.car"), s.car_name_snapshot ? `${s.car_name_snapshot} · ${s.car_plate_snapshot}` : s.car_name_snapshot || "—"],
+      [t("lesson.time"), `${s.start_time}\u2013${s.end_time}`],
+      [t("lesson.car"), s.car_name_snapshot ? `${s.car_name_snapshot} \u00b7 ${s.car_plate_snapshot}` : s.car_name_snapshot || "\u2014"],
       [t("lesson.capacity"), `${s.student_count || 0}/${s.capacity_snapshot}`],
       [t("common.status"), statusText(s.status)],
     ];
     if (role !== "student") {
-      kvs.push([t("lesson.teacher_phone"), s.instructor_phone || "—"]);
+      kvs.push([t("lesson.teacher_phone"), s.instructor_phone || "\u2014"]);
     }
-    if (s.cancel_reason) kvs.push(["❌ " + t("lesson.cancel_reason"), s.cancel_reason]);
+    if (s.cancel_reason) kvs.push(["\u274c " + t("lesson.cancel_reason"), s.cancel_reason]);
     if (s.original_date && s.original_date !== s.date) {
       const from = fmtDate(s.original_date) + " " + (s.original_start_time || s.start_time);
       const to = fmtDate(s.date) + " " + s.start_time;
-      kvs.push(["🔄 " + t("lesson.reschedule_info"), `${from} → ${to}`]);
+      kvs.push(["\u{1f504} " + t("lesson.reschedule_info"), `${from} \u2192 ${to}`]);
     }
     kvs.forEach(([k, v]) => info.append(el("div", { class: "kv" }, [el("span", { class: "k", text: k }), el("span", { class: "v", text: v })])));
     kids.push(el("div", { class: "card" }, [info]));
@@ -468,7 +468,7 @@ const Shared = (function () {
         line.append(avatar(stu, 36),
           el("div", { class: "f1" }, [
             el("div", { class: "cell-strong", text: `${stu.first_name} ${stu.last_name} ${stu.middle_name || ""}`.trim() }),
-            el("div", { class: "muted sm", text: (stu.group_name || "") + " · " + t("meeting.place") + ": " + (stu.pickup_address || "—") }),
+            el("div", { class: "muted sm", text: (stu.group_name || "") + " \u00b7 " + t("meeting.place") + ": " + (stu.pickup_address || "\u2014") }),
           ]));
         const acts = el("div", { class: "row gap-sm wrap" }, []);
         // MODUL 4: xarita (Yandex Maps) — matni endi "Xaritada ko'rish"
@@ -480,7 +480,7 @@ const Shared = (function () {
         // davomat (instruktor)
         if (role === "instructor" && (s.status === "ongoing" || s.status === "scheduled")) {
           const att = el("div", { class: "att-row mt" }, [
-            ["present", t("lesson.present"), "🟢"], ["late", t("lesson.late"), "🟡"], ["absent", t("lesson.absent"), "🔴"],
+            ["present", t("lesson.present"), "\u{1f7e2}"], ["late", t("lesson.late"), "\u{1f7e1}"], ["absent", t("lesson.absent"), "\u{1f534}"],
           ].map(([code, label, ico]) =>
             el("button", {
               class: "att-btn" + (stu.attendance_status === code ? ` active-${code}` : ""),
@@ -510,7 +510,7 @@ const Shared = (function () {
       line.append(
         el("div", { class: "f1" }, [
           el("div", { class: "cell-strong", icon: "user", text: "" + t("auth.role_student") }),
-          el("div", { class: "muted sm", text: t("meeting.place") + ": " + (s.pickup_address || "—") }),
+          el("div", { class: "muted sm", text: t("meeting.place") + ": " + (s.pickup_address || "\u2014") }),
         ]));
       const acts = el("div", { class: "row gap-sm wrap" }, []);
       if (s.status === "scheduled") {
@@ -524,7 +524,7 @@ const Shared = (function () {
       line.append(acts);
       kids.push(el("div", { class: "card mt" }, [el("h4", { class: "card-title", icon: "users", text: "" + t("lesson.students") }), line]));
     } else {
-      kids.push(el("div", { class: "card mt" }, [UI.emptyState("👥", t("instructor.students_empty"))]));
+      kids.push(el("div", { class: "card mt" }, [UI.emptyState("\u{1f465}", t("instructor.students_empty"))]));
     }
 
     // Status car paneli bilan birga (admin: talaba qo'shish, instruktorni almashtirish...)
@@ -722,8 +722,8 @@ const Shared = (function () {
     if (s.status === "scheduled") {
       btns.append(
         el("button", { class: "btn btn-light btn-sm", icon: "plus", text: "" + t("lesson.add_student"), onclick: () => addStudentModal(s, m) }),
-        el("button", { class: "btn btn-light btn-sm", text: "🔄 " + t("lesson.reschedule_btn"), onclick: () => rescheduleModal(s) }),
-        el("button", { class: "btn btn-danger btn-sm", text: "✕ " + t("lesson.cancel_btn"), onclick: () => cancelModal(s) }),
+        el("button", { class: "btn btn-light btn-sm", text: "\u{1f504} " + t("lesson.reschedule_btn"), onclick: () => rescheduleModal(s) }),
+        el("button", { class: "btn btn-danger btn-sm", text: "\u2715 " + t("lesson.cancel_btn"), onclick: () => cancelModal(s) }),
         el("button", { class: "btn btn-light btn-sm", icon: "edit", text: "" + t("common.notes"), onclick: () => notesModal(s) }),
       );
     }
@@ -785,8 +785,8 @@ const Shared = (function () {
       if (!iid) return;
       const car = (await API.get(`admin/instructors`)).instructors.find((i) => String(i.id) === String(iid));
       autoBox.innerHTML = "";
-      if (car && car.car) autoBox.append(field("🔒 " + t("lesson.car"), el("div", { class: "input readonly", text: car.car.brand + " " + car.car.model + " — " + car.car.plate_number })));
-      else autoBox.append(field("🔒 " + t("lesson.car"), el("div", { class: "input readonly", text: "—" })));
+      if (car && car.car) autoBox.append(field("\u{1f512} " + t("lesson.car"), el("div", { class: "input readonly", text: car.car.brand + " " + car.car.model + " \u2014 " + car.car.plate_number })));
+      else autoBox.append(field("\u{1f512} " + t("lesson.car"), el("div", { class: "input readonly", text: "\u2014" })));
     });
     instSel.dispatchEvent(new Event("change"));
   }
@@ -794,17 +794,17 @@ const Shared = (function () {
   function cancelModal(s) {
     const reasonSel = select({
       "": t("lesson.cancel_reason") + "...",
-      car: "🚗 " + t("err.car_in_repair"),
-      instructor: "👨‍🏫 " + t("err.instructor_busy"),
-      school: "🏫 " + t("lesson.cancel_reason"),
-      schedule: "📅 " + t("nav.schedule"),
-      other: "📝 " + t("common.other"),
+      car: "\u{1f697} " + t("err.car_in_repair"),
+      instructor: "\u{1f468}\u200d\u{1f3eb} " + t("err.instructor_busy"),
+      school: "\u{1f3eb} " + t("lesson.cancel_reason"),
+      schedule: "\u{1f4c5} " + t("nav.schedule"),
+      other: "\u{1f4dd} " + t("common.other"),
     });
     const m = modal(t("lesson.cancel_btn"), [
       field(t("lesson.cancel_reason"), reasonSel),
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
-        el("button", { class: "btn btn-danger", text: "✕ " + t("lesson.cancel_btn"),
+        el("button", { class: "btn btn-danger", text: "\u2715 " + t("lesson.cancel_btn"),
           onclick: async () => {
             try {
               await API.post(`admin/sessions/${s.id}/cancel`, { reason: reasonSel.value });
@@ -842,12 +842,12 @@ const Shared = (function () {
             toast(t("misc.saved")); m.close(); openSession(s.id, "instructor"); App.refreshView();
           } catch (e) { errToast(e); }
         } }),
-        el("button", { class: "btn btn-light btn-sm", text: "🔄 " + t("lesson.reschedule_btn"), onclick: () => instructorRescheduleModal(s, m) }),
-        el("button", { class: "btn btn-danger btn-sm", text: "✕ " + t("lesson.cancel_btn"), onclick: () => instructorCancelModal(s, m) }),
+        el("button", { class: "btn btn-light btn-sm", text: "\u{1f504} " + t("lesson.reschedule_btn"), onclick: () => instructorRescheduleModal(s, m) }),
+        el("button", { class: "btn btn-danger btn-sm", text: "\u2715 " + t("lesson.cancel_btn"), onclick: () => instructorCancelModal(s, m) }),
       );
     }
     if (s.status === "ongoing") {
-      btns.append(el("button", { class: "btn btn-cyan", text: "⏹ " + t("lesson.finish_btn"),
+      btns.append(el("button", { class: "btn btn-cyan", text: "\u23f9 " + t("lesson.finish_btn"),
         onclick: async () => {
           try {
             await API.post(`instructor/sessions/${s.id}/finish`);
@@ -890,17 +890,17 @@ const Shared = (function () {
   function instructorCancelModal(s, m) {
     const reasonSel = select({
       "": t("lesson.cancel_reason") + "...",
-      car: "🚗 " + t("err.car_in_repair"),
-      instructor: "👨‍🏫 " + t("err.instructor_busy"),
-      school: "🏫 " + t("lesson.cancel_reason"),
-      schedule: "📅 " + t("nav.schedule"),
-      other: "📝 " + t("common.other"),
+      car: "\u{1f697} " + t("err.car_in_repair"),
+      instructor: "\u{1f468}\u200d\u{1f3eb} " + t("err.instructor_busy"),
+      school: "\u{1f3eb} " + t("lesson.cancel_reason"),
+      schedule: "\u{1f4c5} " + t("nav.schedule"),
+      other: "\u{1f4dd} " + t("common.other"),
     });
     const mm = modal(t("lesson.cancel_btn"), [
       field(t("lesson.cancel_reason"), reasonSel),
       el("div", { class: "row end mt" }, [
         el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => mm.close() }),
-        el("button", { class: "btn btn-danger", text: "✕ " + t("lesson.cancel_btn"),
+        el("button", { class: "btn btn-danger", text: "\u2715 " + t("lesson.cancel_btn"),
           onclick: async () => {
             try {
               await API.post(`instructor/sessions/${s.id}/cancel`, { reason: reasonSel.value });
@@ -989,14 +989,14 @@ const Shared = (function () {
     let carSel = null;
     if (role === "instructor") {
       const cars = (await API.get("admin/cars")).cars.filter((c) => c.status === "active");
-      carSel = select({ "": "— " + t("car.reassign") + " —" }, user && user.instructor ? user.instructor.assigned_car_id : "", {});
-      cars.forEach((c) => carSel.append(el("option", { value: c.id, text: `${c.brand} ${c.model} — ${c.plate_number}`, selected: user && user.instructor && user.instructor.assigned_car_id === c.id ? "selected" : "" })));
-      carBox.append(field("🚗 " + t("instructor.assign_car"), carSel));
+      carSel = select({ "": "\u2014 " + t("car.reassign") + " \u2014" }, user && user.instructor ? user.instructor.assigned_car_id : "", {});
+      cars.forEach((c) => carSel.append(el("option", { value: c.id, text: `${c.brand} ${c.model} \u2014 ${c.plate_number}`, selected: user && user.instructor && user.instructor.assigned_car_id === c.id ? "selected" : "" })));
+      carBox.append(field("\u{1f697} " + t("instructor.assign_car"), carSel));
       wrap.append(carBox);
     }
 
     let credArea = null;
-    if (!isEdit) credArea = el("div", { class: "mt muted", icon: "key", text: "" + t("student.credentials") + " — saqlangach ko'rinadi" });
+    if (!isEdit) credArea = el("div", { class: "mt muted", icon: "key", text: "" + t("student.credentials") + " \u2014 saqlangach ko'rinadi" });
 
     /* MODUL 3: yangi ADMIN — roli faqat admin, login/parol AVTOMATIK
        generatsiya qilinadi va 🔑 orqali keyin ham ko'riladi. */
@@ -1074,7 +1074,7 @@ const Shared = (function () {
   function openUserCredentialsManager(user, onDone) {
     const loginI = input({ class: "input", value: "", autocapitalize: "off",
       autocomplete: "off", spellcheck: false });
-    const pwWrap = UI.passwordInput({ placeholder: "••••••", autocomplete: "off" });
+    const pwWrap = UI.passwordInput({ placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022", autocomplete: "off" });
     const pwI = pwWrap.input;
     const box = el("div", { class: "cred-box" });
     const note = el("p", { class: "cred-warn", icon: "warn" });
@@ -1107,7 +1107,7 @@ const Shared = (function () {
     const saveBtn = el("button", { class: "btn btn-primary", icon: "save", text: "" + t("common.save") });
     const genBtn = el("button", { class: "btn btn-light", icon: "refresh", text: "" + t("users.cred_generate") });
 
-    const m = modal("🔑 " + t("users.cred_title") + " — " + (user.first_name ? user.first_name + " " + user.last_name : user.login), [
+    const m = modal("\u{1f511} " + t("users.cred_title") + " \u2014 " + (user.first_name ? user.first_name + " " + user.last_name : user.login), [
       box,
       el("p", { class: "field-hint mt", icon: "alert", text: "" + t("users.cred_audit_note") }),
       el("div", { class: "row end mt" }, [
@@ -1199,7 +1199,7 @@ const Shared = (function () {
 
   function openUserCredentials(creds, opts = {}) {
     const title = opts.title || t("student.credentials");
-    const m = modal("🔑 " + title, [
+    const m = modal("\u{1f511} " + title, [
       credBox(creds.login, creds.password, opts.hint || t("users.cred_visible_note")),
       el("p", { class: "field-hint mt", icon: "alert", text: "" + t("auth.no_registration") }),
       el("div", { class: "row end mt" }, [el("button", { class: "btn btn-primary", text: t("common.close"), onclick: () => m.close() })]),
@@ -1211,7 +1211,7 @@ const Shared = (function () {
      PROFIL (Modul 2 — uchala rol uchun umumiy bo'lim)
      ============================================================ */
   function profileFullName(u) {
-    return [u.first_name, u.last_name, u.middle_name || ""].filter(Boolean).join(" ") || "—";
+    return [u.first_name, u.last_name, u.middle_name || ""].filter(Boolean).join(" ") || "\u2014";
   }
 
   function _profileRefresh() {
@@ -1297,7 +1297,7 @@ const Shared = (function () {
         stage,
         el("div", { class: "row end mt" }, [
           el("button", { class: "btn btn-light", text: t("common.cancel"), onclick: () => m.close() }),
-          el("button", { class: "btn btn-cyan", icon: "check", text: "" + t("profile.crop") + " ✂",
+          el("button", { class: "btn btn-cyan", icon: "check", text: "" + t("profile.crop") + " \u2702",
             onclick: () => { onDataUrl(doCrop()); m.close(); } }),
         ]),
       ]);
@@ -1384,10 +1384,10 @@ const Shared = (function () {
   }
 
   function enableTwoFA() {
-    const pw = input({ type: "password", placeholder: "••••••" });
+    const pw = input({ type: "password", placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022" });
     const phone = input({ type: "tel", placeholder: "+998 90 123 45 67" });
     if (App.me.user.phone) phone.value = App.me.user.phone;
-    const m = modal("🔐 " + t("profile.twofa"), [
+    const m = modal("\u{1f510} " + t("profile.twofa"), [
       el("p", { class: "field-hint", text: "" + t("profile.twofa_password_hint") }),
       field(t("auth.old_password"), pw),
       el("p", { class: "field-hint", text: "" + t("profile.twofa_phone_hint") }),
@@ -1409,7 +1409,7 @@ const Shared = (function () {
   function twoFACodeStep() {
     const code = input({ inputmode: "numeric", placeholder: "123456", autocomplete: "one-time-code",
       style: "letter-spacing:.4em;font-weight:800" });
-    const m = modal("🔐 " + t("profile.twofa"), [
+    const m = modal("\u{1f510} " + t("profile.twofa"), [
       el("p", { class: "field-hint mb", text: "" + t("profile.twofa_sms_sent") }),
       field(t("profile.twofa_code"), code),
       el("div", { class: "row between wrap mb" }, [
@@ -1430,8 +1430,8 @@ const Shared = (function () {
   }
 
   function disableTwoFA() {
-    const pw = input({ type: "password", placeholder: "••••••" });
-    const m = modal("🔓 " + t("profile.twofa"), [
+    const pw = input({ type: "password", placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022" });
+    const m = modal("\u{1f513} " + t("profile.twofa"), [
       el("p", { class: "field-hint", text: "" + t("profile.twofa_password_hint") }),
       field(t("auth.old_password"), pw),
       el("div", { class: "row end mt" }, [
@@ -1534,7 +1534,7 @@ const Shared = (function () {
       );
     }).catch((e) => {
       body.innerHTML = "";
-      body.append(UI.emptyState("⚠️", I18N.errorText(e && e.code) || t("settings.title")));
+      body.append(UI.emptyState("\u26a0\ufe0f", I18N.errorText(e && e.code) || t("settings.title")));
     });
     return wrap;
   }
@@ -1553,7 +1553,7 @@ const Shared = (function () {
       box.append(btn);
     });
     return el("div", { class: "card mb" }, [
-      el("h3", { class: "card-title", text: "🌐 " + t("settings.lang_title") }),
+      el("h3", { class: "card-title", text: "\u{1f310} " + t("settings.lang_title") }),
       el("div", { class: "muted sm mb", text: t("settings.region_info") }),
       box,
     ]);
@@ -1578,7 +1578,7 @@ const Shared = (function () {
       box.append(btn);
     });
     return el("div", { class: "card mb" }, [
-      el("h3", { class: "card-title", text: "🎨 " + t("settings.theme_title") }),
+      el("h3", { class: "card-title", text: "\u{1f3a8} " + t("settings.theme_title") }),
       el("div", { class: "muted sm mb", text: t("settings.theme_hint") }),
       box,
     ]);
@@ -1616,7 +1616,7 @@ const Shared = (function () {
 
   function securitySettingsCard(sessions) {
     const card = el("div", { class: "card" }, [
-      el("h3", { class: "card-title", text: "🛡️ " + t("settings.security_title") }),
+      el("h3", { class: "card-title", text: "\u{1f6e1}\ufe0f " + t("settings.security_title") }),
       el("div", { class: "row between mb wrap" }, [
         el("div", { class: "muted sm", text: t("settings.sessions_title") + ": " + sessions.length }),
         el("div", { class: "row gap-sm wrap" }, [
@@ -1635,7 +1635,7 @@ const Shared = (function () {
       ]),
     ]);
     if (!sessions.length) {
-      card.append(UI.emptyState("📵", t("settings.sessions_empty")));
+      card.append(UI.emptyState("\u{1f4f5}", t("settings.sessions_empty")));
       return card;
     }
     card.append(el("div", { class: "table-wrap" }, [el("table", { class: "tbl" }, [
@@ -1648,9 +1648,9 @@ const Shared = (function () {
       ])]),
       el("tbody", {}, sessions.map((ss) => el("tr", {}, [
         el("td", { text: I18N.fmtDateTime(ss.created_at) }),
-        el("td", { class: "muted", text: ss.last_seen ? I18N.fmtDateTime(ss.last_seen) : "—" }),
+        el("td", { class: "muted", text: ss.last_seen ? I18N.fmtDateTime(ss.last_seen) : "\u2014" }),
         el("td", { class: "muted", text: I18N.fmtDateTime(ss.expires_at) }),
-        el("td", {}, [ss.current ? el("span", { class: "badge b-cyan", text: t("settings.sessions_current") }) : el("span", { class: "muted sm", text: "•" })]),
+        el("td", {}, [ss.current ? el("span", { class: "badge b-cyan", text: t("settings.sessions_current") }) : el("span", { class: "muted sm", text: "\u2022" })]),
         el("td", { style: "text-align:right" }, [el("button", {
           class: "btn btn-light btn-sm", icon: "x", text: "" + t("settings.revoke"),
           onclick: async () => {
@@ -1672,7 +1672,7 @@ const Shared = (function () {
      uchun bir xil komponentda bitta marta yozilgan. */
   function logoutCard() {
     return el("div", { class: "card logout-card" }, [
-      el("h3", { class: "card-title", text: "🚪 " + t("settings.logout_title") }),
+      el("h3", { class: "card-title", text: "\u{1f6aa} " + t("settings.logout_title") }),
       el("div", { class: "muted sm", text: t("settings.logout_hint") }),
       el("div", { class: "muted sm mb", text: t("settings.logout_desc") }),
       el("button", {
@@ -1691,7 +1691,7 @@ const Shared = (function () {
     // MODUL 5: ommaviy (platforma) "Jami darslar" maqsadi
     const tgtI = input({ type: "number", min: 1, max: 999, step: 1, value: s.total_lessons_target || 30 });
     return el("div", { class: "card" }, [
-      el("h3", { class: "card-title", text: "🛠️ " + t("settings.platform_title") }),
+      el("h3", { class: "card-title", text: "\u{1f6e0}\ufe0f " + t("settings.platform_title") }),
       el("div", { class: "muted sm mb", text: t("settings.platform_hint") }),
       el("div", { class: "mb" }, [toggleRow({
         title: "" + t("settings.allow_requests"),
@@ -1785,7 +1785,7 @@ const Shared = (function () {
         });
         const items = filter === "all" ? list : list.filter((n) => notifCategory(n) === filter);
         listEl.innerHTML = "";
-        if (!items.length) { listEl.append(UI.emptyState("🔔", t("notif.empty"))); return; }
+        if (!items.length) { listEl.append(UI.emptyState("\u{1f514}", t("notif.empty"))); return; }
         items.forEach((n) => {
           /* BAND 21: metadata bitta qatorda tayyor ob'ekt bo'lsa — ishlatiladi,
              aks holda `data` matnidan o'qiladi. Ikalasi ham bo'lmasa — {}. */
@@ -1799,7 +1799,7 @@ const Shared = (function () {
           const senderAvatar = n.sender_id
             ? avatar({ first_name: n.sender_first_name || "?", last_name: n.sender_last_name || "",
                        profile_image: n.sender_profile_image || "" }, 34)
-            : el("div", { class: "avatar notif-sys-avatar", style: "width:34px;height:34px;font-size:16px", text: "⚙" });
+            : el("div", { class: "avatar notif-sys-avatar", style: "width:34px;height:34px;font-size:16px", text: "\u2699" });
           listEl.append(el("div", {
             /* BAND 21: React kaliti emas, lekin barqaror identifikator —
                `id` butun son, ko'rsatkich (index) EMAS. */
@@ -1826,7 +1826,7 @@ const Shared = (function () {
               el("div", { class: "notif-body", text: notifText(n, data) }),
               el("div", { class: "notif-time", text: I18N.fmtDateTime(n.created_at) }),
             ]),
-            el("button", { class: "link-btn notif-del", title: t("notif.delete"), text: "✕",
+            el("button", { class: "link-btn notif-del", title: t("notif.delete"), text: "\u2715",
               onclick: async (ev) => {
                 ev.stopPropagation();
                 try {
@@ -1863,7 +1863,7 @@ const Shared = (function () {
       );
     }).catch((e) => {
       body.innerHTML = "";
-      body.append(UI.emptyState("⚠️", I18N.errorText(e && e.code) || t("notif.title")));
+      body.append(UI.emptyState("\u26a0\ufe0f", I18N.errorText(e && e.code) || t("notif.title")));
     });
     return wrap;
   }

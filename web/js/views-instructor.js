@@ -13,7 +13,7 @@ window.InstructorViews = (function () {
     wrap.append(el("div", { class: "card mb" }, [
       el("div", { class: "row between" }, [
         el("div", {}, [
-          el("div", { class: "cell-strong", text: "👋 " + (App.me.user.first_name || "") + " " + (App.me.user.last_name || "") }),
+          el("div", { class: "cell-strong", text: "\u{1f44b} " + (App.me.user.first_name || "") + " " + (App.me.user.last_name || "") }),
           el("div", { class: "muted sm", text: t("auth.role_instructor") }),
         ]),
         avatar(App.me.user, 44),
@@ -21,7 +21,7 @@ window.InstructorViews = (function () {
     ]));
     if (car) {
       wrap.append(el("div", { class: "car-big mb" }, [
-        el("div", { class: "car-icon", text: "🚗" }),
+        el("div", { class: "car-icon", text: "\u{1f697}" }),
         el("div", { class: "f1" }, [
           el("div", { class: "car-model", text: `${car.brand} ${car.model}` }),
           el("div", { class: "car-plate", text: car.plate_number }),
@@ -29,7 +29,7 @@ window.InstructorViews = (function () {
         el("div", {}, [badge(car.status, statusText(car.status)), el("div", { class: "muted sm mt", icon: "users", text: "" + t("car.capacity") + ": " + car.practice_capacity })]),
       ]));
     } else {
-      wrap.append(el("div", { class: "card mb" }, [emptyState("🚗", t("instructor.no_car"))]));
+      wrap.append(el("div", { class: "card mb" }, [emptyState("\u{1f697}", t("instructor.no_car"))]));
     }
 
     // Haftalik statistika (umumiy holat)
@@ -48,7 +48,7 @@ window.InstructorViews = (function () {
 
     // Umumiy progress + tezkor havolalar
     const progCard = el("div", { class: "card" }, [
-      el("h3", { class: "card-title", text: "📈 " + t("home.overall_progress") }),
+      el("h3", { class: "card-title", text: "\u{1f4c8} " + t("home.overall_progress") }),
       el("div", { class: "prog-line" }, [el("span", { text: t("progress.total") }), el("strong", { text: String(res.overall.sessions) })]),
       el("div", { class: "prog-line" }, [el("span", { text: t("progress.done") }), el("strong", { text: String(res.overall.done) })]),
       el("div", { class: "prog-line" }, [el("span", { text: t("progress.hours") }), el("strong", { text: String(res.overall.hours) })]),
@@ -78,11 +78,11 @@ window.InstructorViews = (function () {
   function sessionCard(s) {
     return el("div", { class: "session-card " + s.status, onclick: () => Shared.openSession(s.id, "instructor") }, [
       el("div", { class: "row between" }, [
-        el("div", { class: "session-time", text: `${s.start_time}–${s.end_time}` }),
+        el("div", { class: "session-time", text: `${s.start_time}\u2013${s.end_time}` }),
         badge(s.status, statusText(s.status)),
       ]),
       el("div", { class: "session-meta" }, [
-        el("div", { icon: "car", text: "" + (s.car_name_snapshot || "—") + " · " + s.car_plate_snapshot }),
+        el("div", { icon: "car", text: "" + (s.car_name_snapshot || "\u2014") + " \u00b7 " + s.car_plate_snapshot }),
         el("div", { class: "session-count", icon: "users", text: "" + (s.student_count || 0) + "/" + s.capacity_snapshot }),
       ]),
     ]);
@@ -91,7 +91,7 @@ window.InstructorViews = (function () {
   async function schedule() {
     const dateI = input({ type: "date", value: Shared.todayISO() });
     const host = el("div", { class: "mt" });
-    const wrap = el("div", {}, [el("div", { class: "row mb" }, [field("📅 " + t("lesson.date"), dateI, { class: "f1" })])]);
+    const wrap = el("div", {}, [el("div", { class: "row mb" }, [field("\u{1f4c5} " + t("lesson.date"), dateI, { class: "f1" })])]);
     wrap.append(host);
     async function load() {
       host.innerHTML = ""; host.append(spinner());
@@ -99,7 +99,7 @@ window.InstructorViews = (function () {
       host.innerHTML = "";
       const list = el("div", { class: "grid-2" });
       res.sessions.forEach((s) => list.append(sessionCard(s)));
-      if (!res.sessions.length) list.append(emptyState("🗓", t("lesson.empty_today")));
+      if (!res.sessions.length) list.append(emptyState("\u{1f5d3}", t("lesson.empty_today")));
       host.append(list);
     }
     dateI.addEventListener("change", load);
@@ -109,13 +109,13 @@ window.InstructorViews = (function () {
 
   async function students() {
     const res = await API.get("instructor/students");
-    const wrap = el("div", {}, [el("h3", { class: "mb", icon: "graduation", text: " 👨" + t("nav.my_students") })]);
-    if (!res.students.length) { wrap.append(emptyState("👨‍🎓", t("instructor.students_empty"))); return wrap; }
+    const wrap = el("div", {}, [el("h3", { class: "mb", icon: "graduation", text: " \u{1f468}" + t("nav.my_students") })]);
+    if (!res.students.length) { wrap.append(emptyState("\u{1f468}\u200d\u{1f393}", t("instructor.students_empty"))); return wrap; }
     const grid = el("div", { class: "grid-3" });
     res.students.forEach((s) => grid.append(el("div", { class: "card" }, [
       el("div", { class: "user-cell mb" }, [avatar(s, 42), el("div", {}, [
         el("div", { class: "cell-strong", text: s.first_name + " " + s.last_name }),
-        el("div", { class: "muted sm", text: (s.group_name || "") + " · " + (s.license_category || "") }),
+        el("div", { class: "muted sm", text: (s.group_name || "") + " \u00b7 " + (s.license_category || "") }),
       ])]),
       el("div", { class: "row" }, [
         callLink(s.phone),
@@ -135,7 +135,7 @@ window.InstructorViews = (function () {
       res.car ? el("button", { class: "btn btn-primary", icon: "edit", text: "" + t("common.edit"),
         onclick: () => carEditModal(c) }) : null,
     ])]);
-    if (!c) { wrap.append(el("div", { class: "card" }, [emptyState("🚗", t("instructor.no_car"))])); return wrap; }
+    if (!c) { wrap.append(el("div", { class: "card" }, [emptyState("\u{1f697}", t("instructor.no_car"))])); return wrap; }
     wrap.append(el("div", { class: "card" }, [
       el("div", { class: "car-big mb" }, [
         carPhoto(res.photos && res.photos[0] ? res.photos[0].path : "", 92),
@@ -149,15 +149,15 @@ window.InstructorViews = (function () {
     ]));
     if (res.photos && res.photos.length) {
       wrap.append(el("div", { class: "card mt" }, [
-        el("h4", { class: "mb", text: "📷 " + t("car.photos") }),
+        el("h4", { class: "mb", text: "\u{1f4f7} " + t("car.photos") }),
         el("div", { class: "car-photos-grid" }, res.photos.map((p) => carPhoto(p.path, 130))),
       ]));
     }
     const kv = el("div", { class: "card mt" }, []);
     [
-      [t("car.year"), String(c.year || "—")], [t("car.color"), c.color || "—"],
-      [t("car.seats"), String(c.seat_count || "—")], [t("car.capacity"), String(c.practice_capacity)],
-      [t("car.inspection"), c.technical_inspection_date || "—"], [t("car.insurance"), c.insurance_expiry || "—"],
+      [t("car.year"), String(c.year || "\u2014")], [t("car.color"), c.color || "\u2014"],
+      [t("car.seats"), String(c.seat_count || "\u2014")], [t("car.capacity"), String(c.practice_capacity)],
+      [t("car.inspection"), c.technical_inspection_date || "\u2014"], [t("car.insurance"), c.insurance_expiry || "\u2014"],
     ].forEach(([k, v]) => kv.append(el("div", { class: "kv" }, [el("span", { class: "k", text: k }), el("span", { class: "v", text: v })])));
     wrap.append(kv);
     return wrap;
@@ -177,12 +177,12 @@ window.InstructorViews = (function () {
       insurance: input({ type: "date", value: c.insurance_expiry || "" }),
     };
     const notes = el("textarea", { class: "input", text: c.notes || "" });
-    const m = modal(t("common.edit") + " — 🚗 " + (c.brand || "") + " " + (c.model || ""), [
+    const m = modal(t("common.edit") + " \u2014 \u{1f697} " + (c.brand || "") + " " + (c.model || ""), [
       el("div", { class: "grid-2" }, [
         field(t("car.brand"), f.brand), field(t("car.model"), f.model),
-        field("🔢 " + t("car.plate"), f.plate), field(t("car.year"), f.year),
+        field("\u{1f522} " + t("car.plate"), f.plate), field(t("car.year"), f.year),
         field(t("car.color"), f.color), field(t("car.seats"), f.seats),
-        field("👥 " + t("car.capacity"), f.capacity),
+        field("\u{1f465} " + t("car.capacity"), f.capacity),
         field(t("car.inspection"), f.inspection), field(t("car.insurance"), f.insurance),
       ]),
       field(t("common.notes"), notes),
@@ -213,9 +213,9 @@ window.InstructorViews = (function () {
     return Shared.renderProfile({
       roleLabel: t("auth.role_instructor"),
       kvs: [
-        [t("common.phone"), u.phone || "—"],
+        [t("common.phone"), u.phone || "\u2014"],
         [t("common.login"), u.login],
-        [t("instructor.schedule"), `${inst.work_start || "—"}–${inst.work_end || "—"}`],
+        [t("instructor.schedule"), `${inst.work_start || "\u2014"}\u2013${inst.work_end || "\u2014"}`],
       ],
     });
   }
