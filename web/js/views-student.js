@@ -70,7 +70,7 @@ window.StudentViews = (function () {
       statCard("check_circle", t("week.done_lessons"), done,
                t("week.done_share", { n: pct }), "gold"),
       /* 3) QOLGAN darslar — `remaining` (manfiy bo'lmaydi) */
-      statCard("hourglass", t("week.remaining_lessons"), remaining,
+      statCard("hourglass", t("progress.remaining"), remaining,
                t("week.remaining_note"), "amber"),
     ]));
 

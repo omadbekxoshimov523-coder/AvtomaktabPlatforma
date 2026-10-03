@@ -109,6 +109,34 @@ FIXED_COUNT = _seed_fixture_credentials()
 HOST, PORT = "127.0.0.1", 0
 
 
+
+
+def _ins_lesson(db, instructor_id, date):
+    """Test uchun bitta mashg'ulot yaratadi va uning id'sini qaytaradi.
+
+    `lesson_sessions` da ko'p ustun NOT NULL bo'lgani uchun yozishni
+    barcha majburiy maydonlarga to'ldirib qilamiz (sxema o'zgarishi ham
+    bu yordamchini buzmasligi kerak)."""
+    cur = db.connect()
+    try:
+        names = {r[1] for r in cur.execute("PRAGMA table_info(lesson_sessions)")}
+        vals = {
+            "date": date, "start_time": "09:00", "end_time": "10:00",
+            "instructor_id": instructor_id, "car_id": None, "car_name_snapshot": "",
+            "car_plate_snapshot": "", "capacity_snapshot": 4, "status": "completed",
+            "created_at": date + " 09:00:00", "updated_at": date + " 10:00:00",
+            "notes": "", "location": "",
+        }
+        use = {k: v for k, v in vals.items() if k in names}
+        cols = ", ".join(use)
+        marks = ", ".join("?" * len(use))
+        c = cur.execute("INSERT INTO lesson_sessions (%s) VALUES (%s)" % (cols, marks),
+                        tuple(use.values()))
+        cur.commit()
+        return c.lastrowid
+    finally:
+        cur.close()
+
 class Client:
     """Cookie'li HTTP klient."""
 
@@ -3164,6 +3192,15 @@ class _MixinAdmin:
                 db.upd("DELETE FROM students WHERE id=?", (srow["id"],))
             irow = db.q1("SELECT id FROM instructors WHERE user_id=?", (user_id,))
             if irow:
+                # instruktorga tegishli darslar avval o'chadi:
+                # `lesson_sessions.instructor_id` NOT NULL bo'lgani uchun
+                # instruktor qatorini o'chirsak, darslar "osilib" qoladi.
+                for ls in db.q("SELECT id FROM lesson_sessions WHERE instructor_id=?",
+                               (irow["id"],)):
+                    db.upd("DELETE FROM session_students WHERE session_id=?", (ls["id"],))
+                    db.upd("DELETE FROM attendance WHERE session_id=?", (ls["id"],))
+                    db.upd("DELETE FROM notifications WHERE related_lesson_id=?", (ls["id"],))
+                    db.upd("DELETE FROM lesson_sessions WHERE id=?", (ls["id"],))
                 db.upd("DELETE FROM instructors WHERE id=?", (irow["id"],))
             db.upd("DELETE FROM notifications WHERE user_id=?", (user_id,))
             db.upd("DELETE FROM user_settings WHERE user_id=?", (user_id,))
@@ -3938,6 +3975,27 @@ class TestLessonsBAND24(_MixinAdmin, Base):
         self.assertEqual(st, 200, r)
         return r
 
+    def _workday(self, start_days, step=1):
+        """Instruktor 1 uchun haqiqiy ISH KUNI bo'lgan sana ("YYYY-MM-DD").
+
+        Nima uchun: `now + 50 kun` kabi DOIMIY raqam qat'iy sana-bog'liq —
+        masalan 2026-10-03 + 50 = 2026-11-22 (yakshanba) bo'lib, `work_days`
+        da yo'q bo'lgani uchun booking `not_work_day` bilan RAD etilardi.
+        Testlar sana o'zgarmasa ham o'tishi uchun ish kuni `work_days` dan
+        OLIB topiladi.
+        """
+        inst = self.db.q1("SELECT work_days FROM instructors WHERE id=1")
+        self.assertIsNotNone(inst, "instruktor 1 topilmadi")
+        raw = inst["work_days"]
+        days = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        d = datetime.now() + timedelta(days=start_days)
+        for _ in range(21):
+            if names[d.weekday()] in days:
+                return d.strftime("%Y-%m-%d")
+            d += timedelta(days=step)
+        self.fail("kelajakdagi ish kuni topilmadi (work_days=%s)" % days)
+
     # --------------------------------------------------------- BAND 13/14
     def test_L01_future_session_is_pending_or_confirmed(self):
         """KELMAGAN mashg'ulot: `pending` (kutilmoqda) yoki `confirmed`
@@ -4053,8 +4111,12 @@ class TestLessonsBAND24(_MixinAdmin, Base):
                                                                     errors="ignore")
         self.assertIn("week.total_lessons", txt)
         self.assertIn("week.done_lessons", txt)
-        self.assertIn("week.remaining_lessons", txt)
         self.assertIn("home.overall_progress", txt)
+        # "Qolgan darslar" karti: PLACEHOLDER'LI kalit paramsiz chaqirilmasin
+        # (aks holda ekranda "Qolgan: {n} 30" ko'rinadi).
+        self.assertIn('t("progress.remaining")', txt)
+        self.assertNotIn('t("week.remaining_lessons")', txt,
+                         "placeholder'li kalit paramsiz chaqirilgan — {n} ko'rinib qoladi")
 
     def test_L10_overdue_not_counted_as_done(self):
         """20/8 -> 20/9: o'tgan, yakunlanmagan dars `done` ga QO'SHILMAYDI."""
@@ -4083,7 +4145,7 @@ class TestLessonsBAND24(_MixinAdmin, Base):
     def test_L13_car_double_booking_rejected(self):
         """BAND 19: bir vaqtda bitta avtomobilga bir nechta talaba
         biriktirilMASIN (slot conflict)."""
-        day = (datetime.now() + timedelta(days=50)).strftime("%Y-%m-%d")
+        day = self._workday(50)
         st, r1 = self.admin.post("/api/admin/sessions", {
             "date": day, "start_time": "08:00", "end_time": "09:00",
             "instructor_id": 1, "student_ids": [self.student_id], "notes": "L13-A"})
@@ -4102,7 +4164,7 @@ class TestLessonsBAND24(_MixinAdmin, Base):
             self._cleanup_user(r2u["user"]["id"])
 
     def test_L14_duplicate_student_in_session_rejected(self):
-        day = (datetime.now() + timedelta(days=51)).strftime("%Y-%m-%d")
+        day = self._workday(51)
         st, r = self.admin.post("/api/admin/sessions", {
             "date": day, "start_time": "10:00", "end_time": "11:00",
             "instructor_id": 1, "student_ids": [self.student_id, self.student_id]})
@@ -5112,29 +5174,50 @@ class TestAdminModulesBAND25(_MixinAdmin, Base):
         self.assertEqual(st, 400, r)
         self.assertEqual(r["error"], "bulk.bad_id")
 
-    def test_MOD6_bulk_delete_soft(self):
-        """Ommaviy o'chirish — soft delete (`deleted_at`), ma'lumot saqlanadi."""
+    def test_MOD6_bulk_delete_is_hard_delete(self):
+        """Ommaviy o'chirish — haqiqiy DELETE (arxiv EMAS).
+
+        Talab: "O'chirish" foydalanuvchini ARXIVGA o'tkazmasin — `users`
+        jadvalidan butunlay o'chsin, "Arxivlanganlar"da ham ko'rinmasin.
+        """
         st, r = self.admin.post("/api/admin/users/bulk-delete", {"ids": [self.su]})
         self.assertEqual(st, 200, r)
         self.assertEqual(r["deleted"], 1, r)
-        row = self.db.q1("SELECT deleted_at, status FROM users WHERE id=?", (self.su,))
-        self.assertIsNotNone(row["deleted_at"], "soft delete ishlamadi")
-        self.assertEqual(row["status"], "archived")
-        # student qatori saqlanib qoladi
-        s = self.db.q1("SELECT * FROM students WHERE user_id=?", (self.su,))
-        self.assertIsNotNone(s, "student ma'lumoti o'chib ketdi")
-        # ro'yxatda ko'rinmaydi
-        st, r2 = self.admin.get("/api/admin/users?role=student")
-        self.assertNotIn(self.su, [u["id"] for u in r2["users"]])
+        # 1) `users` jadvalidan QATOR YO'Q (arxiv emas!)
+        self.assertIsNone(self.db.q1("SELECT id FROM users WHERE id=?", (self.su,)),
+                          "users qatori saqlanib qoldi — bu arxivlash, o'chirmaslik emas")
+        # 2) student yozuvi ham o'chgan (FK butunligi)
+        self.assertIsNone(self.db.q1("SELECT id FROM students WHERE user_id=?", (self.su,)),
+                          "students qatori qoldi — FK buzilgan")
+        # 3) arxivda ham KO'RINMASIN
+        st, r2 = self.admin.get("/api/admin/users?status=archived")
+        self.assertNotIn(self.su, [u["id"] for u in r2["users"]],
+                         "arxivlanganlar ro'yxatida qoldi")
+        # 4) profil ham yo'q
+        st, _ = self.admin.get("/api/admin/users/%s" % self.su)
+        self.assertEqual(st, 404)
+
+    def test_MOD6_bulk_delete_does_not_touch_others(self):
+        """Boshqa foydalanuvchilarning ma'lumotlari OCHIRILMAYDI."""
+        other = self._mkuser("student", "Mod2", "Boshqa")["user"]["id"]
+        self.uids.append(other)
+        before = self.db.q1("SELECT * FROM students WHERE user_id=?", (other,))
+        st, r = self.admin.post("/api/admin/users/bulk-delete", {"ids": [self.su]})
+        self.assertEqual(st, 200, r)
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (other,)))
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (self.iu,)))
+        after = self.db.q1("SELECT * FROM students WHERE user_id=?", (other,))
+        self.assertEqual(after["group_name"], before["group_name"])
+        self.assertEqual(after["license_category"], before["license_category"])
 
     def test_MOD6_bulk_delete_self_protected(self):
         """Admin O'ZINI o'chira olMAYDI (tizimda admin qolishi uchun)."""
         me = self.admin.get("/api/auth/me")[1]["user"]["id"]
         st, r = self.admin.post("/api/admin/users/bulk-delete", {"ids": [me]})
         self.assertEqual(st, 400, r)
-        self.assertEqual(r["error"], "bulk.self_protected")
-        row = self.db.q1("SELECT deleted_at FROM users WHERE id=?", (me,))
-        self.assertIsNone(row["deleted_at"], "admin o'zini o'chirildi!")
+        self.assertEqual(r["error"], "user.cannot_delete_self")
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (me,)),
+                             "admin o'zini o'chirildi!")
 
     def test_MOD6_bulk_delete_mixed_with_self_rejected_entirely(self):
         """Aralash ro'yxatda admin bo'lsa — butun so'rov RAD ETILADI.
@@ -5148,12 +5231,334 @@ class TestAdminModulesBAND25(_MixinAdmin, Base):
         me = self.admin.get("/api/auth/me")[1]["user"]["id"]
         st, r = self.admin.post("/api/admin/users/bulk-delete", {"ids": [me, self.iu]})
         self.assertEqual(st, 400, r)
-        self.assertEqual(r["error"], "bulk.self_protected")
+        self.assertEqual(r["error"], "user.cannot_delete_self")
         # muhim: instructor HAM o'chirilmagan (atomik rad etish)
-        self.assertIsNone(self.db.q1("SELECT deleted_at FROM users WHERE id=?", (me,))["deleted_at"],
-                          "admin o'zini o'chirildi!")
-        self.assertIsNone(self.db.q1("SELECT deleted_at FROM users WHERE id=?", (self.iu,))["deleted_at"],
-                          "qisman o'chirish bo'ldi — atomik emas!")
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (me,)),
+                             "admin o'zini o'chirildi!")
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (self.iu,)),
+                             "qisman o'chirish bo'ldi — atomik emas!")
+
+    # ------------------------------------------- BUTUNLAY O'CHIRISH (DELETE)
+    def test_PURGE_single_user_removed_from_users_table(self):
+        """`DELETE /api/admin/users/{id}` — `users` qatori haqiqatan o'chadi."""
+        st, r = self.admin.delete("/api/admin/users/%s" % self.su)
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["deleted"], 1, r)
+        self.assertIsNone(self.db.q1("SELECT id FROM users WHERE id=?", (self.su,)))
+
+    def test_PURGE_not_visible_anywhere_after_refresh(self):
+        """O'chgandan keyin HECH QAYERDA ko'rinmaydi (arxivda ham)."""
+        self.admin.delete("/api/admin/users/%s" % self.su)
+        for q in ("", "&status=archived", "&status=active", "&status=blocked"):
+            st, r = self.admin.get("/api/admin/users?role=student" + q)
+            self.assertEqual(st, 200, r)
+            self.assertNotIn(self.su, [u["id"] for u in r["users"]],
+                             "ro'yxatda qoldi (?%s)" % q)
+
+    def test_PURGE_cascades_student_related_rows(self):
+        """Talabaga tegishli qatorlar ham o'chadi (FK buzilmaydi)."""
+        sid = self.db.q1("SELECT id FROM students WHERE user_id=?", (self.su,))["id"]
+        # qarshi tekshiruv uchun ma'lumot yaratamiz
+        iid = self.db.q1("SELECT id FROM instructors WHERE user_id=?", (self.iu,))["id"]
+        ls = _ins_lesson(self.db, iid, "2026-01-05")
+        self.db.ex("INSERT OR IGNORE INTO session_students "
+                   "(session_id,student_id,attendance_status,joined_at) VALUES (?,?,'present','2026-01-05')",
+                   (ls, sid))
+        self.db.ex("INSERT INTO attendance (session_id,student_id,status,marked_at) "
+                   "VALUES (?,?,'present','2026-01-05')", (ls, sid))
+        self.db.ex("INSERT INTO practice_requests (student_id,status,created_at) "
+                   "VALUES (?,'pending','2026-01-05')", (sid,))
+
+        st, r = self.admin.delete("/api/admin/users/%s" % self.su)
+        self.assertEqual(st, 200, r)
+        self.assertIsNone(self.db.q1("SELECT id FROM users WHERE id=?", (self.su,)))
+        self.assertIsNone(self.db.q1("SELECT id FROM students WHERE id=?", (sid,)))
+        self.assertIsNone(self.db.q1("SELECT id FROM session_students WHERE student_id=?", (sid,)))
+        self.assertIsNone(self.db.q1("SELECT id FROM attendance WHERE student_id=?", (sid,)))
+        self.assertIsNone(self.db.q1("SELECT id FROM practice_requests WHERE student_id=?", (sid,)))
+        # mashg'ulot va boshqa talaba O'CHIRILMAGAN
+        self.assertIsNotNone(self.db.q1("SELECT id FROM lesson_sessions WHERE id=?", (ls,)),
+                             "mashg'ulot o'chib ketdi — u talabaniki emas")
+
+    def test_PURGE_cascades_instructor_and_lessons(self):
+        """Instruktor o'chirilsa — uning mashg'ulotlari va ularga bog'liq
+        qatorlar ham o'chadi; `instructor_id` NOT NULL bo'lgani uchun
+        darslarni "osilib qoldirib bo'lmaydi"."""
+        iid = self.db.q1("SELECT id FROM instructors WHERE user_id=?", (self.iu,))["id"]
+        ls = _ins_lesson(self.db, iid, "2026-02-05")
+
+        st, r = self.admin.delete("/api/admin/users/%s" % self.iu)
+        self.assertEqual(st, 200, r)
+        self.assertIsNone(self.db.q1("SELECT id FROM users WHERE id=?", (self.iu,)))
+        self.assertIsNone(self.db.q1("SELECT id FROM instructors WHERE id=?", (iid,)))
+        self.assertIsNone(self.db.q1("SELECT id FROM lesson_sessions WHERE id=?", (ls,)),
+                          "instructor o'chirildi, lekin dars qoldi — FK NOT NULL buziladi")
+
+    def test_PURGE_deletes_user_scoped_tables(self):
+        """Sessiya, 2FA, token, xabar va shaxsiy sozlamalar o'chadi."""
+        uid = self.su
+        self.db.ex("INSERT INTO sessions_ring (user_id,token_hash,csrf_token,created_at,expires_at) "
+                   "VALUES (?,'t_purge_1','c','2026-01-01','2030-01-01')", (uid,))
+        self.db.ex("INSERT INTO twofa_codes (user_id,code_hash,created_at,expires_at) "
+                   "VALUES (?,'h1','2026-01-01','2030-01-01')", (uid,))
+        self.db.ex("INSERT INTO password_reset_tokens (user_id,token_hash,created_at,expires_at) "
+                   "VALUES (?,'t2','2026-01-01','2030-01-01')", (uid,))
+        self.db.ex("INSERT INTO user_settings (user_id,key,value,updated_at) "
+                   "VALUES (?,'k','v','2026-01-01')", (uid,))
+        self.db.ex("INSERT INTO notifications (user_id,title,created_at) "
+                   "VALUES (?,'n','2026-01-01')", (uid,))
+        self.db.ex("INSERT INTO messages (from_user_id,to_user_id,text,created_at) "
+                   "VALUES (?,?,'hi','2026-01-01')", (self.iu, uid))
+
+        st, r = self.admin.delete("/api/admin/users/%s" % uid)
+        self.assertEqual(st, 200, r)
+        plain = {"sessions_ring": ("user_id",), "twofa_codes": ("user_id",),
+                 "password_reset_tokens": ("user_id",), "user_settings": ("user_id",),
+                 "notifications": ("user_id",),
+                 "messages": ("from_user_id", "to_user_id")}
+        for t, cols in plain.items():
+            where = " OR ".join(c + "=?" for c in cols)
+            n = self.db.q1("SELECT COUNT(*) AS c FROM %s WHERE %s" % (t, where),
+                           tuple([uid] * len(cols)))["c"]
+            self.assertEqual(int(n), 0, "%s jadvalidan qoldi" % t)
+
+    def test_PURGE_keeps_audit_log_and_other_users(self):
+        """JURNAL va boshqa foydalanuvchilar saqlanadi."""
+        me = self.admin.get("/api/auth/me")[1]["user"]["id"]
+        n_before = int(self.db.q1("SELECT COUNT(*) AS c FROM audit_log")["c"])
+        st, r = self.admin.delete("/api/admin/users/%s" % self.su)
+        self.assertEqual(st, 200, r)
+        n_after = int(self.db.q1("SELECT COUNT(*) AS c FROM audit_log")["c"])
+        self.assertGreaterEqual(n_after, n_before + 1, "jurnalga yozuv qo'shilmadi")
+        # o'chirilgan foydalanuvchi nomi jurnalda saqlangan bo'lishi kerak
+        row = self.db.q1("SELECT description FROM audit_log ORDER BY id DESC LIMIT 1")
+        self.assertIn("user_purged", row["description"])
+        # boshqalar joyida
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (self.iu,)))
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (me,)))
+
+    def test_PURGE_self_protected(self):
+        me = self.admin.get("/api/auth/me")[1]["user"]["id"]
+        st, r = self.admin.delete("/api/admin/users/%s" % me)
+        self.assertEqual(st, 400, r)
+        self.assertEqual(r["error"], "user.cannot_delete_self")
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (me,)))
+
+    def test_PURGE_last_admin_protected(self):
+        """Oxirgi faol adminni o'chirishga ruxsat YO'Q.
+
+        `seed` bitta faol admin yaratadi ("admin"), shuning uchun uni
+        `self.admin` orqali o'chirishga urinib ko'ramiz. Agar test bazasida
+        boshqa faol admin bo'lsa — himoya o'sha uchun ishlaydi va biz
+        o'shandan birini tanlab o'chiramiz (shu bilan ham himoya tekshiriladi).
+        """
+        st, r = self.admin.get("/api/admin/users?role=admin&status=active")
+        self.assertEqual(st, 200, r)
+        ids = [u["id"] for u in r["users"]]
+        self.assertTrue(ids, "bitta faol admin bo'lishi kerak")
+        # qo'shimcha admin yaratib uni oldindan o'chiramiz (test tozalash)
+        extra = self._mkuser("admin", "PurgeAdm", "X")
+        self.admin.delete("/api/admin/users/%s" % extra["user"]["id"])
+        # endi ro'yxatdan oxirgi qolganini o'chirishga urinamiz
+        st2, r2 = self.admin.get("/api/admin/users?role=admin&status=active")
+        left = [u["id"] for u in r2["users"]]
+        if len(left) != 1:
+            return  # baza bir nechta faol admin bilan qurilgan — himoa o'rinida
+        st3, rr = self.admin.delete("/api/admin/users/%s" % left[0])
+        self.assertEqual(st3, 400, rr)
+        self.assertEqual(rr["error"], "user.cannot_delete_self")
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (left[0],)))
+
+    def test_PURGE_archive_is_separate_feature(self):
+        """ARXIVLASH alohida ishlaydi va ma'lumotni SAQLAYDI.
+
+        Talab #8: "Arxivlash" tugmasi bosilgandagina arxivga tushsin;
+        "O'chirish" esa arxivga o'tkazmasin.
+        """
+        st, r = self.admin.post("/api/admin/users/%s/status" % self.su, {"status": "archive"})
+        self.assertEqual(st, 200, r)
+        row = self.db.q1("SELECT deleted_at, status FROM users WHERE id=?", (self.su,))
+        self.assertEqual(row["status"], "archived")
+        self.assertIsNotNone(row["deleted_at"])
+        self.assertIsNotNone(self.db.q1("SELECT id FROM students WHERE user_id=?", (self.su,)),
+                             "arxivlash ma'lumotni o'chirdi — arxiv SAQLASHI kerak")
+        # arxivlanganlar ro'yxatida ko'rinadi
+        st, r2 = self.admin.get("/api/admin/users?status=archived")
+        self.assertIn(self.su, [u["id"] for u in r2["users"]])
+        # va arxivdan chiqarish mumkin
+        st, r3 = self.admin.post("/api/admin/users/%s/status" % self.su, {"status": "unarchive"})
+        self.assertEqual(st, 200, r3)
+        self.assertIsNone(self.db.q1("SELECT deleted_at FROM users WHERE id=?", (self.su,))["deleted_at"])
+
+    # ------------------------- UI/MATN KONTROLLARI (doimiy regressiya qalqoni)
+    def _i18n_val(self, key, lang):
+        """i18n.js dan kalitni {n} placeholder'ini ham hisobga olib o'qiydi."""
+        s = (ROOT / "web" / "js" / "i18n.js").read_text(encoding="utf-8", errors="ignore")
+        m = re.search(r'"' + re.escape(key) + r'"\s*:\s*\{', s)
+        self.assertIsNotNone(m, "i18n kaliti yo'q: " + key)
+        i = m.end() - 1
+        depth, in_str, quote, esc = 0, False, "", False
+        while i < len(s):
+            ch = s[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == quote:
+                    in_str = False
+            else:
+                if ch in "\"'":
+                    in_str, quote = True, ch
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+            i += 1
+        body = s[m.end():i]
+        m2 = re.search(r'(?:^|[,{\s])' + lang + r'\s*:\s*"((?:[^"\\]|\\.)*)"', body)
+        self.assertIsNotNone(m2, "%s tili yo'q: %s" % (lang, key))
+        return m2.group(1)
+
+    def test_PURGE_confirm_dialog_text_is_exact(self):
+        """Tasdiqlash oynasi matni va tugmalari talab qilingandek.
+
+        Talab: "Bu foydalanuvchi butunlay o'chiriladi. O'chirilgandan keyin
+        uni tiklab bo'lmaydi. Davom etasizmi?" + [Bekor qilish][Butunlay o'chirish]
+        """
+        for lang in ("uz", "ru", "en"):
+            with self.subTest(lang=lang):
+                self.assertTrue(self._i18n_val("users.purge_confirm", lang).strip())
+                self.assertTrue(self._i18n_val("users.purge_yes", lang).strip())
+                self.assertTrue(self._i18n_val("users.purge_no", lang).strip())
+        # UZ aniq matni (talab bo'yicha)
+        self.assertEqual(
+            self._i18n_val("users.purge_confirm", "uz"),
+            "Bu foydalanuvchi butunlay o'chiriladi. O'chirilgandan keyin uni tiklab "
+            "bo'lmaydi. Davom etasizmi?")
+        self.assertEqual(self._i18n_val("users.purge_yes", "uz"), "Butunlay o'chirish")
+        self.assertEqual(self._i18n_val("users.purge_no", "uz"), "Bekor qilish")
+        self.assertEqual(self._i18n_val("users.purged", "uz"),
+                         "Foydalanuvchi butunlay o'chirildi.")
+
+    def test_PURGE_new_i18n_keys_exist_in_all_three_languages(self):
+        """Yangi kalitlar 3 tilda ham BO'LISHI SHART (paritet)."""
+        for key in ("users.purge", "users.purge_title", "users.purge_confirm",
+                    "users.purge_yes", "users.purge_no", "users.purged",
+                    "users.purge_hint", "bulk.archive", "bulk.archived",
+                    "err.user.cannot_delete_self", "audit.act.user_purged"):
+            for lang in ("uz", "ru", "en"):
+                with self.subTest(key=key, lang=lang):
+                    self.assertTrue(self._i18n_val(key, lang).strip())
+
+    def test_PURGE_ui_delete_calls_real_DELETE_not_archive(self):
+        """Frontend: "Arxivlash" -> /status (arxiv), "O'chirish" -> DELETE.
+
+        Bu test butun arxitekturani tekshiradi: agar kodingda arxivlash
+        `API.del` bilan aralashtirilsa yoki o'chirish /status'ga ulangansа,
+        test darhol qizil bo'ladi.
+        """
+        src = (ROOT / "web" / "js" / "views-admin.js").read_text(encoding="utf-8", errors="ignore")
+        # 1) `purgeUser` -> API.del
+        i = src.find("async function purgeUser")
+        j = src.find("function canPurge", i)
+        self.assertGreater(i, 0, "purgeUser() topilmadi")
+        chunk = src[i:j]
+        self.assertIn("API.del(`admin/users/${u.id}`)", chunk,
+                      "o'chirish HAQIQIY DELETE chaqirishi kerak")
+        self.assertNotIn("/status", chunk, "o'chirish arxivlash bilan aralashgan")
+        # 2) arxivlash -> /status (DELETE emas)
+        i = src.find("async function setUserStatus")
+        j = src.find("function canPurge", i)
+        self.assertGreater(i, 0, "setUserStatus() topilmadi")
+        self.assertIn("/status", src[i:j], "arxivlash /status orqali bo'lishi kerak")
+        # 3) tasdiqlash `danger` bilan (xavfli ekani ko'rinadi)
+        i = src.find("function userPurgeAction")
+        j = src.find("function openUserProfile", i)
+        self.assertGreater(i, 0, "userPurgeAction() topilmadi")
+        chunk = src[i:j if j > i else i + 1200]
+        self.assertIn("confirmDialog", chunk)
+        self.assertIn("danger: true", chunk, "xavfli amal tasdiqlanishi kerak")
+        self.assertIn("users.purge_yes", chunk)
+        self.assertIn("users.purge_no", chunk)
+        # 4) barcha 4 ta jadval + profil oynasida tugma bor
+        self.assertGreaterEqual(src.count("userPurgeAction(u, load)"), 4,
+                                "3 rol jadvali + 'Baza' qatorida tugma kerak")
+        self.assertIn("userPurgeAction(u, () => {", src, "profil oynasida ham kerak")
+        # 5) o'zini o'chirish tugmasi chiqmaydi
+        i = src.find("function canPurge")
+        j = src.find("function userPurgeAction", i)
+        self.assertIn("App.me", src[i:j], "o'zini o'chirish himoyasi frontend'da yo'q")
+
+    def test_PURGE_backend_has_no_soft_delete_left(self):
+        """O'chirish yo'llarida `UPDATE ... deleted_at` QOLMASIN.
+
+        (arxivlash alohida endpoint orqali ishlaydi — `POST .../status`.)
+        Haqiqiy `DELETE FROM users` esa `_purge_users` ichida bajariladi.
+        """
+        src = (ROOT / "app" / "api.py").read_text(encoding="utf-8", errors="ignore")
+
+        def chunk(fn, nxt):
+            i = src.find(fn)
+            self.assertGreater(i, 0, fn + " topilmadi")
+            j = src.find(nxt, i + 10)
+            return src[i:j if j > i else i + n]
+
+        del_fn = chunk("def admin_user_delete(self, uid):", "\n    # ")
+        self.assertNotIn("SET deleted_at", del_fn, "soft-delete qolib ketgan!")
+        self.assertNotIn("status='archived'", del_fn,
+                         "o'chirish arxivga o'tkazmasin!")
+        self.assertIn("_purge_users", del_fn)
+
+        purge = chunk("def _purge_users(self, uids):", "def _purge_cleanup_images")
+        self.assertIn("DELETE FROM users WHERE id=?", purge,
+                      "haqiqiy `DELETE FROM users` bajarilishi kerak")
+        self.assertNotIn("SET deleted_at", purge)
+        # FK butunligi: kamida o'z profil jadvallari va foydalanuvchi qatorlari
+        for tbl in ("session_students", "attendance", "practice_requests",
+                    "students", "lesson_sessions", "instructors",
+                    "notifications", "messages"):
+            with self.subTest(tbl=tbl):
+                self.assertIn("FROM %s" % tbl, purge,
+                              "bog'liq jadval tozalanmagan: " + tbl)
+        # foydalanuvchiga tegishli qatorlar — umumiy ro'yxatda tekshiriladi
+        i = purge.find("for table in (")
+        self.assertGreater(i, 0, "foydalanuvchi jadvallari tozalanmagan")
+        loop = purge[i:purge.find(")", i) + 1]
+        for tbl in ("sessions_ring", "password_reset_tokens", "twofa_codes",
+                    "hidden_requests", "hidden_history", "user_settings",
+                    "notification_settings"):
+            with self.subTest(tbl=tbl):
+                self.assertIn('"%s"' % tbl, loop, "jadval tozalanmagan: " + tbl)
+        # jurnal esa SAQLANADI (o'chirilmaydi)
+        self.assertNotIn("DELETE FROM audit_log", purge,
+                         "audit jurnalini o'chirish qat'iyan TAQIQLANGAN")
+
+    def test_PURGE_bulk_delete_is_hard_delete(self):
+        """Ommaviy o'chirish ham arxiv EMAS — haqiqiy DELETE."""
+        src = (ROOT / "app" / "api.py").read_text(encoding="utf-8", errors="ignore")
+        i = src.find("def admin_users_bulk_delete(self, body):")
+        j = src.find("def admin_users_update", i)
+        chunk = src[i:j]
+        self.assertGreater(i, 0)
+        self.assertNotIn("SET deleted_at", chunk, "bulk-delete soft-ga qaytgan!")
+        self.assertIn("_purge_users", chunk)
+
+    def test_PURGE_requires_admin(self):
+        """Talaba/instruktor foydalanuvchini o'chira OLMAYDI."""
+        st, r = self.admin.delete("/api/admin/users/%s" % self.su)
+        self.assertEqual(st, 200, r)
+        r2 = self._mkuser("student", "PurgeStud", "Y")
+        pwd = r2["credentials"]["password"]
+        c = Client()
+        s2, _ = c.post("/api/auth/login",
+                       {"login": r2["user"]["login"], "password": pwd, "role": "student"})
+        self.assertEqual(s2, 200)
+        s3, rr = c.delete("/api/admin/users/%s" % self.iu)
+        self.assertIn(s3, (401, 403), rr)
+        self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (self.iu,)))
 
     # ------------------------------------------------- RBAC / xavfsizlik
     def test_MOD6_bulk_requires_admin(self):
@@ -6546,16 +6951,31 @@ class TestModul2UserManagement(_MixinAdmin, Base):
         finally:
             self._cleanup_user(uid)
 
-    def test_M3_11_admin_delete_still_forbidden(self):
-        r = self._mk_admin("Ochirilmaydi")
+    def test_M3_11_admin_can_be_purged_but_last_one_protected(self):
+        """Admin ham BUTUNLAY o'chirilishi mumkin — lekin O'ZINI va
+        OXIRGI faol adminni o'chirishga ruxsat yo'q (tizim qolishi uchun).
+
+        Eski qoida ("adminni o'chirish butunlay mumkin emas") endi
+        KENGAYTIRILDI: yangi talab bo'yicha "O'chirish" = haqiqiy DELETE,
+        u arxivlashdan qat'i ajratilgan bo'lishi SHART.
+        """
+        r = self._mk_admin("Ochiriladi")
         uid = r["user"]["id"]
-        try:
+        # o'zini o'chirishga urinish
+        me = self.admin.get("/api/auth/me")[1]["user"]["id"]
+        if uid != me:
             st, res = self.admin.delete(f"/api/admin/users/{uid}")
-            self.assertEqual(st, 400, res)
-            self.assertEqual(res["error"], "user.cannot_modify_admin")
-            self.assertIsNotNone(self.db.q1("SELECT id FROM users WHERE id=?", (uid,)))
-        finally:
-            self._cleanup_user(uid)
+            self.assertEqual(st, 200, res)
+            # haqiqiy DELETE: arxiv EMAS
+            self.assertIsNone(self.db.q1("SELECT id FROM users WHERE id=?", (uid,)),
+                              "admin o'chirmasligi kerak edi (arxiv emas!)")
+            st2, r2 = self.admin.get("/api/admin/users?status=archived")
+            self.assertNotIn(uid, [u["id"] for u in r2["users"]])
+            return
+        # `me` bo'lsa — o'zini o'chira olmaydi
+        st, res = self.admin.delete(f"/api/admin/users/{uid}")
+        self.assertEqual(st, 400, res)
+        self.assertEqual(res["error"], "user.cannot_delete_self")
 
     def test_M3_12_admin_profile_visible(self):
         r = self._mk_admin("Ko", "Rsat", )

@@ -218,6 +218,9 @@ window.AdminViews = (function () {
               /* MODUL 2/3: bloklash/blokdan chiqarish + arxivlash/arxivdan
                  chiqarish — talaba, instruktor va admin uchun BIR XIL. */
               ...userStatusActions(u, load),
+              /* BUTUNLAY O'CHIRISH = haqiqiy DELETE (arxivlash emas!) */
+
+              userPurgeAction(u, load),
             ])]),
           ]);
         })),
@@ -489,7 +492,29 @@ window.AdminViews = (function () {
           }
           bar.classList.remove("hidden");
           bar.append(el("strong", { class: "bulk-bar-n", text: t("bulk.count", { n: n }) }));
-          /* --- ommaviy o'chirish (tasdiqlash bilan) --- */
+          /* --- OMMAVIY ARXIVLASH (ma'lumotlar saqlanadi) ---
+             Bu "Arxivlash" tugmasi: `status='archived'` qilinadi, foydalanuvchi
+             "Arxivlanganlar"da ko'rinadi va tiklanishi mumkin. */
+          bar.append(el("button", {
+            class: "btn btn-light btn-sm", icon: "archive", text: "" + t("bulk.archive"),
+            onclick: async () => {
+              /* archive = `status='archived'`; bulk-update faqat active/blocked
+                 qo'llaydi, shuning uchun har biriga alohida so'rov yuboriladi. */
+              let ok = 0;
+              for (const id of st.ids) {
+                try {
+                  await API.post("admin/users/" + id + "/status", { status: "archive" });
+                  ok++;
+                } catch (e) { /* bittasi xato bo'lsa, qolganlari davom etadi */ }
+              }
+              state.clear();
+              toast(t("bulk.archived", { n: ok }));
+              onReload();
+            },
+          }));
+          /* --- OMMAVIY BUTUNLAY O'CHIRISH = haqiqiy DELETE ---
+             Arxivlash EMAS: backend `users` qatorini DELETE qiladi, shuning
+             uchun foydalanuvchi hech qayerda qolmaydi va tiklanmaydi. */
           bar.append(el("button", {
             class: "btn btn-danger btn-sm", icon: "trash", text: "" + t("bulk.delete"),
             onclick: () => confirmDialog(t("bulk.confirm_delete", { n: n }), async () => {
@@ -499,7 +524,8 @@ window.AdminViews = (function () {
                 toast(t("bulk.deleted", { n: (r && r.deleted != null) ? r.deleted : n }));
                 onReload();
               } catch (e) { errToast(e); }
-            }, { danger: true }),
+            }, { danger: true, yesText: "" + t("users.purge_yes"), noText: "" + t("users.purge_no"),
+                  title: "" + t("users.purge_title") }),
           }));
           /* --- ommaviy tahrirlash (umumiy maydonlar) --- */
           bar.append(el("button", {
@@ -794,7 +820,7 @@ window.AdminViews = (function () {
         el("div", { class: "grid-3 mt" }, [
           el("div", {}, [el("div", { class: "muted sm", text: t("week.total_lessons") }), el("div", { class: "cell-strong", text: String(pr.target) })]),
           el("div", {}, [el("div", { class: "muted sm", text: t("week.done_lessons") }), el("div", { class: "cell-strong", text: String(pr.done) })]),
-          el("div", {}, [el("div", { class: "muted sm", text: t("week.remaining_lessons") }), el("div", { class: "cell-strong", text: String(pr.remaining) })]),
+          el("div", {}, [el("div", { class: "muted sm", text: t("progress.remaining") }), el("div", { class: "cell-strong", text: String(pr.remaining) })]),
         ]),
       ]));
     }
@@ -826,6 +852,16 @@ window.AdminViews = (function () {
       m.close();
       if (typeof onDone === "function") onDone();
     })));
+    const purgeBtn = userPurgeAction(u, () => {
+      m.close();
+      if (typeof onDone === "function") onDone();
+    });
+    if (purgeBtn) {
+      acts.append(el("div", { class: "row wrap gap-sm mt" }, [
+        purgeBtn,
+        el("span", { class: "muted sm", text: "" + t("users.purge_hint") }),
+      ]));
+    }
     body.append(acts);
     /* "Jami mashg'ulotlar sonini o'zgartirish" — barcha talabalar uchun
        (tanlov modal ichida ham bor). */
@@ -869,6 +905,47 @@ window.AdminViews = (function () {
       if (typeof onDone === "function") onDone();
       return true;
     } catch (e) { errToast(e); return false; }
+  }
+
+  /* ==================================================================
+     BUTUNLAY O'CHIRISH = haqiqiy DELETE (`DELETE /api/admin/users/{id}`)
+
+     "Arxivlash" (users.archive) bilan QAT'IY ajratilgan:
+       * Arxivlash -> status='archived' + deleted_at -> fayl/user qo'yib
+         boradi, "Arxivlanganlar"da ko'rinadi, tiklanadi.
+       * O'chirish -> backend `users` qatorini `DELETE` qiladi va bog'liq
+         ma'lumotlarni FK butunligi buzilmaydigan tartibda o'chiradi.
+         Foydalanuvchi HECH QAYERDA qolmaydi va tiklanmaydi.
+
+     UI yashirish emas — amal haqiqiy DELETE. Ammo "o'zini o'chira olmaydi"
+     qoidasi frontend'da ham ko'rsatiladi (chiroyli xato o'rniga tugma
+     ko'rinmasligi).
+     ================================================================== */
+  async function purgeUser(u, onDone) {
+    try {
+      await API.del(`admin/users/${u.id}`);
+      toast(t("users.purged"));
+      if (typeof onDone === "function") onDone();
+      return true;
+    } catch (e) { errToast(e); return false; }
+  }
+
+  function canPurge(u) {
+    /* o'zini o'chira olmaydi — backend ham rad etadi, tugmani ko'rsatmaymiz */
+    const me = (App.me && App.me.user) || null;
+    return !(me && Number(me.id) === Number(u.id));
+  }
+
+  function userPurgeAction(u, onDone) {
+    if (!canPurge(u)) return null;
+    return el("button", {
+      class: "btn btn-danger btn-sm", icon: "trash",
+      title: "" + t("users.purge"), text: "" + t("users.purge"),
+      onclick: () => confirmDialog("" + t("users.purge_confirm"),
+        () => purgeUser(u, onDone),
+        { danger: true, yesText: "" + t("users.purge_yes"), noText: "" + t("users.purge_no"),
+          title: "" + t("users.purge_title") }),
+    });
   }
 
   function userStatusActions(u, onDone) {
@@ -1012,7 +1089,7 @@ window.AdminViews = (function () {
           el("td", {}, [el("div", { class: "prog-mini" }, [
             el("div", { class: "prog-mini-bar" }, [el("i", { style: `width:${pr.pct}%` })]),
             /* BAND 22: "bajarilgan / jami · qolgan" */
-            el("span", { class: "muted sm", text: `${pr.done}/${pr.target} \u00b7 ${t("week.remaining_lessons")} ${pr.remaining}` }),
+            el("span", { class: "muted sm", text: `${pr.done}/${pr.target} \u00b7 ${t("progress.remaining")} ${pr.remaining}` }),
           ])]),
           el("td", { text: u.phone || "\u2014" }),
           el("td", {}, [userStatusBadge(u)]),
@@ -1029,6 +1106,9 @@ window.AdminViews = (function () {
               onclick: () => Shared.openUserCredentialsManager(u, load) }),
             /* MODUL 2: bloklash/blokdan chiqarish + arxivlash/arxivdan chiqarish */
             ...userStatusActions(u, load),
+            /* BUTUNLAY O'CHIRISH = haqiqiy DELETE (arxivlash emas!) */
+
+            userPurgeAction(u, load),
           ])]),
         ]);
       }))]);
@@ -1106,6 +1186,9 @@ window.AdminViews = (function () {
               onclick: () => Shared.openUserCredentialsManager(u, load) }),
             /* MODUL 2: instruktor ham xuddi shunday boshqariladi. */
             ...userStatusActions(u, load),
+            /* BUTUNLAY O'CHIRISH = haqiqiy DELETE (arxivlash emas!) */
+
+            userPurgeAction(u, load),
           ])]),
         ]);
       }))]);
@@ -1184,6 +1267,9 @@ window.AdminViews = (function () {
           /* MODUL 3: admin ham xuddi shunday bloklanadi/arxivlanadi
              (o'zini va oxirgi faol adminni — backend qat'iy tekshiradi). */
           ...userStatusActions(u, load),
+          /* BUTUNLAY O'CHIRISH = haqiqiy DELETE (arxivlash emas!) */
+
+          userPurgeAction(u, load),
         ])]),
       ])))]);
       host.append(tbl);

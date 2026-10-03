@@ -282,5 +282,110 @@ class TestEncodingEscapedSymbols(unittest.TestCase):
             self.assertIn(esc, src, '%s sarlavha ikonkasi topilmadi' % name)
 
 
+# =====================================================================
+#  i18n MATN KALITLARI — "ko'rinib qolgan placeholder" ga qarshi
+# =====================================================================
+# Bug: `t("week.remaining_lessons")` `{n}` PARAMETRSIZ chaqirilganda
+# ekranda "Qolgan: {n} 30" ko'rinardi (o'rniga "Qolgan 30" bo'lishi
+# kerak edi). Kelajakda shu xato TIKILMASLIGI uchun:
+#   1. har bir kalitda faqat 3 til ham bor (paritet)
+#   2. placeholder'li kalit `t(...)` da paramsiz CHAQIRILMAGAN
+#      (emoji-placeholder va qo'lda `.replace("{x}", ...)` hisobga olinadi)
+
+
+def _i18n_blocks():
+    """i18n.js dan (kalit -> tana) juftliklarini qaytaradi (qobiq-aware)."""
+    import re as _re
+    src = (ROOT / 'web' / 'js' / 'i18n.js').read_text(encoding='utf-8')
+    out = []
+    i = 0
+    pat = _re.compile(r'"([\w.]+)"\s*:\s*\{')
+    while True:
+        m = pat.search(src, i)
+        if not m:
+            return out
+        j = m.end() - 1
+        depth, in_str, quote, esc = 0, False, '', False
+        while j < len(src):
+            ch = src[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == '\\':
+                    esc = True
+                elif ch == quote:
+                    in_str = False
+            else:
+                if ch in '"\'':
+                    in_str, quote = True, ch
+                elif ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        break
+            j += 1
+        out.append((m.group(1), src[m.end():j]))
+        i = j + 1
+
+
+class TestI18nText(unittest.TestCase):
+    """Matn kalitlarining to'g'riligi (3 til + placeholder)."""
+
+    LANGS = ('uz', 'ru', 'en')
+
+    def test_13_all_keys_have_three_languages(self):
+        """PARITET: har bir kalitda uz + ru + en bo'lishi SHART."""
+        import re as _re
+        bad = []
+        for key, body in _i18n_blocks():
+            for lang in self.LANGS:
+                if not _re.search(r'(?:^|[,{\s])' + lang + r'\s*:\s*"', body):
+                    bad.append('%s -> %s yo\'q' % (key, lang))
+        self.assertEqual(bad, [], 'i18n paritet buzilgan:\n  ' + '\n  '.join(bad))
+
+    def test_14_no_placeholder_left_in_ui(self):
+        """Placeholder'li kalit `paramsiz` chaqirilmasin.
+
+        Aks holda ekranda "Qolgan: {n} 30" kabi matn chiqadi.
+        Emoji-placeholder (`{1f4e8}`) va qo'lda `.replace("{s}", ...)`
+        bilan almashtirilgan holatlar hisobga olinadi.
+        """
+        import re as _re
+        emoji = _re.compile(r'^(1f[0-9a-f]{3}|2[0-9a-f]{4}|23[0-9a-f]{2})$')
+        placeholders = {}
+        for key, body in _i18n_blocks():
+            ph = sorted({p for p in _re.findall(r'\{(\w+)\}', body)
+                         if not emoji.match(p)})
+            if ph:
+                placeholders[key] = ph
+        self.assertTrue(placeholders, 'placeholder topilmadi — skaner buzilgan')
+
+        bad = []
+        for js in sorted((ROOT / 'web' / 'js').glob('*.js')):
+            if js.name == 'i18n.js':
+                continue
+            text = js.read_text(encoding='utf-8')
+            for ln, line in enumerate(text.split('\n'), 1):
+                for m in _re.finditer(r'\bt\(\s*"([\w.]+)"\s*([,)])', line):
+                    key, tail = m.group(1), m.group(2)
+                    if key not in placeholders:
+                        continue
+                    seg = line[m.end(1):]
+                    # qo'lda `.replace("{x}", ...)` bilan almashtirilgan — OK
+                    if all(('{%s}' % p) in seg for p in placeholders[key]):
+                        continue
+                    if tail == ')':
+                        bad.append('%s:%d t("%s") -> %s'
+                                   % (js.name, ln, key, placeholders[key]))
+                    else:
+                        for p in placeholders[key]:
+                            if not _re.search(r'\b' + p + r'\s*:', seg):
+                                bad.append('%s:%d t("%s") -> {%s} berilmagan'
+                                           % (js.name, ln, key, p))
+        self.assertEqual(bad, [], 'ekranda ko\'rinib qoladigan placeholder:\n  '
+                                   + '\n  '.join(bad))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

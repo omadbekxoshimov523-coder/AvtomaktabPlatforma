@@ -1599,26 +1599,30 @@ class Api:
         return OK, {"ok": True, "updated": updated}
 
     def admin_users_bulk_delete(self, body):
-        """`POST /api/admin/users/bulk-delete` — MODUL 6.
+        """`POST /api/admin/users/bulk-delete` — haqiqiy DELETE (arxiv EMAS).
 
-        Tanlangan foydalanuvchilarni O'CHIRADI (soft delete `deleted_at`).
-        HIMOYA: o'zini o'chirishga BO'LMAYDI (`self_protected`).
+        "Arxivlash"dan qat'i ajratilgan: bu amal foydalanuvchini
+        `status='archived'` qilmaydi, balki `users` jadvalidan BUTUNLAY
+        o'chiradi (barcha bog'liq ma'lumotlar bilan — `_purge_users`).
+
+        HIMOYALAR:
+          * o'zini o'chirishga BO'LMAYDI;
+          * oxirgi faol adminni o'chirishga BO'LMAYDI.
         """
         self._require("admin")
         ids, st, e = self._bulk_ids(body)
         if st != OK:
             return st, e
-        # O'ZINI HIMOYA QILISH: admin o'zini o'chira olmaydi.
-        if self.user["id"] in ids:
-            return BAD, err("bulk.self_protected")
-        ph = ",".join("?" * len(ids))
-        n = self.db.upd(
-            "UPDATE users SET deleted_at=?, status='archived', updated_at=? "
-            "WHERE deleted_at IS NULL AND id IN (" + ph + ") AND id!=?",
-            (now(), now(), *ids, self.user["id"]))
-        audit(self.db, self.user["id"], "bulk deleted", "users", None,
-              {"count": n, "ids": ids[:50]})
-        return OK, {"ok": True, "deleted": n}
+        guard_status, guard_err = self._purge_guard(ids)
+        if guard_status != OK:
+            return guard_status, guard_err
+        images, deleted, report = self._purge_users(ids)
+        self._purge_cleanup_images(images)
+        audit(self.db, self.user["id"], action_type="user_purged", target_type="users",
+              target_id=None,
+              description="bulk purged: %s (%s)" % (deleted, json.dumps(report, ensure_ascii=False)),
+              details={"count": deleted, "ids": ids[:50], "rows": report})
+        return OK, {"ok": True, "deleted": deleted, "rows": report}
 
     def admin_users_update(self, body, uid):
         self._require("admin")
@@ -2145,18 +2149,196 @@ class Api:
         out["progress"] = progress
         return OK, {"ok": True, "user": out}
 
+    # ==================================================================
+    #  BUTUNLAY O'CHIRISH (hard DELETE) — "Arxivlash"dan QAT'IY ajratilgan
+    # ==================================================================
+    #   Arxivlash -> UPDATE users SET status='archived', deleted_at=now()
+    #                (ma'lumotlar saqlanadi; "Arxivlanganlar"da ko'rinadi)
+    #   O'chirish -> haqiqiy DELETE FROM users WHERE id=?
+    #                (arxivga O'TKAZILMAYDI, hech qanday ro'yxatda qolmaydi)
+    #
+    #  BOG'LANISH XARITASI (Db.connect() har ulanishda `PRAGMA foreign_keys = ON`):
+    #    users --< students.user_id                       ON DELETE CASCADE
+    #    users --< instructors.user_id                   ON DELETE CASCADE
+    #    users --< user_settings.user_id                 ON DELETE CASCADE
+    #    users --< notification_settings.user_id         ON DELETE CASCADE
+    #    users --< notifications.user_id                 CASCADE YO'Q
+    #    users --< notifications.sender_id               CASCADE YO'Q
+    #    users --< messages.from_user_id / .to_user_id   CASCADE YO'Q
+    #    users --< sessions_ring.user_id                 CASCADE YO'Q
+    #    users --< password_reset_tokens.user_id         CASCADE YO'Q
+    #    users --< twofa_codes.user_id                   CASCADE YO'Q
+    #    users --< hidden_requests.user_id               CASCADE YO'Q
+    #    users --< hidden_history.user_id                CASCADE YO'Q
+    #    students --< session_students.student_id        CASCADE YO'Q
+    #    students --< attendance.student_id              CASCADE YO'Q
+    #    students --< practice_requests.student_id       CASCADE YO'Q
+    #    instructors --< lesson_sessions.instructor_id   CASCADE YO'Q
+    #    lesson_sessions --< session_students.session_id ON DELETE CASCADE
+    #    lesson_sessions --< notifications.related_lesson_id ON DELETE CASCADE
+    #    lesson_sessions --< attendance.session_id       CASCADE YO'Q
+    #
+    #  O'CHIRILMAYDIGANLAR (ataylab saqlanadi):
+    #    * `audit_log` / `audit_logs` — jurnal hisobni o'chirgan bo'lsa,
+    #      "kim nimani o'chirgani" izi butunlay yo'qolardi. Shuuning uchun
+    #      o'chirish amali jurnalga TIZIMLI (nomi, logini, o'chirilgan
+    #      qatorlar soni bilan) yoziladi va o'sha yozuv saqlanib qoladi.
+    #    * `used_credentials` — login/parol DИGEST'ini saqlaydi: o'chirilgan
+    #      hisobning eski login va paroli qayta ishlatilmasligi uchun.
+    def _purge_guard(self, uids):
+        """`DELETE` dan oldin himoya tekshiruvlari -> (status, err)."""
+        if self.user["id"] in [int(x) for x in uids]:
+            return BAD, err("user.cannot_delete_self")
+        # Oxirgi faol adminni o'chirishga ruxsat yo'q — aks holda hech kim
+        # panelga kira olmay qoladi. (Arxivlash/bloklash bilan bir qoida.)
+        left = self.db.q1(
+            "SELECT COUNT(*) AS c FROM users WHERE role='admin' AND status='active'"
+            " AND deleted_at IS NULL AND id NOT IN (%s)"
+            % ",".join("?" * len(uids)), tuple(int(x) for x in uids))
+        if int(left["c"] or 0) == 0:
+            return BAD, err("user.last_admin_protected")
+        return OK, None
+
+    def _purge_users(self, uids):
+        """Foydalanuvchilarni BAZADAN butunlay o'chiradi (bir tranzaksiyada).
+
+        Qaytaradi: (avatarlar_ro'yxati, o'chirilgan_soni, {jadval: qator_soni})
+        Xatolik bo'lsa tranzaksiya butunlay qaytariladi (rollback) — ya'ni
+        yarim o'chirilgan holat qolmaydi.
+        """
+        uids = [int(x) for x in uids]
+        images = []
+        counts = {}
+
+        def add(table, n):
+            if n and n > 0:
+                counts[table] = counts.get(table, 0) + n
+
+        def work(conn):
+            total = 0
+            for uid in uids:
+                row = conn.execute("SELECT id, login, role FROM users WHERE id=?",
+                                   (uid,)).fetchone()
+                if row is None:
+                    continue
+                img = conn.execute("SELECT profile_image FROM users WHERE id=?",
+                                   (uid,)).fetchone()[0]
+                if img:
+                    images.append(img)
+
+                # --- 1) TALABA: profil yozuvi va uning ostidagi ma'lumotlar ---
+                st_row = conn.execute("SELECT id FROM students WHERE user_id=?",
+                                      (uid,)).fetchone()
+                if st_row:
+                    sid = st_row[0]
+                    add("session_students", conn.execute(
+                        "DELETE FROM session_students WHERE student_id=?",
+                        (sid,)).rowcount)
+                    add("attendance", conn.execute(
+                        "DELETE FROM attendance WHERE student_id=?",
+                        (sid,)).rowcount)
+                    add("practice_requests", conn.execute(
+                        "DELETE FROM practice_requests WHERE student_id=?",
+                        (sid,)).rowcount)
+                    add("students", conn.execute(
+                        "DELETE FROM students WHERE id=?", (sid,)).rowcount)
+
+                # --- 2) INSTRUKTOR: uning mashg'ulotlari va ularga bog'liq narsa ---
+                in_row = conn.execute("SELECT id FROM instructors WHERE user_id=?",
+                                      (uid,)).fetchone()
+                if in_row:
+                    iid = in_row[0]
+                    sids = [r[0] for r in conn.execute(
+                        "SELECT id FROM lesson_sessions WHERE instructor_id=?",
+                        (iid,)).fetchall()]
+                    if sids:
+                        ph = ",".join("?" * len(sids))
+                        add("attendance", conn.execute(
+                            "DELETE FROM attendance WHERE session_id IN (%s)" % ph,
+                            sids).rowcount)
+                        add("session_students", conn.execute(
+                            "DELETE FROM session_students WHERE session_id IN (%s)" % ph,
+                            sids).rowcount)
+                        # so'rov esa STUDENTning — o'zi saqlanadi, faqat
+                        # endi mavjud bo'lmagan darsga bog'lanmasin.
+                        conn.execute(
+                            "UPDATE practice_requests SET session_id=NULL "
+                            "WHERE session_id IN (%s)" % ph, sids)
+                        add("messages", conn.execute(
+                            "DELETE FROM messages WHERE session_id IN (%s)" % ph,
+                            sids).rowcount)
+                        add("notifications", conn.execute(
+                            "DELETE FROM notifications WHERE related_lesson_id IN (%s)" % ph,
+                            sids).rowcount)
+                        add("lesson_sessions", conn.execute(
+                            "DELETE FROM lesson_sessions WHERE instructor_id=?",
+                            (iid,)).rowcount)
+                    add("instructors", conn.execute(
+                        "DELETE FROM instructors WHERE id=?", (iid,)).rowcount)
+
+                # --- 3) Foydalanuvchining O'ZIGA bog'liq qatorlar ---
+                for table in ("sessions_ring", "password_reset_tokens", "twofa_codes",
+                              "hidden_requests", "hidden_history", "user_settings",
+                              "notification_settings"):
+                    add(table, conn.execute(
+                        "DELETE FROM %s WHERE user_id=?" % table, (uid,)).rowcount)
+                # Boshqalar uchun yuborilgan bildirishnomalar SAQLANADI —
+                # faqat yuboruvchi havolasi bo'sh qilinadi (FK uchun).
+                add("notifications_sender", conn.execute(
+                    "UPDATE notifications SET sender_id=NULL WHERE sender_id=?",
+                    (uid,)).rowcount)
+                add("notifications", conn.execute(
+                    "DELETE FROM notifications WHERE user_id=?", (uid,)).rowcount)
+                add("messages", conn.execute(
+                    "DELETE FROM messages WHERE from_user_id=? OR to_user_id=?",
+                    (uid, uid)).rowcount)
+
+                # --- 4) NIHOYAT: `users` qatorining haqiqiy DELETE ---
+                add("users", conn.execute(
+                    "DELETE FROM users WHERE id=?", (uid,)).rowcount)
+                total += 1
+            return total
+
+        total = self.db.transaction(work)
+        # O'chirilganini tekshirish (FK buzilmaganini ham bildiradi).
+        for uid in uids:
+            if self.db.q1("SELECT id FROM users WHERE id=?", (uid,)):
+                raise RuntimeError("purge_failed:%s" % uid)
+        return images, total, counts
+
+    def _purge_cleanup_images(self, images):
+        """O'chirilgan foydalanuvchilarning avatarlari (ixtiyoriy, xatosiz)."""
+        for path in images or []:
+            try:
+                if path.startswith("/uploads/avatars/"):
+                    os.remove(upload_dir("avatars") + os.sep + os.path.basename(path))
+            except OSError:
+                pass
+
     def admin_user_delete(self, uid):
-        """Soft delete — tarix buzilmaydi."""
+        """`DELETE /api/admin/users/{id}` — BUTUNLAY o'chirish (hard DELETE).
+
+        Arxivga o'tkazmaydi: `users` qatori `DELETE` qilinadi, shuning uchun
+        foydalanuvchi na asosiy ro'yxatda, na "Arxivlanganlar"da qolmaydi
+        va tiklab bo'lmaydi. Bog'liq ma'lumotlar FK butunligi buzilmaydigan
+        tartibda o'chiriladi (batafsil — `_purge_users`).
+        """
         self._require("admin")
-        u = self.db.q1("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (int(uid),))
+        uid = int(uid)
+        u = self.db.q1("SELECT id, login, role, status FROM users WHERE id=?", (uid,))
         if not u:
             return NOTFOUND, err("user.not_found")
-        if u["role"] in ("admin",):
-            return BAD, err("user.cannot_modify_admin")
-        self.db.upd("UPDATE users SET deleted_at=?, status='archived', updated_at=? WHERE id=?", (now(), now(), int(uid)))
-        self.db.upd("DELETE FROM sessions_ring WHERE user_id=?", (int(uid),))
-        audit(self.db, self.user["id"], "user deleted (soft)", "users", int(uid))
-        return OK, {"ok": True}
+        guard_status, guard_err = self._purge_guard([uid])
+        if guard_status != OK:
+            return guard_status, guard_err
+        images, deleted, report = self._purge_users([uid])
+        self._purge_cleanup_images(images)
+        audit(self.db, self.user["id"], action_type="user_purged", target_type="users",
+              target_id=uid,
+              description="user_purged: %s (%s) -> rows=%s" % (
+                  u["login"], u["role"], json.dumps(report, ensure_ascii=False)),
+              details={"login": u["login"], "role": u["role"], "rows": report})
+        return OK, {"ok": True, "deleted": deleted, "rows": report}
 
     # ---- cars
     def admin_cars(self, query):
