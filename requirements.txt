@@ -33,4 +33,4 @@ reportlab>=4.0,<6.0
 #     `reason: "crypto"` (admin parolni KO'RA OLMAYDI, lekin 🔑 orqali
 #     yangi parol o'rnatishi mumkin).
 #
-# pip install "cryptography>=42,<50"
+cryptography>=42,<50
