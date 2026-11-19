@@ -363,7 +363,8 @@ domen bilan almashtirib, Let's Encrypt qo'shish kifoya.
 
 **Veb-sayt (`deploy.yml`):**
 `WEB_HOST`, `WEB_USER`, `WEB_SSH_KEY`, `WEB_APP_DIR`,
-`WEB_ADMIN_PASSWORD`, `YANDEX_MAPS_API_KEY`, `MAP_PROVIDER`,
+`WEB_ADMIN_PASSWORD`, `WEB_CREDENTIALS_KEY` (parollarni qaytarib ochish kaliti —
+`.env` dagi `CREDENTIALS_KEY`), `YANDEX_MAPS_API_KEY`, `MAP_PROVIDER`,
 `MAP_CENTER_LAT`, `MAP_CENTER_LNG`, `MAP_CENTER_ZOOM`.
 
 **Bot (`deploy-bot.yml`):**

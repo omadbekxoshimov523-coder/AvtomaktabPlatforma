@@ -32,6 +32,10 @@ jobs:
   test:
     name: Testlar (unit + JS + i18n)
     runs-on: ubuntu-latest
+    env:
+      # Faqat test uchun 32 baytlik kalit (maxfiy emas). Lokal .env dagi
+      # ishlab chiqarish kaliti CI'ga yuborilmaydi.
+      CREDENTIALS_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
     steps:
       - uses: actions/checkout@v4
 
@@ -103,6 +107,7 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           WEB_ADMIN_PASSWORD: ${{ secrets.WEB_ADMIN_PASSWORD }}
+          WEB_CREDENTIALS_KEY: ${{ secrets.WEB_CREDENTIALS_KEY }}
           YANDEX_MAPS_API_KEY: ${{ secrets.YANDEX_MAPS_API_KEY }}
           MAP_PROVIDER: ${{ secrets.MAP_PROVIDER }}
           MAP_CENTER_LAT: ${{ secrets.MAP_CENTER_LAT }}
@@ -113,7 +118,7 @@ jobs:
           username: ${{ secrets.WEB_USER }}
           key: ${{ secrets.WEB_SSH_KEY }}
           port: ${{ secrets.WEB_PORT || '22' }}
-          envs: WEB_ADMIN_PASSWORD,YANDEX_MAPS_API_KEY,MAP_PROVIDER,MAP_CENTER_LAT,MAP_CENTER_LNG,MAP_CENTER_ZOOM
+          envs: WEB_ADMIN_PASSWORD,WEB_CREDENTIALS_KEY,YANDEX_MAPS_API_KEY,MAP_PROVIDER,MAP_CENTER_LAT,MAP_CENTER_LNG,MAP_CENTER_ZOOM
           script: |
             set -e
             APP_DIR="${{ secrets.WEB_APP_DIR }}"
@@ -126,6 +131,7 @@ jobs:
             bash scripts/aws_bootstrap.sh web
             cat > .env <<EOF
             ADMIN_INITIAL_PASSWORD=${WEB_ADMIN_PASSWORD}
+            CREDENTIALS_KEY=${WEB_CREDENTIALS_KEY}
             YANDEX_MAPS_API_KEY=${YANDEX_MAPS_API_KEY}
             MAP_PROVIDER=${MAP_PROVIDER:-yandex}
             MAP_CENTER_LAT=${MAP_CENTER_LAT:-41.311081}
