@@ -1,0 +1,30 @@
+# ============================================================================
+# AVTOMAKTAB BOT — FAQAT Telegram bot (EC2 #2 / BOT server)
+#
+#   docker compose -f docker-compose.bot.yml up -d --build
+#
+# Veb-sayt alohida EC2 da ishlaydi: docker-compose.web.yml
+# Bot polling rejimida — kiruvchi port ochish shart emas (faqat SSH:22).
+# ============================================================================
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    image: avtomaktab-bot:latest
+    container_name: avtomaktab-bot
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN .env da ko'rsatilishi shart}
+      ADMIN_IDS: ${ADMIN_IDS:-}
+      BOT_ADMINS: ${BOT_ADMINS:-}
+      PLATFORM_NAME: ${PLATFORM_NAME:-AutoPrime}
+      PLATFORM_URL: ${PLATFORM_URL:?PLATFORM_URL .env da ko'rsatilishi shart}
+      BOT_DEFAULT_LANG: ${BOT_DEFAULT_LANG:-uz}
+    volumes:
+      - bot-data:/app/data
+
+volumes:
+  bot-data:
+    # bot.db (avtomaktablar ro'yxati, bosish statistikasi)

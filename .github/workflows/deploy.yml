@@ -1,26 +1,22 @@
 # ============================================================================
-# AvtomaktabPlatforma — CI/CD: TEST → BUILD → DEPLOY
+# AvtomaktabPlatforma — CI + VEBSITE deploy (EC2 #1)
 #
-# Ishlash tartibi:
-#   1. `main` branch'ga har push'da (va qo'lda workflow_dispatch) ishga tushadi
-#   2. test: birlik testlar + JS/i18n tekshiruvlari (muvaffaqiyatsiz bo'lsa
-#      build hint boshlanmaydi — deploy ham to'xtaydi)
-#   3. build: Docker image qurilishi tekshiriladi
-#   4. deploy: VPS'ga SSH orqali `docker compose up -d --build`
-#      (faqat quyidagi secret'lar qo'yilgan bo'lsa; aks holda "skipped" —
-#       yangi repo'da CI yashil qoladi, xato bermaydi)
-#   5. Har qanday xatolikda deploy to'xtaydi + GitHub bildiradi (email/UI),
-#      ixtiyoriy Telegram xabari ham bor (secret'lar qo'yilsa)
+#   1. test  — unit/JS/i18n/bot sintaksis
+#   2. build — Docker image qurish + smoke-test
+#   3. deploy — faqat veb-saytni WEB_HOST ga joylashtiradi (Nginx orqali :80)
 #
-# GitHub repo -> Settings -> Secrets and variables -> Actions -> New secret:
-#   VPS_HOST       — server IP yoki domen (misol: 155.133.26.12)
-#   VPS_USER       — SSH foydalanuvchi (misol: root yoki deploy)
-#   VPS_SSH_KEY    — private SSH kalit (-----BEGIN OPENSSH PRIVATE KEY----- ...)
-#   VPS_APP_DIR    — serverdagi loyiha papkasi (misol: /opt/avtomaktab)
-#   (ixtiyoriy) VPS_PORT — SSH porti, standart 22
-#   (ixtiyoriy) TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID — xato haqida xabar
+# Bot alohida EC2 da: .github/workflows/deploy-bot.yml
+#
+# GitHub Secrets (Settings -> Secrets and variables -> Actions):
+#   WEB_HOST           — sayt EC2 public IP/DNS
+#   WEB_USER           — SSH user (ubuntu / ec2-user)
+#   WEB_SSH_KEY        — private SSH kalit
+#   WEB_APP_DIR        — serverdagi papka (masalan /opt/avtomaktab)
+#   WEB_ADMIN_PASSWORD — birinchi admin paroli
+#   YANDEX_MAPS_API_KEY, MAP_PROVIDER, MAP_CENTER_* (ixtiyoriy)
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (deploy xatolari uchun, ixtiyoriy)
 # ============================================================================
-name: Test + Deploy
+name: Test + Deploy Web (EC2)
 
 on:
   push:
@@ -28,7 +24,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-web-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -55,7 +51,7 @@ jobs:
       - name: Bot sintaksis tekshiruvi
         run: python -m compileall -q bot
 
-      - name: Workflow fayli tekshiruvi (noto'g'ri if/run aniqlanadi)
+      - name: Workflow fayli tekshiruvi
         run: python tools_workflow_check.py
 
   # ------------------------------------------------------------- 2) BUILD
@@ -66,8 +62,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Docker image qurish
-        run: docker build -t avtomaktab:ci .
+      - name: Veb image qurish
+        run: docker build -t autoprime-web:ci .
 
       - name: Bot image qurish
         run: docker build -f bot/Dockerfile -t avtomaktab-bot:ci .
@@ -76,69 +72,75 @@ jobs:
         run: |
           docker run -d --name avtomaktab-smoke -p 18080:8080 \
             -e ADMIN_INITIAL_PASSWORD=ci-test-pw \
-            -v avtomaktab-smoke-data:/app/data avtomaktab:ci
+            -v avtomaktab-smoke-data:/app/data autoprime-web:ci
           sleep 6
           curl -fsS http://127.0.0.1:18080/api/health || { docker logs avtomaktab-smoke; exit 1; }
           docker rm -f avtomaktab-smoke
           docker volume rm avtomaktab-smoke-data
 
-  # ------------------------------------------------------------- 3) DEPLOY
-  # FAQAT VPS secret'lari qo'yilgan bo'lsa haqiqiy deploy ishlaydi.
-  #
-  # MUHIM: GitHub Actions'da `secrets` konteksti job/step `if` shartida
-  # ISHLATILMAYDI (ruxsatli: github, needs, vars, inputs, steps) — aks holda
-  # "Unrecognized named-value: 'secrets'" xatosi chiqadi va butun workflow
-  # ishlamay qoladi. Shuning uchun `secrets` ni `env:` orqali step ichiga
-  # o'kib, uning bo'shligi shu yerda tekshiriladi.
+  # ------------------------------------------------------------- 3) WEB DEPLOY
   deploy:
-    name: VPS'ga joylashtirish
+    name: Veb-saytni EC2 ga joylashtirish
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: VPS secret'lari bormi?
+      - name: WEB secret'lari bormi?
         id: gate
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          WEB_HOST: ${{ secrets.WEB_HOST }}
+          WEB_SSH_KEY: ${{ secrets.WEB_SSH_KEY }}
         run: |
-          if [ -n "${VPS_HOST}" ] && [ -n "${VPS_SSH_KEY}" ]; then
+          if [ -n "${WEB_HOST}" ] && [ -n "${WEB_SSH_KEY}" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Deploy o'tkazildi::VPS_HOST/VPS_SSH_KEY secret'lari qo'yilmagan — serverga chiqarilmadi."
+            echo "::notice title=Web deploy o'tkazildi::WEB_HOST/WEB_SSH_KEY secret'lari qo'yilmagan."
           fi
 
-      - uses: actions/checkout@v4
-        if: steps.gate.outputs.ready == 'true'
-
-      - name: SSH orqali deploy
+      - name: SSH orqali veb-saytni joylashtirish
         if: steps.gate.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          WEB_ADMIN_PASSWORD: ${{ secrets.WEB_ADMIN_PASSWORD }}
+          YANDEX_MAPS_API_KEY: ${{ secrets.YANDEX_MAPS_API_KEY }}
+          MAP_PROVIDER: ${{ secrets.MAP_PROVIDER }}
+          MAP_CENTER_LAT: ${{ secrets.MAP_CENTER_LAT }}
+          MAP_CENTER_LNG: ${{ secrets.MAP_CENTER_LNG }}
+          MAP_CENTER_ZOOM: ${{ secrets.MAP_CENTER_ZOOM }}
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || '22' }}
+          host: ${{ secrets.WEB_HOST }}
+          username: ${{ secrets.WEB_USER }}
+          key: ${{ secrets.WEB_SSH_KEY }}
+          port: ${{ secrets.WEB_PORT || '22' }}
+          envs: WEB_ADMIN_PASSWORD,YANDEX_MAPS_API_KEY,MAP_PROVIDER,MAP_CENTER_LAT,MAP_CENTER_LNG,MAP_CENTER_ZOOM
           script: |
             set -e
-            APP_DIR="${{ secrets.VPS_APP_DIR }}"
+            APP_DIR="${{ secrets.WEB_APP_DIR }}"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone "https://github.com/${{ github.repository }}.git" "$APP_DIR"
+            fi
             cd "$APP_DIR"
-            echo "--- .env mavjudligini tekshirish ---"
-            test -f .env || echo "OGOHLANTIRISH: .env topilmadi — env default qiymatlar"
-            echo "--- yangi kodni tortish ---"
-            git pull --ff-only origin main
-            echo "--- compose bilan qayta qurish va ishga tushirish ---"
-            docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
-            echo "--- eski imagelarni tozalash ---"
-            docker image prune -f || true
-            echo "--- natijani tekshirish ---"
-            sleep 5
-            docker compose -f docker-compose.prod.yml ps
-            curl -fsS "http://127.0.0.1:${APP_PORT:-8080}/api/health" && echo "" \
-              || echo "OGOHLANTIRISH: app health javobi bermadi"
-            docker compose -f docker-compose.prod.yml logs --tail=20 bot || true
-            echo "--- deploy tugadi ---"
+            git fetch --all
+            git reset --hard origin/main
+            bash scripts/aws_bootstrap.sh web
+            cat > .env <<EOF
+            ADMIN_INITIAL_PASSWORD=${WEB_ADMIN_PASSWORD}
+            YANDEX_MAPS_API_KEY=${YANDEX_MAPS_API_KEY}
+            MAP_PROVIDER=${MAP_PROVIDER:-yandex}
+            MAP_CENTER_LAT=${MAP_CENTER_LAT:-41.311081}
+            MAP_CENTER_LNG=${MAP_CENTER_LNG:-69.240562}
+            MAP_CENTER_ZOOM=${MAP_CENTER_ZOOM:-12}
+            EOF
+            docker compose -f docker-compose.web.yml up -d --build --remove-orphans
+            sudo cp deploy/nginx/autoprime.conf /etc/nginx/sites-available/autoprime.conf
+            sudo ln -sf /etc/nginx/sites-available/autoprime.conf /etc/nginx/sites-enabled/autoprime.conf
+            sudo nginx -t
+            sudo systemctl reload nginx
+            sleep 6
+            curl -fsS http://127.0.0.1/api/health && echo ""
+            docker compose -f docker-compose.web.yml ps
+            echo "--- veb deploy tugadi ---"
 
   # ------------------------------------------------------------- 4) XABAR
   notify-failure:
@@ -147,15 +149,12 @@ jobs:
     if: failure()
     runs-on: ubuntu-latest
     steps:
-      - name: GitHub xabari (avtomatik — commit status + email)
-        # DIQQAT: qiymat `|` (block scalar) bilan yoziladi. Bir qatorli `run:`
-        # ichida ": " (ikki nuqta + bo'sh joy) bo'lsa, YAML uni mapping deb
-        # o'qib, butun workflow ishlamay qoladi ("workflow file issue").
+      - name: GitHub xabari
         run: |
           echo "Workflow xato bilan tugadi."
           echo "Tafsilot: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-      - name: Telegram xabari uchun tayyorlik (ixtiyoriy)
+      - name: Telegram xabari uchun tayyorlik
         id: tg_gate
         env:
           BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -167,9 +166,7 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Telegram xabari yuborish (ixtiyoriy)
-        # `if` shartida `secrets` ishlatilmaydi (yuqoriga qarang) — shuning
-        # uchun yuqoridagi `tg_gate` step natijasidan foydalaniladi.
+      - name: Telegram xabari yuborish
         if: steps.tg_gate.outputs.ready == 'true'
         env:
           BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}

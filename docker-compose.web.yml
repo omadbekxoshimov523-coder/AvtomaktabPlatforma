@@ -1,0 +1,42 @@
+# ============================================================================
+# Avtomaktab veb-sayti — FAQAT platforma (EC2 #1 / WEB server)
+#
+#   docker compose -f docker-compose.web.yml up -d --build
+#
+# Bot alohida EC2 da ishlaydi: docker-compose.bot.yml
+# Port 8080 faqat localhost'ga bog'langan — tashqi kirish nginx (80) orqali.
+# ============================================================================
+
+services:
+  web:
+    build: .
+    image: autoprime-web:latest
+    container_name: autoprime-web
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      AVTOMAKTAB_DB: /app/data/avtomaktab.db
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY:-}
+      MAP_PROVIDER: ${MAP_PROVIDER:-yandex}
+      MAP_CENTER_LAT: ${MAP_CENTER_LAT:-41.311081}
+      MAP_CENTER_LNG: ${MAP_CENTER_LNG:-69.240562}
+      MAP_CENTER_ZOOM: ${MAP_CENTER_ZOOM:-12}
+    ports:
+      # Tashqariga ochilmaydi — nginx shu portga proxy qiladi
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - web-data:/app/data
+      - ./backups:/app/data/backups
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  web-data:
+    # SQLite bazasi va yuklanadigan fayllar — container qayta qurilsa ham saqlanadi

@@ -59,7 +59,7 @@ class Config:
     admins: set[int] = field(default_factory=set)
     default_lang: str = "uz"
     db_path: str = "data/bot.db"
-    platform_name: str = "Avtomaktab Platforma"
+    platform_name: str = "AutoPrime"
     platform_url: str = ""
 
 
@@ -96,6 +96,6 @@ def load_config() -> Config:
         admins=admins,
         default_lang=default_lang,
         db_path=load_db_path(),
-        platform_name=os.environ.get("PLATFORM_NAME", "").strip() or "Avtomaktab Platforma",
+        platform_name=os.environ.get("PLATFORM_NAME", "").strip() or "AutoPrime",
         platform_url=os.environ.get("PLATFORM_URL", "").strip().rstrip("/"),
     )

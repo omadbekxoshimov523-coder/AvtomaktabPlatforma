@@ -55,6 +55,10 @@ desktop.ini
 # ---- Loglar ----
 *.log
 
+# ---- AWS SSH kalitlari (HECH QACHON commit qilinmasin) ----
+.deploy/keys/
+*.pem
+
 # ---- QA skrinshotlar (m*shot*.png, shots/) — talab emas kodga ----
 m*shot*.png
 shots/

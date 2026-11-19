@@ -408,7 +408,7 @@ async def set_url(message: Message, db: BotDB, cfg: Config) -> None:
         db.update_school(current["id"], login_url=url)
         db.set_active(current["id"], True)
     else:
-        db.add_school(cfg.platform_name or "Avtomaktab Platforma", PLATFORM_SLUG, url)
+        db.add_school(cfg.platform_name or "AutoPrime", PLATFORM_SLUG, url)
 
     username = await bot_username(message.bot)
     await message.answer(i18n.t(lang, "set_url_done", url=url, bot=username))

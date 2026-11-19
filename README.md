@@ -329,3 +329,56 @@ Migratsiya kerak bo'lsa, `bot/db.py` ichidagi `BotDB` — yagona o'zgarish nuqta
 uning **login URL'ini** saqlaydi. Shu sababli platforma yangilansa, bot
 kodi yangilanishiga ehtiyoj yo'q; `PLATFORM_URL` o'zgarganda bot URL'ni
 o'z-o'zidan yangilaydi.
+
+---
+
+## ☁️ AWS EC2: sayt va bot alohida serverlarda
+
+Ikki mustaqil EC2 instansiyasi ishlatiladi:
+
+| Server | Komponent | Compose fayl | Kontentnom | Port |
+|---|---|---|---|---|
+| **EC2 #1 (WEB)** | Veb-sayt (platforma) | `docker-compose.web.yml` | `autoprime-web` | Nginx `:80` → localhost `:8080` |
+| **EC2 #2 (BOT)** | AvtoMaktab Bot | `docker-compose.bot.yml` | `avtomaktab-bot` | yo'q (polling) |
+
+### 1) EC2 tayyorlash
+
+Har bir serverda bootstrap skripti ishlaydi (Docker, Compose, Git, Nginx o'rnatadi):
+
+```bash
+# WEB serverda
+bash scripts/aws_bootstrap.sh web
+
+# BOT serverda
+bash scripts/aws_bootstrap.sh bot
+```
+
+Security group: WEB → `22` (SSH), `80` (HTTP); BOT → faqat `22`.
+Domen berilganda `deploy/nginx/autoprime.conf` dagi `server_name _;` ni
+domen bilan almashtirib, Let's Encrypt qo'shish kifoya.
+
+### 2) GitHub Secrets
+
+`Settings → Secrets and variables → Actions`:
+
+**Veb-sayt (`deploy.yml`):**
+`WEB_HOST`, `WEB_USER`, `WEB_SSH_KEY`, `WEB_APP_DIR`,
+`WEB_ADMIN_PASSWORD`, `YANDEX_MAPS_API_KEY`, `MAP_PROVIDER`,
+`MAP_CENTER_LAT`, `MAP_CENTER_LNG`, `MAP_CENTER_ZOOM`.
+
+**Bot (`deploy-bot.yml`):**
+`BOT_HOST`, `BOT_USER`, `BOT_SSH_KEY`, `BOT_APP_DIR`, `BOT_TOKEN`,
+`ADMIN_IDS`, `BOT_PLATFORM_URL` (sayt manzili; domen kelganda yangilanadi),
+ixtiyoriy `BOT_DEFAULT_LANG`.
+
+`main` ga push qilganda `deploy.yml` faqat saytni, `deploy-bot.yml` faqat botni
+yangilaydi. Qo'lda ishga tushurish: GitHub → Actions → kerakli workflow →
+**Run workflow**.
+
+### 3) Domen kelganda
+
+1. DNS A-yozuvini WEB EC2 public IP'ga yo'naltiring.
+2. `deploy/nginx/autoprime.conf` da `server_name _;` o'rniga domenni yozing.
+3. `BOT_PLATFORM_URL` secret'ini yangi manzil bilan yangilang — bot
+   `/set_url` ga o'xshab yangi URL'ni o'ziga qabul qiladi.
+
